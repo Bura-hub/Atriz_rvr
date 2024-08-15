@@ -110,7 +110,6 @@ install(TARGETS
 # Install rospy nodes
 catkin_install_python(PROGRAMS
   scripts/rvr-ros.py
-  scripts/rvr-ros-sim.py
   scripts/emergency_stop.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )

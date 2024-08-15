@@ -141,7 +141,7 @@ Asegúrate de haber activado el LED del sensor antes de leer las lecturas:
 rostopic echo /rvr/color
 ```
 
-### Obtener Lecturas del Sensor de Color
+### Obtener Lecturas de Odometría
 
 Para obtener las lecturas de odometría:
 

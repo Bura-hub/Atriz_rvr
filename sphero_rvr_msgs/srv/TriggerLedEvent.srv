@@ -1,0 +1,19 @@
+# set to true to stop all current running events
+# note that this is only important for asynchronous events
+bool stop_current_event
+
+# this event is triggered when stop_current_event is not true
+int32 event_id
+
+# synchronous events
+int32 STARTUP = 1
+int32 EMERGENCY_STOP = 2
+int32 START_DRIVING = 3
+int32 ERROR = 4
+int32 VISION_STARTUP = 5
+
+# asynchronous events
+int32 DOWNLOAD_MODEL = 10
+
+---
+bool success

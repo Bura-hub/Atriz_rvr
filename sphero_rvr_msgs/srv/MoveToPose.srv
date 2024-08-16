@@ -1,0 +1,7 @@
+Header header
+geometry_msgs/Pose pose
+float32 speed
+# True if speed is in m/s, otherwise speed is in [0..128]
+bool speed_in_si
+---
+bool success

@@ -1,0 +1,4 @@
+---
+int8 battery_percentage
+# available states are [unknown, ok, low, critical]
+string voltage_state

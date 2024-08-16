@@ -1,0 +1,20 @@
+<?xml version="1.0" ?>
+<launch>
+    <arg name="robot_name" />
+    <arg name="pub_odom_as_tf" />           <!-- prevents the odom node to publish a separate tf. This is needed when an external tool, eg. ekf is handling the tf publish of the odom frame -->
+    <arg name="enable_emergency_stop" />        <!-- emergency stop needs a running intel realsense camera -->
+    <arg name="as_simulation" />
+    <arg name="as_visualization" />
+
+    <node name="rvr_ros_restarter" pkg="sphero_rvr_hw" type="rvr-ros-restarter.py" output="screen" >
+        <param name="robot_name" value="$(arg robot_name)" />
+        <param name="as_simulation" value="$(arg as_simulation)" />
+        <param name="as_visualization" value="$(arg as_visualization)" />
+        <param name="pub_odom_as_tf" value="$(arg pub_odom_as_tf)" />
+    </node>
+
+    <node name="rvr_emergency_stop" pkg="sphero_rvr_hw" type="emergency_stop.py" output="screen" if="$(arg enable_emergency_stop)">
+            <param name="depth_threshold" value="0.165" />
+    </node>
+</launch>
+

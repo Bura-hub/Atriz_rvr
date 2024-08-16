@@ -1,0 +1,19 @@
+<package format="2">
+  <name>sphero_rvr</name>
+  <version>0.0.2</version>
+  <description>
+    The main entry point for the rvr base. This package contains startup launch files and some global configurations.
+  </description>
+  <maintainer email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</maintainer>
+  <license>GPLv3</license>
+
+  <author email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</author>
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!--> PACKAGES </-->  
+	<!--  <exec_depend>sphero_rvr_description</exec_depend> -->
+  <exec_depend>sphero_rvr_hw</exec_depend>
+
+  <export>
+  </export>
+</package>

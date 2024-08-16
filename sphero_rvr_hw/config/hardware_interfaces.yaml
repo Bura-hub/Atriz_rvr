@@ -1,0 +1,8 @@
+# Settings for ros_control control loop and hardware interface
+hardware_interface:
+  loop_hz: 300
+  cycle_time_error_threshold: 0.01
+  joints:
+    - sphero_rvr_wheel_fl_joint  
+    - sphero_rvr_wheel_fr_joint  
+  sim_control_mode: 1 # 0: position, 1: velocity

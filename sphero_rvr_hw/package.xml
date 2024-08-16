@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>sphero_rvr_hw</name>
+  <version>0.0.2</version>
+  <description>The Sphero RVR ROS hardware package. This package is based on the free sphero C++ library from Rud Merriam (https://bitbucket.org/rmerriam/rvr-cpp).</description>
+
+  <maintainer email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</maintainer>
+
+  <license>GPLv3</license>
+
+  <author email="no-email@no-domain.com">Rud Merriam</author>
+  <author email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</author>
+  <author email="paddy-hofmann@web.de">Paddy</author>
+
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>serial</depend>
+  <depend>tf</depend>
+  <build_depend>message_generation</build_depend>
+  <build_export_depend>message_generation</build_export_depend>
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>message_runtime</exec_depend>
+  <depend>geometry_msgs</depend>
+  <depend>cv_bridge</depend>
+  <depend>joint_limit_interface</depend>
+  <depend>transmission_interface</depend>
+
+  <depend>minibot_msgs</depend>
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+  </export>
+</package>

@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="robot_name" default="rvr" />         <!-- this is the namespace of the robot -->
+    <arg name="as_simulation" default="false" />    <!-- won't start the actual hardware but a simulation -->
+    <arg name="as_visualization" default="false" /> <!-- like the as_simulation arg but starts only a fake rviz simulation -->
+    <arg name="run_rviz" default="false" />         <!-- start rviz with the robot model -->
+
+    <group ns="$(arg robot_name)" >
+        <node name="tf2_relay" pkg="sphero_rvr_description" type="tf2_relay" output="screen" >
+            <param name="prefix" value="$(arg robot_name)/" />
+            <!--rosparam param="frames" >[<write the frames you want to relay here>]</rosparam-->
+        </node>
+        <node pkg="tf2_ros" type="static_transform_publisher" name="tf2_world_to_odom_global" args="0 0 0 0 0 0 1 /world /$(arg robot_name)/world" />
+
+        <!-- everything launched after the remapping will only work within the remapped tf -->
+        <remap from="/tf" to="/$(arg robot_name)/tf" />
+        <remap from="/tf_static" to="/$(arg robot_name)/tf_static" />
+
+        <!-- load robot description and state publisher -->
+        <include file="$(find sphero_rvr_description)/launch/display.launch" >
+            <arg name="use_gui" value="False" />
+        </include>
+
+        <node pkg="tf2_ros" type="static_transform_publisher" name="tf2_world_to_odom_local" args="0 0 0 0 0 0 1 world odom" />
+
+        <!-- load hw and ros interfaces -->
+        <include file="$(find sphero_rvr)/launch/bringup_rvr.launch" >
+            <arg name="as_simulation" value="$(arg as_simulation)" />
+            <arg name="as_visualization" value="$(arg as_visualization)" />
+            <arg name="with_camera" value="false" />
+            <arg name="robot_name" value="$(arg robot_name)" />
+            <arg name="pub_odom_as_tf" value="true" />
+        </include>
+
+        <!-- load rviz -->
+        <node name="rviz" pkg="rviz" type="rviz" args="-d $(find sphero_rvr_description)/config/single_robot.rviz" required="true" if="$(arg run_rviz)"/>
+    </group>
+</launch>

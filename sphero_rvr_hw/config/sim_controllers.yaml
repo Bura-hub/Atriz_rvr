@@ -1,0 +1,14 @@
+diff_drive_controller:
+  type: "diff_drive_controller/DiffDriveController"
+  left_wheel: ['sphero_rvr_wheel_fl_joint', 'sphero_rvr_wheel_rl_joint']
+  right_wheel: ['sphero_rvr_wheel_fr_joint', 'sphero_rvr_wheel_rr_joint']
+  pose_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 1000.0]
+  twist_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 1000.0]
+
+# new: renamed the controller to get correct name
+rvr:
+  type: "diff_drive_controller/DiffDriveController"
+  left_wheel: ['sphero_rvr_wheel_fl_joint', 'sphero_rvr_wheel_rl_joint']
+  right_wheel: ['sphero_rvr_wheel_fr_joint', 'sphero_rvr_wheel_rr_joint']
+  pose_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 1000.0]
+  twist_covariance_diagonal: [0.001, 0.001, 1000000.0, 1000000.0, 1000000.0, 1000.0]

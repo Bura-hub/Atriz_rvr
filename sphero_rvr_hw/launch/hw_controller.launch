@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="as_simulation" default="False" />
+    <arg name="as_visualization" default="False" />
+    <arg name="pub_odom_as_tf" default="True" />           <!-- prevents the odom node to publish a separate tf. This is needed when an external tool, eg. ekf is handling the tf publish of the odom frame -->
+
+
+    <node name="ros_interface" pkg="sphero_rvr_hw" type="rvr-ros.py" output="screen" unless="$(eval arg('as_simulation') or arg('as_visualization'))" >
+        <param name="pub_tf" value="$(arg pub_odom_as_tf)" />
+    </node>
+
+    <group if="$(arg as_simulation)" >
+        <!-- SIMULATION: cmd_vel and odm (ros_conrol diff drive) -->
+        <group unless="$(arg as_visualization)">
+            <!-- sphero rvr controller configurations -->
+            <rosparam command="load" file="$(find sphero_rvr_hw)/config/sim_controllers.yaml" />
+            <!-- load the controllers -->
+            <!-- TODO this is changed but not tested at jun 8. 2023 -->
+            <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false" output="screen" args="rvr"/>
+
+            <!-- Start hw interface for sim robot -->
+            <node name="ros_interface" pkg="sphero_rvr_hw" type="rvr-ros-sim.py" output="screen" />
+        </group>
+    </group>
+
+    <group if="$(arg as_visualization)">
+        <!-- FAKE cmd_vel for visualiation -->
+        <node pkg="sphero_rvr_hw" name="fake_cmd_vel" type="cmd_vel_rviz.py" output="screen" />
+        <!-- Start hw interface for sim robot -->
+        <node name="ros_interface" pkg="sphero_rvr_hw" type="rvr-ros-sim.py" output="screen" />
+    </group>
+</launch>

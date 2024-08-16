@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<launch>
+    <arg name="robot_name" default="rvr" />
+    <arg name="as_simulation" default="False" />
+    <arg name="as_visualization" default="False" />
+    <arg name="with_camera" default="False" />
+    <arg name="pub_odom_as_tf" default="True" />
+
+    <include file="$(find sphero_rvr_hw)/launch/hw_controller.launch" ns="rvr">
+        <arg name="as_simulation" value="$(arg as_simulation)" />
+        <arg name="as_visualization" value="$(arg as_visualization)" />
+        <arg name="pub_odom_as_tf" value="$(arg pub_odom_as_tf)" />
+    </include>
+
+    <include file="$(find sphero_rvr_hw)/launch/hw_controller_maintenance.launch">
+        <arg name="enable_emergency_stop" value="$(arg with_camera)" />
+        <arg name="robot_name" value="$(arg robot_name)" />
+        <arg name="as_simulation" value="$(arg as_simulation)" />
+        <arg name="as_visualization" value="$(arg as_visualization)" />
+        <arg name="pub_odom_as_tf" value="$(arg pub_odom_as_tf)" />
+    </include>
+
+    <!-- Launch the joystick control node -->
+    <node pkg="sphero_rvr" type="rvr_joystick_control.py" name="rvr_joystick_control" output="screen"/>
+</launch>

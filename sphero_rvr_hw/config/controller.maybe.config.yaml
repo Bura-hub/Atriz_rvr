@@ -1,0 +1,15 @@
+joint_state_controller:
+    type: joint_state_controller/JointStateController
+    publish_rate: 50
+joint_motor_controller:
+    type: velocity_controllers/JointGroupVelocityController
+    joints: 
+        - sphero_rvr_wheel_fl_joint 
+        - sphero_rvr_wheel_fr_joint
+        - sphero_rvr_wheel_rl_joint 
+        - sphero_rvr_wheel_rr_joint
+gains:
+    sphero_rvr_wheel_fl_joint: {p: 10000, i: 1, d: 1000}
+    sphero_rvr_wheel_fr_joint: {p: 10000, i: 1, d: 1000}
+    sphero_rvr_wheel_rl_joint: {p: 10000, i: 1, d: 1000}
+    sphero_rvr_wheel_rl_joint: {p: 10000, i: 1, d: 1000}

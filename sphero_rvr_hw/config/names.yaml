@@ -1,0 +1,4 @@
+# Joint Names -------------------------------------------------------
+joints:
+    - sphero_rvr_wheel_fl_joint 
+    - sphero_rvr_wheel_fr_joint

@@ -138,7 +138,7 @@ rosservice call /enable_color "{data: false/true}"
 Asegúrate de haber activado el LED del sensor antes de leer las lecturas:
 
 ```bash
-rostopic echo /rvr/color
+rostopic echo /color
 ```
 
 ### Obtener Lecturas de Odometría

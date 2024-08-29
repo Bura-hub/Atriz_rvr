@@ -1,0 +1,5 @@
+string[] messages  # Lista de códigos infrarrojos (en formato de cadena)
+uint8 strength     # Fuerza del emisor
+---
+bool success
+string message

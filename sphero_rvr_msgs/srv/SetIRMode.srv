@@ -1,0 +1,6 @@
+string mode
+int32 far_code
+int32 near_code
+---
+bool success
+string message

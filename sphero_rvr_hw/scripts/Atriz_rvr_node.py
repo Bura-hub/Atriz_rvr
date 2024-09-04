@@ -45,8 +45,7 @@ import std_srvs.srv
 import rvr_tools
 from sphero_rvr_msgs.srv import (
     SetIRMode, SetIRModeResponse, MoveToPose, MoveToPoseResponse, MoveToPosAndYaw,
-    MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest,
-    SendIRMessages, SendIRMessagesResponse)
+    MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest)
 
 # =======================================================
 # Variables globales
@@ -82,8 +81,6 @@ imu = Imu(header=Header(frame_id='imu'))
 yaw_north = 0
 calibration_completed = False
 color_enabled = False
-NO_SIGNAL: int = 00000
-ir_signal = NO_SIGNAL
 ir_mode = ""
 
 # =======================================================
@@ -104,7 +101,6 @@ pub_color = None
 pub_imu = None
 pub_ir_signal = None
 pub_ir_messages = None
-pub_ir_messages_received = None
 
 # =======================================================
 # Funciones de callback
@@ -334,33 +330,6 @@ def set_ir_mode_callback(req):
         # Devolver mensaje de respuesta con success=False y un mensaje de texto
         return SetIRModeResponse(success=False, message="Modo de IR no reconocido")
 
-def send_ir_messages_callback(req):
-    """Callback para enviar mensajes IR."""
-    try:
-        # Convertir los mensajes de cadena a InfraredCodes
-        messages_enum = [InfraredCodes[m] for m in req.messages]
-        # Validar fuerza
-        if req.strength < 0 or req.strength > 64:
-            raise ValueError('parameter strength must be greater than or equal to 0 and less than or equal 64')
-        # Ejecutar la función asíncrona dentro del loop de eventos
-        asyncio.run(rvr.infrared_control.send_infrared_messages(messages_enum, req.strength))
-        rospy.loginfo("({}) Mensajes IR enviados con éxito.".format(rospy.get_name()))
-        return SendIRMessagesResponse(success=True, message="Mensajes IR enviados con exito.")
-    except Exception as e:
-        rospy.logerr("Error en send_ir_messages_callback: {}".format(e))
-        return SendIRMessagesResponse(success=False, message="Error: {}".format(e))
-    
-async def listen_for_infrared_message_callback(handler):
-    """Escucha mensajes infrarrojos y maneja los mensajes recibidos."""
-    if not callable(handler):
-        raise TypeError('handler must be una función')
-
-    is_enabled = True
-    await rvr.enable_robot_infrared_message_notify(is_enabled)
-
-    # Se suscribe a las notificaciones de mensajes IR
-    await rvr.on_robot_to_robot_infrared_message_received_notify(handler)
-
 # =======================================================
 # Funciones de manejo de sensores
 # =======================================================
@@ -499,51 +468,6 @@ async def color_handler(color_data):
     msg.rgb_color = detected_color
     # Publica el mensaje en el tópico '/color'.
     pub_color.publish(msg)
-
-async def ir_signal_handler():
-    """
-    La función `ir_signal_handler` se encarga de obtener lecturas de los sensores
-    infrarrojos del Sphero RVR y publicar un mensaje en el tópico 'ir_signal' si
-    se detecta una señal en alguno de los sensores.
-
-    La función utiliza el método `get_bot_to_bot_infrared_readings()` para obtener
-    las lecturas de los sensores infrarrojos. Luego, utiliza operaciones de máscara
-    para extraer los valores específicos de cada sensor.
-
-    Si se detecta una señal en alguno de los sensores, se crea un mensaje de tipo
-    `Bool` y se publica en el tópico '/ir_signal'. El mensaje tiene como valor
-    `True` si se detectó una señal en alguno de los sensores y `False` en caso
-    contrario.
-    """
-    global pub_ir_signal, ir_signal
-    # Obtener lecturas del sensor infrarrojo del RVR
-    ir_readings = await rvr.get_bot_to_bot_infrared_readings()
-    # Extraer los valores específicos de los sensores
-    front_left_sensor = ir_readings['sensor_data'] & 0x000000ff
-    front_right_sensor = ir_readings['sensor_data'] & 0x0000ff00
-    back_right_sensor = ir_readings['sensor_data'] & 0x00ff0000
-    back_left_sensor = ir_readings['sensor_data'] & 0xff000000
-
-    # Crear y publicar el mensaje si se detecta una señal en cualquier sensor
-    ir_signal = Bool()
-    if front_left_sensor or front_right_sensor or back_right_sensor or back_left_sensor:
-        # Si se detecta una señal en alguno de los sensores, se publica un mensaje
-        # con valor `True`.
-        ir_signal.data = True
-    else:
-        # Si no se detecta una señal en ninguno de los sensores, se publica un
-        # mensaje con valor `False`.
-        ir_signal.data = False
-    
-    # Publicar el mensaje en el tópico '/ir_signal'.
-    pub_ir_signal.publish(ir_signal)
-
-async def message_received_handler(ir_code):
-    """Manejador para los mensajes IR recibidos, publica en un tópico."""
-    if isinstance(ir_code, InfraredCodes):
-        ir_message = String(data=ir_code.name)
-        pub_ir_messages_received.publish(ir_message)  # Publica el mensaje en el tópico
-        rospy.loginfo(f"Mensaje IR recibido y publicado: {ir_code.name}")
 
 async def light_handler(light_data):
     """
@@ -993,9 +917,7 @@ if __name__ == '__main__':
     pub_light = rospy.Publisher('ambient_light', Illuminance, queue_size=10)
     pub_color = rospy.Publisher('color', Color, queue_size=10)
     pub_imu = rospy.Publisher('imu', Imu, queue_size=10)
-    pub_ir_signal = rospy.Publisher('ir_signal', Bool, queue_size=10)
     pub_ir_messages = rospy.Publisher('ir_messages', String, queue_size=10)
-    pub_ir_messages_received = rospy.Publisher('ir_received_messages', String, queue_size=10)
 
     # Crea los subscribers para los tópicos /cmd_vel y /is_emergency_stop
     rospy.Subscriber('cmd_vel', Twist, cmd_vel_callback, queue_size=1)
@@ -1009,8 +931,7 @@ if __name__ == '__main__':
     rospy.Service('reset_odom', std_srvs.srv.Empty, reset_odom_callback)
     rospy.Service('release_emergency_stop', std_srvs.srv.Empty, release_emergency_stop_callback)
     rospy.Service('ir_mode', SetIRMode, set_ir_mode_callback)
-    rospy.Service('send_ir_messages', SendIRMessages, send_ir_messages_callback)
-    
+        
     # Inicializa el Flag de stop de emergencia en False
     set_emergency_stop(False)
 
@@ -1024,7 +945,6 @@ if __name__ == '__main__':
         while not rospy.is_shutdown():
             # Ejecuta el bucle principal
             loop.run_until_complete(asyncio.gather(handle_ros()))
-            loop.run_until_complete(listen_for_infrared_message_callback(message_received_handler))
             # Espera a que el bucle principal termine
             r.sleep()
 

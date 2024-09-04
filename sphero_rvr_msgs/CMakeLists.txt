@@ -56,7 +56,6 @@ add_message_files(
 add_service_files(
   FILES
   SetIRMode.srv
-  SendIRMessages.srv
   SetLeds.srv
   MoveToPosAndYaw.srv
   MoveToPose.srv

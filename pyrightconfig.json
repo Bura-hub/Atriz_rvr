@@ -1,0 +1,26 @@
+{
+  "include": [
+    "scripts/**/*.py",
+    "atriz_rvr_driver/scripts/**/*.py",
+    "atriz_rvr_msgs/**/*.py",
+    "atriz_rvr_serial/**/*.py"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/build",
+    "**/devel"
+  ],
+  "pythonPath": "/usr/bin/python3",
+  "extraPaths": [
+    "./atriz_rvr_driver/scripts",
+    "./scripts/core",
+    "/opt/ros/noetic/lib/python3/dist-packages"
+  ],
+  "typeCheckingMode": "basic",
+  "useLibraryCodeForTypes": true,
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportOptionalMemberAccess": "warning",
+  "reportUnusedCoroutine": "warning"
+}

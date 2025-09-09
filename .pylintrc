@@ -1,0 +1,22 @@
+[MASTER]
+init-hook='import sys; sys.path.append("./atriz_rvr_driver/scripts"); sys.path.append("./scripts/core")'
+
+[MESSAGES CONTROL]
+disable=import-error,no-name-in-module
+
+[IMPORTS]
+generated-members=rospy.*,tf.*,tf2_ros.*,geometry_msgs.*,nav_msgs.*,sensor_msgs.*,std_msgs.*,sphero_rvr_msgs.*
+
+[DESIGN]
+max-args=10
+max-locals=20
+max-returns=6
+max-branches=15
+max-statements=60
+
+[FORMAT]
+max-line-length=120
+indent-string='    '
+
+[VARIABLES]
+init-import=0

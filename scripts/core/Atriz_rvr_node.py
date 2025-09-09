@@ -14,6 +14,21 @@ import traceback
 import signal
 
 import std_msgs.msg
+import sys
+import os
+
+# =======================================================
+# Configuración de rutas para el SDK de Sphero
+# =======================================================
+# Importar configuración del SDK
+from sphero_sdk_config import setup_sphero_sdk_path
+
+# Configurar la ruta del SDK
+try:
+    setup_sphero_sdk_path()
+except ImportError as e:
+    print(f"Error: Could not setup Sphero SDK path: {e}")
+    sys.exit(1)
 
 # =======================================================
 # Importaciones de Sphero
@@ -33,9 +48,11 @@ from sphero_sdk import (
 import tf
 import tf2_ros
 import tf2_geometry_msgs
+from tf import transformations
+from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 import rospy
 import geometry_msgs
-from geometry_msgs.msg import PoseWithCovariance, Pose, TwistWithCovariance, Twist, Point, Quaternion, Vector3
+from geometry_msgs.msg import PoseWithCovariance, Pose, TwistWithCovariance, Twist, Point, Quaternion, Vector3, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header, String, Bool
@@ -461,7 +478,7 @@ async def imu_handler(imu_data):
     pitch = imu_data['IMU']['Pitch'] * (pi / 180)
     yaw = imu_data['IMU']['Yaw'] * (pi / 180)
     # Convierte las rotaciones de Euler a un quaternion
-    orientation_q = tf.transformations.quaternion_from_euler(roll, pitch, yaw, axes='sxyz')
+    orientation_q = transformations.quaternion_from_euler(roll, pitch, yaw, axes='sxyz')
     # Actualiza la orientación del robot en el mensaje de odometria
     robot_pose.orientation.x = orientation_q[0]
     robot_pose.orientation.y = orientation_q[1]
@@ -501,7 +518,8 @@ async def color_handler(color_data):
     msg.confidence = color_data['ColorDetection']['Confidence']
     msg.rgb_color = detected_color
     # Publica el mensaje en el tópico '/color'.
-    pub_color.publish(msg)
+    if pub_color is not None:
+        pub_color.publish(msg)
 
 async def light_handler(light_data):
     """
@@ -527,7 +545,8 @@ async def light_handler(light_data):
     # el sensor no proporciona esta información.
     msg.variance = 0
     # Publica el mensaje en el tópico '/illuminance'.
-    pub_light.publish(msg)
+    if pub_light is not None:
+        pub_light.publish(msg)
 
 
 #TODO: Revisar este handler
@@ -725,8 +744,8 @@ def sig_handler(_signo, _stack_frame):
     Se encarga de limpiar los recursos utilizados por el RVR y
     cerrar la conexión con el robot.
     """
-    rvr.sensor_control.clear()
-    rvr.close()
+    asyncio.create_task(rvr.sensor_control.clear())
+    asyncio.create_task(rvr.close())
     print("Programa del RVR terminado limpiamente.")
     sys.exit(0)
 
@@ -759,12 +778,14 @@ def check_if_need_to_send_msg(component):
 
         try:
             # Se envía el mensaje de odometría
-            pub_odom.publish(odom)
+            if pub_odom is not None:
+                pub_odom.publish(odom)
             # Se envía el mensaje de imu
-            pub_imu.publish(imu)
+            if pub_imu is not None:
+                pub_imu.publish(imu)
 
             # Si se ha especificado que se debe publicar el tf, se publica
-            if pub_tf:
+            if pub_tf and br is not None:
                 br.sendTransform(
                     (robot_pose.position.x, robot_pose.position.y, robot_pose.position.z),
                     (robot_pose.orientation.x, robot_pose.orientation.y, robot_pose.orientation.z, robot_pose.orientation.w),
@@ -923,10 +944,10 @@ def move_to_pose(frame_id, pos, ori, speed, speed_in_si):
         trans_base_world = tfBuffer.lookup_transform('world', 'rvr_base_link', rospy.Time())
         trans_frame_id_base = tfBuffer.lookup_transform('rvr_base_link', frame_id, rospy.Time())
         trans_frame_id_world = tfBuffer.lookup_transform('world', frame_id, rospy.Time())
-    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+    except (LookupException, ConnectivityException, ExtrapolationException):
         rospy.logerr('({}) ERROR al buscar la transformación de marcos tf2'.format(rospy.get_name()))
         return False
-    pos_s = geometry_msgs.msg.PoseStamped()
+    pos_s = PoseStamped()
     pos_s.pose.position = pos
     pos_s.pose.orientation.w = 1
     pos_transformed = tf2_geometry_msgs.do_transform_pose(pos_s, trans_frame_id_base)
@@ -934,10 +955,10 @@ def move_to_pose(frame_id, pos, ori, speed, speed_in_si):
     trans_base_world.transform.translation.y = 0.
     trans_base_world.transform.translation.z = 0.
     pos_transformed = tf2_geometry_msgs.do_transform_pose(pos_transformed, trans_base_world)
-    ori_s = geometry_msgs.msg.PoseStamped()
+    ori_s = PoseStamped()
     ori_s.pose.orientation = ori
     ori_transformed = tf2_geometry_msgs.do_transform_pose(ori_s, trans_frame_id_world)
-    (row, pitch, yaw) = tf.transformations.euler_from_quaternion(message_to_quaternion(ori_transformed.pose.orientation), axes='sxyz')
+    (row, pitch, yaw) = transformations.euler_from_quaternion(message_to_quaternion(ori_transformed.pose.orientation), axes='sxyz')
     yaw_d = yaw * (180 / pi)
     # Si se especifica una velocidad negativa, se considera que se debe
     # mover marcha atrás

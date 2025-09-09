@@ -94,8 +94,15 @@ class SystemDiagnostic:
         
         available_topics = []
         try:
-            published_topics = rospy.get_published_topics()
-            topic_names = [topic[0] for topic in published_topics]
+            # Usar rostopic list para obtener todos los tópicos (incluyendo los sin publicadores)
+            import subprocess
+            result = subprocess.run(['rostopic', 'list'], capture_output=True, text=True)
+            if result.returncode == 0:
+                topic_names = result.stdout.strip().split('\n')
+            else:
+                # Fallback a rospy si rostopic no funciona
+                published_topics = rospy.get_published_topics()
+                topic_names = [topic[0] for topic in published_topics]
             
             for topic in expected_topics:
                 if topic in topic_names:
@@ -104,7 +111,11 @@ class SystemDiagnostic:
                     rospy.loginfo(f"✓ Tópico {topic} disponible")
                 else:
                     self.diagnostic_results['topics_available'][topic] = False
-                    rospy.logwarn(f"✗ Tópico {topic} no disponible")
+                    # Solo mostrar warning si el driver debería estar ejecutándose
+                    if self.diagnostic_results['driver_running']:
+                        rospy.logwarn(f"✗ Tópico {topic} no disponible (driver ejecutándose)")
+                    else:
+                        rospy.loginfo(f"ℹ Tópico {topic} no disponible (driver no ejecutándose)")
             
             return len(available_topics) == len(expected_topics)
             
@@ -134,7 +145,11 @@ class SystemDiagnostic:
                 rospy.loginfo(f"✓ Servicio {service} disponible")
             except rospy.ROSException:
                 self.diagnostic_results['services_available'][service] = False
-                rospy.logwarn(f"✗ Servicio {service} no disponible")
+                # Solo mostrar warning si el driver debería estar ejecutándose
+                if self.diagnostic_results['driver_running']:
+                    rospy.logwarn(f"✗ Servicio {service} no disponible (driver ejecutándose)")
+                else:
+                    rospy.loginfo(f"ℹ Servicio {service} no disponible (driver no ejecutándose)")
         
         return len(available_services) == len(expected_services)
     
@@ -302,43 +317,54 @@ class SystemDiagnostic:
     
     def run_full_diagnostic(self):
         """Ejecuta el diagnóstico completo"""
-        rospy.loginfo("Iniciando diagnóstico completo del sistema...")
+        rospy.loginfo("🔍 Iniciando diagnóstico completo del sistema Atriz RVR...")
+        rospy.loginfo("=" * 60)
         
         # Verificar ROS master
+        rospy.loginfo("1️⃣ Verificando master de ROS...")
         self.check_ros_master()
         rospy.sleep(1.0)
         
         # Verificar driver
+        rospy.loginfo("2️⃣ Verificando driver Atriz RVR...")
         self.check_driver_running()
         rospy.sleep(1.0)
         
         # Verificar tópicos
+        rospy.loginfo("3️⃣ Verificando tópicos...")
         self.check_topics()
         rospy.sleep(1.0)
         
         # Verificar servicios
+        rospy.loginfo("4️⃣ Verificando servicios...")
         self.check_services()
         rospy.sleep(1.0)
         
-        # Verificar datos de sensores
-        self.check_sensor_data()
-        rospy.sleep(1.0)
-        
-        # Verificar batería
-        self.check_battery_status()
-        rospy.sleep(1.0)
-        
-        # Verificar parada de emergencia
-        self.check_emergency_stop_status()
-        rospy.sleep(1.0)
-        
-        # Probar movimiento básico
-        self.test_basic_movement()
+        # Solo verificar datos de sensores si el driver está ejecutándose
+        if self.diagnostic_results['driver_running']:
+            rospy.loginfo("5️⃣ Verificando datos de sensores...")
+            self.check_sensor_data()
+            rospy.sleep(1.0)
+            
+            rospy.loginfo("6️⃣ Verificando batería...")
+            self.check_battery_status()
+            rospy.sleep(1.0)
+            
+            rospy.loginfo("7️⃣ Verificando parada de emergencia...")
+            self.check_emergency_stop_status()
+            rospy.sleep(1.0)
+            
+            rospy.loginfo("8️⃣ Probando movimiento básico...")
+            self.test_basic_movement()
+        else:
+            rospy.loginfo("ℹ Saltando verificación de sensores (driver no ejecutándose)")
         
         # Generar reporte
+        rospy.loginfo("9️⃣ Generando reporte...")
         self.generate_report()
         
-        rospy.loginfo("Diagnóstico completo finalizado")
+        rospy.loginfo("=" * 60)
+        rospy.loginfo("✅ Diagnóstico completo finalizado")
 
 def main():
     """Función principal"""

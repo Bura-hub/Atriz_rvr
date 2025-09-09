@@ -30,6 +30,12 @@ echo "4. complete     - Suite completa con diagnóstico"
 echo "5. launch       - Lanzar con opciones avanzadas"
 echo "6. help         - Mostrar ayuda detallada"
 echo ""
+echo "Estructura del proyecto:"
+echo "  packages/     - Paquetes ROS organizados"
+echo "  scripts/      - Scripts organizados por funcionalidad"
+echo "  testing_scripts/ - Scripts de prueba"
+echo "  docs/         - Documentación organizada"
+echo ""
 
 # Procesar argumentos
 case "$1" in

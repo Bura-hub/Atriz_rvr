@@ -10,22 +10,113 @@ Este repositorio contiene el código necesario para operar el robot Sphero RVR u
 - **Seguridad Avanzada**: Sistema de parada de emergencia y monitoreo de batería
 - **Sensores Integrados**: Odometría, IMU, sensores de color y luz ambiental
 - **Control de LEDs**: Sistema completo de control de iluminación
-- **Scripts de Prueba**: Suite completa de pruebas automatizadas e interactivas
-- **Documentación Organizada**: Guías detalladas por categorías
+- **Suite de Pruebas**: Scripts de prueba automatizados, interactivos y de diagnóstico
+- **Documentación Completa**: Guías detalladas organizadas por categorías
+- **Configuración Automática**: Setup automático de Python y dependencias
+- **Linter Optimizado**: Configuración completa para desarrollo sin errores
 
-## 📚 Documentación
+## 📁 Estructura del Proyecto
+
+```
+atriz_git/src/ros_sphero_rvr/
+├── 📄 README.md                           # Este archivo
+├── 📄 PROJECT_ORGANIZATION_REPORT.md     # Reporte de organización
+├── 🚀 run_tests.sh                        # Script principal de pruebas
+├── 🚀 start_ros.sh                        # Script de inicio de ROS
+├── ⚙️ setup_python_path.py                # Configuración automática de Python
+├── ⚙️ pyrightconfig.json                  # Configuración del linter
+├── 📁 docs/                               # 📚 Documentación organizada
+│   ├── README.md                          # Índice de documentación
+│   ├── driver/                            # Documentación del driver
+│   │   └── DRIVER_FUNCTIONALITY_GUIDE.md # Guía completa de funcionalidades
+│   ├── testing/                           # Documentación de pruebas
+│   │   └── README_TESTING.md             # Guía de testing
+│   ├── hardware/                          # Documentación de hardware
+│   │   └── README.md                     # Documentación RVR++
+│   ├── scripts/                           # Documentación de scripts
+│   │   ├── GRADOS_CONTROL_README.md      # Control por grados
+│   │   ├── GRADOS_DIRECTOS_README.md     # Grados directos
+│   │   ├── LINTER_ERRORS_FIXED.md        # Corrección de errores
+│   │   └── PYTHON_IMPORT_SETUP.md        # Configuración Python
+│   └── packages_README.md                 # Guía de paquetes
+├── 📁 atriz_rvr_driver/                   # 📦 Driver principal ROS
+│   ├── package.xml                        # Metadatos del paquete
+│   ├── setup.py                           # Configuración Python
+│   └── scripts/                           # Scripts del driver
+│       ├── cmd_vel_rviz.py               # Control RViz
+│       ├── degrees_control_example.py    # Ejemplo de grados
+│       ├── emergency_stop.py             # Parada de emergencia
+│       ├── rvr-ros-restarter.py          # Reiniciador automático
+│       ├── rvr-ros.py                    # Driver alternativo
+│       ├── rvr_tools.py                  # Herramientas
+│       └── sphero_sdk/                   # SDK completo de Sphero
+├── 📁 atriz_rvr_msgs/                     # 📦 Mensajes personalizados ROS
+│   ├── package.xml                        # Metadatos del paquete
+│   ├── msg/                               # Definiciones de mensajes
+│   └── srv/                               # Definiciones de servicios
+├── 📁 atriz_rvr_serial/                   # 📦 Biblioteca serial ROS
+│   ├── package.xml                        # Metadatos del paquete
+│   ├── src/                               # Código fuente C++
+│   ├── include/                           # Headers
+│   └── tests/                             # Pruebas de la biblioteca
+├── 📁 scripts/                            # 🚀 Scripts organizados por funcionalidad
+│   ├── README.md                          # Guía de scripts
+│   ├── core/                              # Scripts principales
+│   │   ├── Atriz_rvr_node.py             # Driver principal (ÚNICO)
+│   │   ├── sphero_sdk_config.py           # Configuración del SDK
+│   │   ├── emergency_stop.py              # Parada de emergencia
+│   │   └── rvr-ros-restarter.py          # Reiniciador automático
+│   ├── examples/                          # Ejemplos de uso
+│   │   ├── degrees_control_example.py    # Control por grados
+│   │   ├── example_degrees_control.py    # Ejemplo de grados
+│   │   ├── random_walking.py             # Caminata aleatoria
+│   │   └── rvr_joystick_control.py       # Control con joystick
+│   ├── tools/                             # Herramientas
+│   │   ├── cmd_vel_rviz.py               # Control RViz
+│   │   ├── color_listener.py             # Listener de color
+│   │   └── rvr_tools.py                  # Herramientas generales
+│   └── utilities/                         # Utilidades
+│       └── test_both_topics.py           # Prueba de ambos tópicos
+└── 📁 testing_scripts/                    # 🧪 Suite completa de pruebas
+    ├── README.md                          # Guía de testing
+    ├── automated/                         # Pruebas automáticas
+    │   ├── test_atriz_rvr_driver.py      # Pruebas del driver
+    │   └── run_complete_tests.py         # Pruebas completas
+    ├── interactive/                       # Pruebas interactivas
+    │   └── test_individual_functions.py  # Pruebas individuales
+    ├── diagnostic/                        # Diagnóstico del sistema
+    │   └── diagnose_system.py            # Diagnóstico completo
+    └── launch/                            # Scripts de lanzamiento
+        └── launch_tests.sh               # Lanzador de pruebas
+```
+
+## 📚 Documentación Completa
 
 Toda la documentación está organizada en la carpeta `docs/`:
 
 - **[Índice de Documentación](docs/README.md)** - Guía principal de documentación
-- **[Guía del Driver](docs/driver/DRIVER_FUNCTIONALITY_GUIDE.md)** - Funcionalidades completas
-- **[Guía de Pruebas](docs/testing/README_TESTING.md)** - Scripts y testing
-- **[Scripts de Prueba](testing_scripts/README.md)** - Pruebas organizadas
+- **[Guía del Driver](docs/driver/DRIVER_FUNCTIONALITY_GUIDE.md)** - Funcionalidades completas del driver
+- **[Guía de Pruebas](docs/testing/README_TESTING.md)** - Scripts y testing detallado
+- **[Scripts de Prueba](testing_scripts/README.md)** - Pruebas organizadas y documentadas
+- **[Scripts del Proyecto](scripts/README.md)** - Scripts organizados por funcionalidad
+- **[Paquetes ROS](docs/packages_README.md)** - Guía de paquetes ROS
 
 ## 🚀 Inicio Rápido
 
-### **1. Pruebas Rápidas**
+### **1. Configuración Automática**
 ```bash
+# Configurar rutas de Python automáticamente
+python3 setup_python_path.py
+
+# Verificar configuración
+python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
+```
+
+### **2. Pruebas Rápidas**
+```bash
+# Ver todas las opciones disponibles
+./run_tests.sh help
+
 # Ejecutar todas las pruebas automáticamente
 ./run_tests.sh automated
 
@@ -34,143 +125,64 @@ Toda la documentación está organizada en la carpeta `docs/`:
 
 # Diagnóstico del sistema
 ./run_tests.sh diagnostic
+
+# Pruebas completas (automáticas + diagnóstico)
+./run_tests.sh complete
 ```
 
-### **2. Ver Ayuda**
+### **3. Ejecutar el Driver**
 ```bash
-# Ver todas las opciones disponibles
-./run_tests.sh help
+# Opción 1: Usar el script de inicio
+./start_ros.sh
+
+# Opción 2: Ejecutar directamente
+python3 ./scripts/core/Atriz_rvr_node.py
 ```
 
-## Requisitos Previos
+## ⚙️ Requisitos Previos
 
-- ROS Noetic instalado en Ubuntu.
-- Python 3.8 o superior.
+- **ROS Noetic** instalado en Ubuntu 20.04
+- **Python 3.8** o superior
+- **Sphero RVR** robot
+- **Conexión Bluetooth** o USB
 
-## Instalación
-
-Sigue los pasos a continuación para configurar tu entorno y ejecutar el nodo principal:
+## 🔧 Instalación
 
 ### 1. Crear el Workspace de ROS
 
-Si aún no tienes un workspace creado, ejecuta el siguiente comando para crearlo:
-
 ```bash
 mkdir -p ~/catkin_ws/src
+cd ~/catkin_ws/src
 ```
 
 ### 2. Clonar el Repositorio
 
-Clona este repositorio dentro de la carpeta `src` de tu workspace:
-
 ```bash
-cd ~/catkin_ws/src
 git clone https://github.com/atriz-udenar/ros_sphero_rvr.git
+cd ros_sphero_rvr
 ```
 
-### 3. Compilar los Paquetes de ROS
-Compila los paquetes clonados en tu workspace:
+### 3. Configurar el Entorno
 
 ```bash
-cd ~/catkin_ws/
-source devel/setup.sh
+# Configurar rutas de Python
+python3 setup_python_path.py
+
+# Compilar paquetes ROS
+cd ~/catkin_ws
 catkin_make
+source devel/setup.bash
 ```
 
-## Ejecución del Nodo Principal
-
-Para ejecutar el nodo principal y comenzar a interactuar con el Sphero RVR, sigue los pasos a continuación:
-
-### 1. Iniciar el Nodo Maestro de ROS
-
-En la primera terminal, inicia el nodo maestro de ROS:
+### 4. Verificar Instalación
 
 ```bash
-roscore
+# Ejecutar diagnóstico
+./run_tests.sh diagnostic
+
+# Probar configuración
+python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('✅ Configuración exitosa')"
 ```
-
-### 2. Ejecutar el Nodo Principal
-
-En una segunda terminal, ejecuta el nodo principal para controlar el Sphero RVR:
-
-```bash
-rosrun sphero_rvr_hw Atriz_rvr_node.py
-```
-
-### 3. Configuración de Permisos de Ejecución
-
-Si experimentas problemas al intentar ejecutar los scripts del nodo, es posible que necesites otorgar permisos de ejecución a los archivos. Para hacerlo, ejecuta los siguientes comandos:
-
-```bash
-chmod +x ~/catkin_ws/src/ros_sphero_rvr/sphero_rvr_hw/scripts/Atriz_rvr_node.py
-chmod +x ~/catkin_ws/src/ros_sphero_rvr/sphero_rvr/scripts/rvr_joystick_control.py
-chmod +x ~/catkin_ws/src/ros_sphero_rvr/sphero_rvr/scripts/color_listener.py
-```
-
-## Ejecución de los Nodos Adicionales
-
-Para ejecutar otros nodos disponibles en el repositorio, sigue los pasos a continuación:
-
-### Control del Joystick
-
-Ejecuta el siguiente comando para iniciar el nodo de control del joystick:
-
-```bash
-rosrun sphero_rvr rvr_joystick_control.py
-```
-
-> **Nota:** Este nodo requiere que el paquete **`joy_node`** esté instalado. Puedes seguir [este tutorial](https://wiki.ros.org/joy/Tutorials/ConfiguringALinuxJoystick) para configurarlo.
-
-```bash
-rosrun joy joy_node
-```
-
-### Listener de Color
-
-```bash
-rosrun sphero_rvr color_listener.py
-```
-
-## Acceso a Tópicos y Servicios
-
-Puedes listar los tópicos y servicios disponibles ejecutando los siguientes comandos:
-
-```bash
-rostopic list
-rosservice list
-```
-
-### Tópicos Disponibles:
-
-#### Control de Movimiento
-- `/cmd_vel` - Control estándar ROS (radianes/segundo)
-- `/cmd_degrees` - Control directo en grados/segundo (más intuitivo)
-
-#### Sensores y Datos
-- `/ambient_light` - Sensor de luz ambiental
-- `/color` - Sensor de color
-- `/magnet` - Magnetómetro
-- `/odom` - Odometría del robot
-- `/imu` - Datos del IMU
-- `/battery_state` - Estado de la batería
-
-#### Control y Seguridad
-- `/is_emergency_stop` - Parada de emergencia
-- `/sphero_rvr/status` - Estado general del robot
-
-### Servicios Disponibles
-
-- `/battery_state`
-- `/calibrate_magnetometer`
-- `/enable_color`
-- `/move_to_pos_and_yaw`
-- `/move_to_pose`
-- `/release_emergency_stop`
-- `/reset_odom`
-- `/rvr_ros_interface/get_loggers`
-- `/rvr_ros_interface/set_logger_level`
-- `/set_leds`
-- `/trigger_led_event`
 
 ## 🎮 Control de Movimiento
 
@@ -209,159 +221,183 @@ rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y
 rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 0.0}" -r 1
 ```
 
-### Scripts de Ejemplo
+## 🔍 Sensores y Datos
 
-#### Script Interactivo de Grados
+### Tópicos de Sensores Disponibles
+
+#### Control de Movimiento
+- `/cmd_vel` - Control estándar ROS (radianes/segundo)
+- `/cmd_degrees` - Control directo en grados/segundo
+
+#### Sensores y Datos
+- `/odom` - Odometría del robot
+- `/imu` - Datos del IMU (orientación, aceleración, giroscopio)
+- `/ambient_light` - Sensor de luz ambiental
+- `/color` - Sensor de color con confianza
+- `/sphero_rvr/status` - Estado general del robot
+
+#### Control y Seguridad
+- `/is_emergency_stop` - Parada de emergencia
+- `/ir_messages` - Mensajes de comunicación IR
+
+### Servicios Disponibles
+
+- `/battery_state` - Estado de la batería
+- `/enable_color` - Habilitar/deshabilitar sensor de color
+- `/reset_odom` - Reiniciar odometría
+- `/release_emergency_stop` - Liberar parada de emergencia
+- `/ir_mode` - Configurar modo de comunicación IR
+
+### Ejemplos de Uso de Sensores
+
 ```bash
-python3 /home/sphero/atriz_git/src/ros_sphero_rvr/sphero_rvr_hw/scripts/degrees_control_example.py
-```
-
-#### Script de Prueba de Ambos Tópicos
-```bash
-python3 /home/sphero/atriz_git/src/ros_sphero_rvr/sphero_rvr_hw/scripts/test_both_topics.py
-```
-
-## 🔧 Sensores y Datos
-
-### Control del LED del Sensor de Color
-
-Para encender o apagar el LED del sensor de color:
-
-```bash
-rosservice call /enable_color "{data: true}"
-```
-
-### Obtener Lecturas del Sensor de Color
-
-```bash
+# Obtener lecturas del sensor de color
 rostopic echo /color
-```
 
-### Obtener Lecturas de Odometría
-
-```bash
+# Obtener lecturas de odometría
 rostopic echo /odom
-```
 
-### Estado de la Batería
-
-```bash
+# Estado de la batería
 rosservice call /battery_state
-```
 
-### Lectura de Luz Ambiental
-
-```bash
+# Lectura de luz ambiental
 rostopic echo /ambient_light
-```
 
-### Datos del IMU
-
-```bash
+# Datos del IMU
 rostopic echo /imu
+
+# Habilitar sensor de color
+rosservice call /enable_color "{data: true}"
+
+# Reiniciar odometría
+rosservice call /reset_odom "{}"
 ```
 
 ## 🎨 Control de LEDs
 
-Para cambiar el color de los LEDs, usa el siguiente comando, donde `[R, G, B]` son valores entre 0 y 255:
+Para cambiar el color de los LEDs, usa el siguiente comando:
 
 ```bash
-rosservice call /set_leds "[255, 0, 0]"  # Rojo
-rosservice call /set_leds "[0, 255, 0]"  # Verde
-rosservice call /set_leds "[0, 0, 255]"  # Azul
+# Rojo
+rosservice call /set_leds "[255, 0, 0]"
+
+# Verde
+rosservice call /set_leds "[0, 255, 0]"
+
+# Azul
+rosservice call /set_leds "[0, 0, 255]"
+
+# Blanco
+rosservice call /set_leds "[255, 255, 255]"
 ```
 
 ## 🚨 Seguridad y Emergencia
 
 ### Parada de Emergencia
 
-Para activar la parada de emergencia:
-
 ```bash
+# Activar parada de emergencia
 rostopic pub /is_emergency_stop std_msgs/Empty "{}"
+
+# Liberar parada de emergencia
+rosservice call /release_emergency_stop "{}"
 ```
 
-### Liberar Parada de Emergencia
+## 🧪 Suite de Pruebas
 
-Para liberar la parada de emergencia:
+### Scripts de Prueba Disponibles
+
+#### Pruebas Automáticas
+```bash
+# Ejecutar todas las pruebas automáticamente
+./run_tests.sh automated
+
+# Pruebas específicas del driver
+python3 testing_scripts/automated/test_atriz_rvr_driver.py
+
+# Pruebas completas
+python3 testing_scripts/automated/run_complete_tests.py
+```
+
+#### Pruebas Interactivas
+```bash
+# Pruebas interactivas individuales
+./run_tests.sh interactive
+
+# O ejecutar directamente
+python3 testing_scripts/interactive/test_individual_functions.py
+```
+
+#### Diagnóstico del Sistema
+```bash
+# Diagnóstico completo
+./run_tests.sh diagnostic
+
+# O ejecutar directamente
+python3 testing_scripts/diagnostic/diagnose_system.py
+```
+
+## 🔧 Configuración Avanzada
+
+### Configuración del Linter
+
+El proyecto incluye configuración completa para linters:
+
+- **Pyright/Pylance**: `pyrightconfig.json`
+- **Pylint**: `.pylintrc`
+- **VS Code**: `.vscode/settings.json`
+
+### Configuración de Python
 
 ```bash
-rosservice call /release_emergency_stop "{}"
+# Configuración automática
+python3 setup_python_path.py
+
+# Verificar configuración
+python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
 ```
 
 ## 📊 Monitoreo del Sistema
 
-### Estado General del Robot
+### Comandos Útiles
 
 ```bash
-rostopic echo /sphero_rvr/status
-```
-
-### Listar Todos los Tópicos
-
-```bash
+# Listar todos los tópicos
 rostopic list
-```
 
-### Listar Todos los Servicios
-
-```bash
+# Listar todos los servicios
 rosservice list
+
+# Ver información de un tópico
+rostopic info /cmd_vel
+
+# Ver información de un servicio
+rosservice info /battery_state
+
+# Ver nodos activos
+rosnode list
 ```
 
-## 📚 Documentación Adicional
+## 🎯 Ejemplos Prácticos
 
-### Mensaje Personalizado: DegreesTwist
-
-El sistema incluye un mensaje personalizado `DegreesTwist` que permite control directo en grados/segundo:
-
-```msg
-# sphero_rvr_msgs/DegreesTwist.msg
-float32 linear_x    # Velocidad lineal en m/s
-float32 linear_y    # Velocidad lineal en m/s (no usado)
-float32 linear_z    # Velocidad lineal en m/s (no usado)
-float32 angular_x   # Velocidad angular en grados/s (no usado)
-float32 angular_y   # Velocidad angular en grados/s (no usado)
-float32 angular_z   # Velocidad angular en grados/s (PRINCIPAL)
-```
-
-### Ejemplos Prácticos de Movimiento
-
-#### Girar 360 grados en 10 segundos
+### Girar 360 grados en 10 segundos
 ```bash
 # 36 grados/s = 360° en 10s
 rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 36.0}" -r 10
 ```
 
-#### Girar 90 grados en 1 segundo
+### Girar 90 grados en 1 segundo
 ```bash
 # 90 grados/s = 90° en 1s
 rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 90.0}" -r 10
 ```
 
-#### Movimiento combinado (adelante + giro)
+### Movimiento combinado (adelante + giro)
 ```bash
 rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.3, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 30.0}" -r 10
 ```
 
-## 🔧 Estructura del Proyecto
-
-```
-ros_sphero_rvr/
-├── sphero_rvr_hw/                 # Paquete principal de hardware
-│   ├── scripts/
-│   │   ├── Atriz_rvr_node.py     # Nodo principal
-│   │   ├── degrees_control_example.py  # Ejemplo interactivo
-│   │   ├── test_both_topics.py   # Prueba de ambos tópicos
-│   │   └── GRADOS_DIRECTOS_README.md  # Documentación detallada
-│   └── ...
-├── sphero_rvr_msgs/               # Mensajes personalizados
-│   └── msg/
-│       └── DegreesTwist.msg      # Mensaje para grados/segundo
-└── ...
-```
-
-## ⚡ Ventajas del Sistema Dual
+## ⚡ Ventajas del Sistema
 
 ### Control Estándar ROS (`/cmd_vel`)
 - ✅ Compatible con herramientas ROS estándar
@@ -375,26 +411,43 @@ ros_sphero_rvr/
 - ✅ Conversión directa sin cálculos
 - ✅ Ideal para control manual y pruebas
 
-## 🚀 Inicio Rápido
+### Suite de Pruebas
+- ✅ Pruebas automatizadas completas
+- ✅ Pruebas interactivas individuales
+- ✅ Diagnóstico del sistema
+- ✅ Scripts de lanzamiento organizados
 
-1. **Iniciar roscore:**
+### Documentación
+- ✅ Guías detalladas por categoría
+- ✅ Ejemplos prácticos
+- ✅ Configuración paso a paso
+- ✅ Solución de problemas
+
+## 🚀 Inicio Rápido Completo
+
+1. **Configurar el entorno:**
+   ```bash
+   python3 setup_python_path.py
+   ```
+
+2. **Iniciar roscore:**
    ```bash
    roscore
    ```
 
-2. **Ejecutar el nodo principal:**
+3. **Ejecutar el driver:**
    ```bash
-   cd ~/atriz_git && source devel/setup.sh && rosrun sphero_rvr_hw Atriz_rvr_node.py
+   python3 ./scripts/core/Atriz_rvr_node.py
    ```
 
-3. **Probar control en grados:**
+4. **Probar control en grados:**
    ```bash
    rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 30.0}" -r 10
    ```
 
-4. **Probar control estándar:**
+5. **Ejecutar pruebas:**
    ```bash
-   rostopic pub /cmd_vel geometry_msgs/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.5}}" -r 10
+   ./run_tests.sh automated
    ```
 
 ## 🤝 Contribuciones
@@ -404,7 +457,8 @@ Este proyecto es parte de la investigación en la Universidad de Nariño. Para c
 1. Fork el repositorio
 2. Crea una rama para tu feature
 3. Realiza tus cambios
-4. Envía un Pull Request
+4. Ejecuta las pruebas: `./run_tests.sh automated`
+5. Envía un Pull Request
 
 ## 📄 Licencia
 
@@ -417,4 +471,19 @@ Este proyecto está bajo la licencia MIT. Ver el archivo `LICENSE` para más det
 
 ## 📞 Soporte
 
-Para soporte técnico o preguntas sobre el proyecto, contacta al equipo de investigación de la Universidad de Nariño.
+Para soporte técnico o preguntas sobre el proyecto:
+
+1. **Revisa la documentación** en `docs/README.md`
+2. **Ejecuta el diagnóstico**: `./run_tests.sh diagnostic`
+3. **Consulta los logs** de ROS
+4. **Contacta al equipo** de investigación de la Universidad de Nariño
+
+## 🔄 Mantenimiento
+
+Para mantener el proyecto actualizado:
+
+1. **Mantén READMEs actualizados** cuando agregues funcionalidades
+2. **Actualiza documentación** en `docs/`
+3. **Revisa enlaces** en la documentación
+4. **Mantén scripts organizados** por funcionalidad
+5. **Ejecuta pruebas regularmente** con `./run_tests.sh automated`

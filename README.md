@@ -10,6 +10,37 @@ Este repositorio contiene el código necesario para operar el robot Sphero RVR u
 - **Seguridad Avanzada**: Sistema de parada de emergencia y monitoreo de batería
 - **Sensores Integrados**: Odometría, IMU, sensores de color y luz ambiental
 - **Control de LEDs**: Sistema completo de control de iluminación
+- **Scripts de Prueba**: Suite completa de pruebas automatizadas e interactivas
+- **Documentación Organizada**: Guías detalladas por categorías
+
+## 📚 Documentación
+
+Toda la documentación está organizada en la carpeta `docs/`:
+
+- **[Índice de Documentación](docs/README.md)** - Guía principal de documentación
+- **[Guía del Driver](docs/driver/DRIVER_FUNCTIONALITY_GUIDE.md)** - Funcionalidades completas
+- **[Guía de Pruebas](docs/testing/README_TESTING.md)** - Scripts y testing
+- **[Scripts de Prueba](testing_scripts/README.md)** - Pruebas organizadas
+
+## 🚀 Inicio Rápido
+
+### **1. Pruebas Rápidas**
+```bash
+# Ejecutar todas las pruebas automáticamente
+./run_tests.sh automated
+
+# Pruebas interactivas
+./run_tests.sh interactive
+
+# Diagnóstico del sistema
+./run_tests.sh diagnostic
+```
+
+### **2. Ver Ayuda**
+```bash
+# Ver todas las opciones disponibles
+./run_tests.sh help
+```
 
 ## Requisitos Previos
 

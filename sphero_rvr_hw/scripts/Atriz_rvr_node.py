@@ -105,7 +105,7 @@ pub_ir_messages = None
 # =======================================================
 # Funciones de callback
 # =======================================================
-def emergency_stop_callback():
+def emergency_stop_callback(msg):
     """
     Activa el modo de parada de emergencia.
 
@@ -121,7 +121,7 @@ def emergency_stop_callback():
     release_emergency_stop_callback().
 
     Args:
-        None
+        msg: Mensaje del tópico (no se usa)
 
     Returns:
         None
@@ -139,13 +139,16 @@ def emergency_stop_callback():
         # Escribimos un mensaje en el log para indicar que se ha activado la parada de emergencia
         rospy.loginfo('({}) ¡PARADA DE EMERGENCIA ACTIVADA!'.format(rospy.get_name()))
 
-def release_emergency_stop_callback():
+def release_emergency_stop_callback(req):
     """
     Libera el modo de parada de emergencia. El modo de parada de emergencia es un
     estado en el que el robot se detiene y no permite que se le envíen comandos de
     movimiento hasta que se llama a este callback. El callback simplemente
     desactiva la bandera que indica que el robot está en parada de emergencia y
     escribe un mensaje en el log.
+
+    Args:
+        req: Request del servicio (no se usa)
 
     Returns:
         std_srvs.srv.EmptyResponse: Un mensaje vacío que indica que el servicio
@@ -156,8 +159,17 @@ def release_emergency_stop_callback():
     rospy.loginfo('({}) Parada de emergencia liberada'.format(rospy.get_name()))
     return std_srvs.srv.EmptyResponse()
 
-def reset_odom_callback():
-    """Reinicia la odometría."""
+def reset_odom_callback(req):
+    """
+    Reinicia la odometría.
+    
+    Args:
+        req: Request del servicio (no se usa)
+    
+    Returns:
+        std_srvs.srv.EmptyResponse: Un mensaje vacío que indica que el servicio
+            ha sido procesado correctamente.
+    """
     rospy.loginfo('({}) Reiniciando odometría'.format(rospy.get_name()))
     asyncio.run(reset_odom())
     return std_srvs.srv.EmptyResponse()

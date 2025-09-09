@@ -1,0 +1,33 @@
+# Cursor IDE files
+.cursor/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ROS build artifacts
+build/
+devel/
+install/
+logs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Sphero SDK cache
+*.fw

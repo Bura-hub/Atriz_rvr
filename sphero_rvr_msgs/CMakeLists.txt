@@ -51,6 +51,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   Color.msg
+  DegreesTwist.msg
 )
 
 add_service_files(

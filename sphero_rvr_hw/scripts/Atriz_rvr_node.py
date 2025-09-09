@@ -39,7 +39,7 @@ from geometry_msgs.msg import PoseWithCovariance, Pose, TwistWithCovariance, Twi
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header, String, Bool
-from sphero_rvr_msgs.msg import Color
+from sphero_rvr_msgs.msg import Color, DegreesTwist
 from sensor_msgs.msg import Illuminance
 import std_srvs.srv
 import rvr_tools
@@ -184,7 +184,7 @@ def move_to_pose_callback(req):
 
 def cmd_vel_callback(cmdtwist):
     """
-    Callback para manejar comandos de velocidad.
+    Callback para manejar comandos de velocidad usando el método RC nativo de la SDK.
 
     Este callback se llama cada vez que se envía un mensaje de tipo
     geometry_msgs/Twist a este nodo. El mensaje de tipo Twist contiene
@@ -192,9 +192,8 @@ def cmd_vel_callback(cmdtwist):
     velocidad lineal del robot en metros por segundo, y el componente
     angular es la velocidad angular del robot en radianes por segundo.
 
-    La velocidad lineal se traduce en velocidades para los motores
-    izquierdo y derecho del robot. La velocidad angular se traduce en
-    una diferencia de velocidad entre los motores izquierdo y derecho.
+    Convierte automáticamente de radianes/segundo a grados/segundo para
+    usar el método drive_rc_si_units nativo de la SDK.
     """
 
     global is_in_emergency_stop, is_driving_with_cmd_vel, last_cmd_vel_time
@@ -203,18 +202,41 @@ def cmd_vel_callback(cmdtwist):
         # Si el robot está en parada de emergencia, no se permite que se
         # le envíen comandos de movimiento.
         return
+    
     v_x = cmdtwist.linear.x
-    v_th = cmdtwist.angular.z
-    radius = 0.1825 / 2
-    vel_linear = v_th * radius
-    # La velocidad lineal se traduce en velocidades para los motores
-    # izquierdo y derecho del robot. La velocidad angular se traduce en
-    # una diferencia de velocidad entre los motores izquierdo y derecho.
-    l = v_x - vel_linear
-    r = v_x + vel_linear
-    # Se llama a la función write_motors_si para enviar las velocidades
-    # a los motores del robot.
-    asyncio.run(write_motors_si(l, r))
+    v_th_rad_s = cmdtwist.angular.z
+    
+    # Convertir radianes/segundo a grados/segundo
+    v_th_deg_s = v_th_rad_s * (180.0 / pi)
+    
+    # Usar el método RC nativo de la SDK con grados/segundo
+    asyncio.run(write_rc_si(v_x, v_th_deg_s))
+    is_driving_with_cmd_vel = True
+    # Se almacena el momento en el que se envió el último comando de
+    # velocidad.
+    last_cmd_vel_time = time.time()
+
+def cmd_degrees_callback(degrees_twist):
+    """
+    Callback para manejar comandos de velocidad directamente en grados/segundo.
+
+    Este callback recibe comandos directamente en grados/segundo, lo que es
+    más intuitivo que radianes/segundo. Usa el método RC nativo de la SDK
+    sin necesidad de conversión.
+    """
+
+    global is_in_emergency_stop, is_driving_with_cmd_vel, last_cmd_vel_time
+
+    if is_in_emergency_stop:
+        # Si el robot está en parada de emergencia, no se permite que se
+        # le envíen comandos de movimiento.
+        return
+    
+    v_x = degrees_twist.linear_x
+    v_th_deg_s = degrees_twist.angular_z
+    
+    # Usar el método RC nativo de la SDK directamente con grados/segundo
+    asyncio.run(write_rc_si(v_x, v_th_deg_s))
     is_driving_with_cmd_vel = True
     # Se almacena el momento en el que se envió el último comando de
     # velocidad.
@@ -779,6 +801,79 @@ async def write_motors_si(l_vel, r_vel):
     await rvr.drive_tank_si_units(l_vel, r_vel)
     await asyncio.sleep(.1)
 
+async def write_rc_si(linear_vel, angular_vel_deg_s):
+    """
+    Escribe comandos de velocidad usando el método RC nativo de la SDK.
+    
+    Args:
+        linear_vel (float): Velocidad lineal en m/s
+        angular_vel_deg_s (float): Velocidad angular en grados/s
+    """
+    global last_cmd_vel_time, is_driving_with_cmd_vel, is_in_emergency_stop
+    if is_in_emergency_stop:
+        return
+    last_cmd_vel_time = time.time()
+    if linear_vel == 0 and angular_vel_deg_s == 0:
+        is_driving_with_cmd_vel = False
+    else:
+        is_driving_with_cmd_vel = True
+    
+    # Usar el método RC nativo de la SDK directamente con grados/s
+    await rvr.drive_rc_si_units(angular_vel_deg_s, linear_vel, 0)
+    await asyncio.sleep(.1)
+
+async def move_forward(linear_vel_m_s):
+    """
+    Mueve el robot hacia adelante a una velocidad específica.
+    
+    Args:
+        linear_vel_m_s (float): Velocidad lineal en m/s
+    """
+    await write_rc_si(linear_vel_m_s, 0.0)
+
+async def move_backward(linear_vel_m_s):
+    """
+    Mueve el robot hacia atrás a una velocidad específica.
+    
+    Args:
+        linear_vel_m_s (float): Velocidad lineal en m/s (positiva)
+    """
+    await write_rc_si(-linear_vel_m_s, 0.0)
+
+async def turn_left(angular_vel_deg_s):
+    """
+    Gira el robot a la izquierda a una velocidad angular específica.
+    
+    Args:
+        angular_vel_deg_s (float): Velocidad angular en grados/s (positiva)
+    """
+    await write_rc_si(0.0, angular_vel_deg_s)
+
+async def turn_right(angular_vel_deg_s):
+    """
+    Gira el robot a la derecha a una velocidad angular específica.
+    
+    Args:
+        angular_vel_deg_s (float): Velocidad angular en grados/s (positiva)
+    """
+    await write_rc_si(0.0, -angular_vel_deg_s)
+
+async def stop_robot():
+    """
+    Detiene completamente el robot.
+    """
+    await write_rc_si(0.0, 0.0)
+
+async def move_and_turn(linear_vel_m_s, angular_vel_deg_s):
+    """
+    Mueve el robot con velocidad lineal y angular combinadas.
+    
+    Args:
+        linear_vel_m_s (float): Velocidad lineal en m/s
+        angular_vel_deg_s (float): Velocidad angular en grados/s (positivo = izquierda, negativo = derecha)
+    """
+    await write_rc_si(linear_vel_m_s, angular_vel_deg_s)
+
 def move_to_pose(frame_id, pos, ori, speed, speed_in_si):
     """
     Mueve el robot a una pose específica.
@@ -919,8 +1014,9 @@ if __name__ == '__main__':
     pub_imu = rospy.Publisher('imu', Imu, queue_size=10)
     pub_ir_messages = rospy.Publisher('ir_messages', String, queue_size=10)
 
-    # Crea los subscribers para los tópicos /cmd_vel y /is_emergency_stop
+    # Crea los subscribers para los tópicos /cmd_vel, /cmd_degrees y /is_emergency_stop
     rospy.Subscriber('cmd_vel', Twist, cmd_vel_callback, queue_size=1)
+    rospy.Subscriber('cmd_degrees', DegreesTwist, cmd_degrees_callback, queue_size=1)
     rospy.Subscriber('is_emergency_stop', std_msgs.msg.Empty, emergency_stop_callback)
 
     # Crea los servicios para los tópicos

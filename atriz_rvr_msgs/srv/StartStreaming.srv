@@ -1,0 +1,7 @@
+# Inicia streaming con período personalizado
+
+int32 period                   # Período en milisegundos
+int32 target                   # Target (1 o 2)
+---
+bool success
+string message

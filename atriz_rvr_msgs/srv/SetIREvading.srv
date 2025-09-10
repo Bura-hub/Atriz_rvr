@@ -1,0 +1,7 @@
+# Configura modo de evasión IR
+
+int32 far_code          # Código para distancia larga (3+ metros)
+int32 near_code         # Código para distancia corta (<1 metro)
+---
+bool success
+string message

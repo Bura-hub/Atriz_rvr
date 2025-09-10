@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Script de prueba para las nuevas funcionalidades del Sphero RVR -->
+  
+  <!-- Argumentos -->
+  <arg name="interactive" default="false" />
+  <arg name="test_type" default="all" />
+  
+  <!-- Nodo principal del Sphero RVR -->
+  <node name="sphero_rvr_node" pkg="sphero_rvr_hw" type="Atriz_rvr_node.py" output="screen">
+    <param name="pub_tf" value="true" />
+  </node>
+  
+  <!-- Script de pruebas -->
+  <node name="functionality_tester" pkg="sphero_rvr_hw" type="test_new_functionalities.py" output="screen">
+    <param name="interactive" value="$(arg interactive)" />
+    <param name="test_type" value="$(arg test_type)" />
+  </node>
+  
+</launch>

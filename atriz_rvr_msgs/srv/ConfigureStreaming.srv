@@ -1,0 +1,8 @@
+# Configura servicios de streaming personalizados
+
+int32 token                    # Token de configuración
+int32[] configuration          # Array de configuración del cliente
+int32 target                   # Target (1 o 2)
+---
+bool success
+string message

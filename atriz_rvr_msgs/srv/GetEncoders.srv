@@ -1,0 +1,6 @@
+# Obtiene los conteos actuales de los encoders
+---
+bool success
+string message
+int32 left_wheel_count
+int32 right_wheel_count

@@ -1,0 +1,9 @@
+# Control directo de motores con modo y velocidad
+
+int32 left_mode          # Modo motor izquierdo: 0=off, 1=forward, 2=reverse
+int32 left_speed         # Velocidad motor izquierdo (0-255)
+int32 right_mode         # Modo motor derecho: 0=off, 1=forward, 2=reverse  
+int32 right_speed        # Velocidad motor derecho (0-255)
+---
+bool success
+string message

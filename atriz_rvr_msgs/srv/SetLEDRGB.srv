@@ -1,0 +1,9 @@
+# Controla LED individual con RGB
+
+int32 led_id            # ID del LED a controlar
+int32 red               # Valor rojo (0-255)
+int32 green             # Valor verde (0-255)
+int32 blue              # Valor azul (0-255)
+---
+bool success
+string message

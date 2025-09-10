@@ -1,0 +1,9 @@
+# Controla múltiples LEDs simultáneamente
+
+int32[] led_ids         # IDs de los LEDs a controlar
+int32[] red_values      # Valores rojos (0-255)
+int32[] green_values    # Valores verdes (0-255)
+int32[] blue_values     # Valores azules (0-255)
+---
+bool success
+string message

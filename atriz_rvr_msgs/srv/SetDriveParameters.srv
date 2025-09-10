@@ -1,0 +1,10 @@
+# Configura parámetros de control de conducción
+
+float32 a                        # Coeficiente 'a' de la ecuación cuadrática
+float32 b                        # Coeficiente 'b' de la ecuación cuadrática
+float32 c                        # Coeficiente 'c' de la ecuación cuadrática
+float32 linear_acceleration      # Aceleración lineal en m/s²
+int32 linear_velocity_slew_method # Método de limitación de velocidad lineal
+---
+bool success
+string message

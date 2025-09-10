@@ -84,8 +84,6 @@ odom = Odometry(
 )
 
 # sensors
-yaw_north = 0                   # the yaw offset from odom to magnetic North in degree
-calibration_completed = False   # Flag used to indicate that calibration is complete
 color_enabled = False           # Flag indicates that the color sensor is enabled7
 
 is_driving_with_cmd_vel = False  # Flag indicates that the robot is currently driving with cmd_vel
@@ -98,7 +96,6 @@ pub_odom = None
 br = None
 pub_light = None
 pub_color = None
-pub_magnet = None
 
 
 # * ----------------------------------------------
@@ -183,11 +180,6 @@ def cmd_vel_callback(cmdtwist):
     asyncio.run(write_motors_si(l, r))
 
 
-def calibrate_magnetometer_callback(req):
-    res = std_srvs.srv.TriggerResponse()
-    res.success = asyncio.run(calibrate_magnetometer(timeout=10.0))
-
-    return res
 
 
 def battery_state_callback(req):
@@ -257,16 +249,6 @@ def sleep_callback(req):
 # * ----------------------------------------------
 
 # Handler for completion of calibration
-async def on_calibration_complete_notify_handler(response):
-    """
-    This handler is called when the magnetometer calibration is completed.
-    The calibration_completed flag will be set and the offset angle from the odom frame to the magnetic north is set as yaw_north
-    """
-    global calibration_completed, yaw_north
-
-    rospy.loginfo('({}) Calibration complete, response:{}'.format(rospy.get_name(), response))
-    yaw_north = response['yaw_north_direction']
-    calibration_completed = True
 
 
 def check_if_need_to_send_msg(component):
@@ -533,32 +515,6 @@ def message_to_quaternion(orientation):
     return orientation_q
 
 
-async def calibrate_magnetometer(timeout=None):
-    """
-    A routine to calibrate the magnetometer.
-    Check on_calibration_complete_notify_handler for more information about the result of the calibration.
-    Note that the rvr will spin very fast during the calibration
-    :param timeout: a timeout in seconds for the calibration routine. None is interpreted as infinite
-    :return: True if the calibration was successful
-    """
-    global calibration_completed, is_in_emergency_stop
-
-    if is_in_emergency_stop:
-        return
-
-    # Register for the async on completion of calibration
-    calibration_completed = False
-    await rvr.on_magnetometer_calibration_complete_notify(handler=on_calibration_complete_notify_handler)
-    await rvr.magnetometer_calibrate_to_north(timeout=timeout)
-    # wait at last some time for the notifier
-    start = time.time()
-    while not calibration_completed:
-        await asyncio.sleep(.1)
-        if time.time() - start >= timeout:
-            rospy.logerr("({}) magnetometer calibration timeout".format(rospy.get_name()))
-            break
-
-    return calibration_completed
 
 
 def wait_until_motion_complete():
@@ -707,33 +663,6 @@ def move_to_pose(frame_id, pos, ori, speed, speed_in_si):
     return success
 
 
-def publish_magnet():
-    global pub_magnet
-
-    if calibration_completed:
-        north_pose_s = geometry_msgs.msg.PoseStamped()
-        north_pose_s.header.frame_id = "odom"
-
-        q = tf.transformations.quaternion_from_euler(0, 0, yaw_north * (pi / 180.))
-        north_pose_s.pose.orientation.x = q[0]
-        north_pose_s.pose.orientation.y = q[1]
-        north_pose_s.pose.orientation.z = q[2]
-        north_pose_s.pose.orientation.w = q[3]
-
-        # transform to base_frame
-        try:
-            trans_odom_base = tfBuffer.lookup_transform('rvr_base_link', 'odom', rospy.Time())            # transform the pos to spheros world axis aligned heading
-            north_pose_s = tf2_geometry_msgs.do_transform_pose(north_pose_s, trans_odom_base)
-            north_pose_s.header.stamp = rospy.get_rostime()
-            north_pose_s.header.frame_id = "rvr_base_link"
-            north_pose_s.pose.position.x = 0
-            north_pose_s.pose.position.y = 0
-            north_pose_s.pose.position.z = 0
-        except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-            rospy.logerr("({}) ERROR while looking for tf2 frame transform".format(rospy.get_name()))
-            return
-
-        pub_magnet.publish(north_pose_s)
 
 
 if __name__ == '__main__':
@@ -757,7 +686,6 @@ if __name__ == '__main__':
     pub_odom = rospy.Publisher('odom', Odometry, queue_size=10)
     pub_light = rospy.Publisher('ambient_light', Illuminance, queue_size=10)
     pub_color = rospy.Publisher('color', Color, queue_size=10)
-    pub_magnet = rospy.Publisher('magnet', geometry_msgs.msg.PoseStamped, queue_size=10)
 
     rospy.Subscriber('cmd_vel', Twist, cmd_vel_callback, queue_size=1)
     rospy.Subscriber("is_emergency_stop", std_msgs.msg.Empty, emergency_stop_callback)
@@ -766,7 +694,6 @@ if __name__ == '__main__':
     rospy.Service('move_to_pose', MoveToPose, move_to_pose_callback)
     rospy.Service('move_to_pos_and_yaw', MoveToPosAndYaw, move_to_pos_and_yaw_callback)
     rospy.Service('enable_color', std_srvs.srv.SetBool, enable_color_callback)
-    rospy.Service('calibrate_magnetometer', std_srvs.srv.Trigger, calibrate_magnetometer_callback)
     rospy.Service('battery_state', BatteryState, battery_state_callback)
     #rospy.Service('wake', std_srvs.srv.Empty, wake_callback)
     #rospy.Service('sleep', std_srvs.srv.Empty, sleep_callback)

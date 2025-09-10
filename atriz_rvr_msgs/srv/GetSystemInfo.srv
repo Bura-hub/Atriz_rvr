@@ -1,0 +1,5 @@
+# Obtiene información del sistema
+---
+bool success
+string message
+SystemInfo system_info

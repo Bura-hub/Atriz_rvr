@@ -1,0 +1,5 @@
+# Obtiene el estado del sistema de control
+---
+bool success
+string message
+ControlState control_state

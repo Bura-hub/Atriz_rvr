@@ -56,13 +56,18 @@ from geometry_msgs.msg import PoseWithCovariance, Pose, TwistWithCovariance, Twi
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header, String, Bool
-from sphero_rvr_msgs.msg import Color, DegreesTwist
+from sphero_rvr_msgs.msg import Color, DegreesTwist, Encoder, InfraredMessage, SystemInfo, ControlState
 from sensor_msgs.msg import Illuminance
 import std_srvs.srv
 import rvr_tools
 from sphero_rvr_msgs.srv import (
     SetIRMode, SetIRModeResponse, MoveToPose, MoveToPoseResponse, MoveToPosAndYaw,
-    MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest)
+    MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest,
+    GetEncoders, GetEncodersResponse, RawMotors, RawMotorsResponse, SendInfraredMessage, 
+    SendInfraredMessageResponse, SetIREvading, SetIREvadingResponse, SetLEDRGB, SetLEDRGBResponse,
+    SetMultipleLEDs, SetMultipleLEDsResponse, GetSystemInfo, GetSystemInfoResponse,
+    GetControlState, GetControlStateResponse, SetDriveParameters, SetDriveParametersResponse,
+    ConfigureStreaming, ConfigureStreamingResponse, StartStreaming, StartStreamingResponse)
 
 # =======================================================
 # Variables globales
@@ -95,8 +100,6 @@ imu = Imu(header=Header(frame_id='imu'))
 # =======================================================
 # Variables de sensores
 # =======================================================
-yaw_north = 0
-calibration_completed = False
 color_enabled = False
 ir_mode = ""
 
@@ -118,6 +121,8 @@ pub_color = None
 pub_imu = None
 pub_ir_signal = None
 pub_ir_messages = None
+pub_encoder = None
+pub_infrared_message = None
 
 # =======================================================
 # Funciones de callback
@@ -382,6 +387,391 @@ def set_ir_mode_callback(req):
         return SetIRModeResponse(success=False, message="Modo de IR no reconocido")
 
 # =======================================================
+# Funciones de callback para nuevas funcionalidades
+# =======================================================
+
+
+def get_encoders_callback(req):
+    """
+    Callback para obtener los conteos actuales de los encoders.
+    """
+    try:
+        counts = asyncio.run(rvr.get_encoder_counts(timeout=1.0))
+        
+        return GetEncodersResponse(
+            success=True,
+            message="Lectura exitosa",
+            left_wheel_count=counts['encoder_counts'][0],
+            right_wheel_count=counts['encoder_counts'][1]
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error obteniendo encoders: {}'.format(rospy.get_name(), str(e)))
+        return GetEncodersResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            left_wheel_count=0,
+            right_wheel_count=0
+        )
+
+def raw_motors_callback(req):
+    """
+    Callback para control directo de motores.
+    """
+    global is_in_emergency_stop
+    
+    if is_in_emergency_stop:
+        return RawMotorsResponse(
+            success=False,
+            message="Robot en parada de emergencia"
+        )
+    
+    try:
+        # Validar parámetros
+        if not (0 <= req.left_speed <= 255) or not (0 <= req.right_speed <= 255):
+            return RawMotorsResponse(
+                success=False,
+                message="Velocidades deben estar entre 0 y 255"
+            )
+        
+        if not (0 <= req.left_mode <= 2) or not (0 <= req.right_mode <= 2):
+            return RawMotorsResponse(
+                success=False,
+                message="Modos deben ser 0=off, 1=forward, 2=reverse"
+            )
+        
+        # Ejecutar comando
+        asyncio.run(rvr.raw_motors(
+            req.left_mode, req.left_speed,
+            req.right_mode, req.right_speed
+        ))
+        
+        return RawMotorsResponse(
+            success=True,
+            message="Comando de motores ejecutado"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error en control de motores: {}'.format(rospy.get_name(), str(e)))
+        return RawMotorsResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def send_infrared_message_callback(req):
+    """
+    Callback para enviar mensaje IR personalizado.
+    """
+    try:
+        # Validar parámetros
+        if not (0 <= req.code <= 7):
+            return SendInfraredMessageResponse(
+                success=False,
+                message="Código IR debe estar entre 0 y 7"
+            )
+        
+        if not all(0 <= strength <= 64 for strength in [req.front_strength, req.left_strength, req.right_strength, req.rear_strength]):
+            return SendInfraredMessageResponse(
+                success=False,
+                message="Intensidades deben estar entre 0 y 64"
+            )
+        
+        # Enviar mensaje
+        asyncio.run(rvr.send_infrared_message(
+            req.code, req.front_strength, req.left_strength,
+            req.right_strength, req.rear_strength
+        ))
+        
+        return SendInfraredMessageResponse(
+            success=True,
+            message="Mensaje IR enviado"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error enviando mensaje IR: {}'.format(rospy.get_name(), str(e)))
+        return SendInfraredMessageResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def set_ir_evading_callback(req):
+    """
+    Callback para configurar modo de evasión IR.
+    """
+    try:
+        # Validar códigos
+        if not (0 <= req.far_code <= 7) or not (0 <= req.near_code <= 7):
+            return SetIREvadingResponse(
+                success=False,
+                message="Códigos IR deben estar entre 0 y 7"
+            )
+        
+        # Configurar modo evasión
+        asyncio.run(rvr.infrared_control.start_infrared_evading(
+            InfraredCodes(req.far_code), 
+            InfraredCodes(req.near_code)
+        ))
+        
+        rospy.loginfo('({}) Modo de evasión IR activado'.format(rospy.get_name()))
+        return SetIREvadingResponse(
+            success=True,
+            message="Modo de evasión IR activado"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error configurando modo evasión IR: {}'.format(rospy.get_name(), str(e)))
+        return SetIREvadingResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def set_led_rgb_callback(req):
+    """
+    Callback para controlar LED individual con RGB.
+    """
+    try:
+        # Validar parámetros
+        if not all(0 <= val <= 255 for val in [req.red, req.green, req.blue]):
+            return SetLEDRGBResponse(
+                success=False,
+                message="Valores RGB deben estar entre 0 y 255"
+            )
+        
+        # Controlar LED
+        asyncio.run(rvr.led_control.set_led_rgb(
+            req.led_id, req.red, req.green, req.blue
+        ))
+        
+        return SetLEDRGBResponse(
+            success=True,
+            message="LED controlado exitosamente"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error controlando LED: {}'.format(rospy.get_name(), str(e)))
+        return SetLEDRGBResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def set_multiple_leds_callback(req):
+    """
+    Callback para controlar múltiples LEDs simultáneamente.
+    """
+    try:
+        # Validar parámetros
+        if len(req.led_ids) != len(req.red_values) or len(req.led_ids) != len(req.green_values) or len(req.led_ids) != len(req.blue_values):
+            return SetMultipleLEDsResponse(
+                success=False,
+                message="Número de LEDs y valores RGB debe coincidir"
+            )
+        
+        if not all(0 <= val <= 255 for val in req.red_values + req.green_values + req.blue_values):
+            return SetMultipleLEDsResponse(
+                success=False,
+                message="Valores RGB deben estar entre 0 y 255"
+            )
+        
+        # Preparar datos
+        rgb_values = []
+        for i in range(len(req.led_ids)):
+            rgb_values.extend([req.red_values[i], req.green_values[i], req.blue_values[i]])
+        
+        # Controlar LEDs
+        asyncio.run(rvr.led_control.set_multiple_leds_with_rgb(
+            req.led_ids, rgb_values
+        ))
+        
+        return SetMultipleLEDsResponse(
+            success=True,
+            message="LEDs controlados exitosamente"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error controlando múltiples LEDs: {}'.format(rospy.get_name(), str(e)))
+        return SetMultipleLEDsResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def get_system_info_callback(req):
+    """
+    Callback para obtener información del sistema.
+    """
+    try:
+        # Obtener información básica del sistema
+        app_version = asyncio.run(rvr.get_main_application_version(1, timeout=1.0))
+        bootloader_version = asyncio.run(rvr.get_bootloader_version(1, timeout=1.0))
+        board_revision = asyncio.run(rvr.get_board_revision(timeout=1.0))
+        mac_address = asyncio.run(rvr.get_mac_address(timeout=1.0))
+        sku = asyncio.run(rvr.get_sku(timeout=1.0))
+        
+        # Crear mensaje de respuesta
+        system_info = SystemInfo()
+        system_info.app_major = app_version.get('major', 0)
+        system_info.app_minor = app_version.get('minor', 0)
+        system_info.app_revision = app_version.get('revision', 0)
+        system_info.bootloader_major = bootloader_version.get('major', 0)
+        system_info.bootloader_minor = bootloader_version.get('minor', 0)
+        system_info.bootloader_revision = bootloader_version.get('revision', 0)
+        system_info.board_revision = board_revision.get('revision', 0)
+        system_info.mac_address = mac_address.get('mac_address', 'Unknown')
+        system_info.sku = sku.get('sku', 'Unknown')
+        
+        # Obtener información adicional de forma segura
+        try:
+            uptime = asyncio.run(rvr.get_core_up_time_in_milliseconds(timeout=1.0))
+            system_info.uptime_ms = uptime.get('up_time', 0)
+        except:
+            system_info.uptime_ms = 0
+            
+        try:
+            processor_1_name = asyncio.run(rvr.get_processor_name(1, timeout=1.0))
+            system_info.processor_1_name = processor_1_name.get('name', 'Unknown')
+        except:
+            system_info.processor_1_name = 'Unknown'
+            
+        try:
+            processor_2_name = asyncio.run(rvr.get_processor_name(2, timeout=1.0))
+            system_info.processor_2_name = processor_2_name.get('name', 'Unknown')
+        except:
+            system_info.processor_2_name = 'Unknown'
+        
+        return GetSystemInfoResponse(
+            success=True,
+            message="Información del sistema obtenida",
+            system_info=system_info
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error obteniendo información del sistema: {}'.format(rospy.get_name(), str(e)))
+        # Crear respuesta con valores por defecto
+        system_info = SystemInfo()
+        system_info.app_major = 0
+        system_info.app_minor = 0
+        system_info.app_revision = 0
+        system_info.bootloader_major = 0
+        system_info.bootloader_minor = 0
+        system_info.bootloader_revision = 0
+        system_info.board_revision = 0
+        system_info.mac_address = 'Unknown'
+        system_info.sku = 'Unknown'
+        system_info.uptime_ms = 0
+        system_info.processor_1_name = 'Unknown'
+        system_info.processor_2_name = 'Unknown'
+        
+        return GetSystemInfoResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            system_info=system_info
+        )
+
+def get_control_state_callback(req):
+    """
+    Callback para obtener el estado del sistema de control.
+    """
+    try:
+        # Obtener estado del control
+        active_controller = asyncio.run(rvr.get_active_control_system_id(timeout=1.0))
+        stop_state = asyncio.run(rvr.get_stop_controller_state(timeout=1.0))
+        motor_fault = asyncio.run(rvr.get_motor_fault_state(timeout=1.0))
+        
+        # Crear mensaje de respuesta
+        control_state = ControlState()
+        control_state.active_controller_id = active_controller['controller_id']
+        control_state.is_stopped = stop_state['stopped']
+        control_state.motor_fault = motor_fault['is_fault']
+        control_state.is_driving = is_driving_with_cmd_vel
+        
+        return GetControlStateResponse(
+            success=True,
+            message="Estado de control obtenido",
+            control_state=control_state
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error obteniendo estado de control: {}'.format(rospy.get_name(), str(e)))
+        return GetControlStateResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            control_state=ControlState()
+        )
+
+def set_drive_parameters_callback(req):
+    """
+    Callback para configurar parámetros de control de conducción.
+    """
+    try:
+        # Configurar parámetros
+        asyncio.run(rvr.set_drive_target_slew_parameters(
+            req.a, req.b, req.c, req.linear_acceleration, req.linear_velocity_slew_method
+        ))
+        
+        rospy.loginfo('({}) Parámetros de conducción configurados'.format(rospy.get_name()))
+        return SetDriveParametersResponse(
+            success=True,
+            message="Parámetros configurados exitosamente"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error configurando parámetros de conducción: {}'.format(rospy.get_name(), str(e)))
+        return SetDriveParametersResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def configure_streaming_callback(req):
+    """
+    Callback para configurar servicios de streaming personalizados.
+    """
+    try:
+        # Configurar streaming
+        asyncio.run(rvr.configure_streaming_service(
+            req.token, req.configuration, req.target
+        ))
+        
+        rospy.loginfo('({}) Streaming configurado para target {}'.format(rospy.get_name(), req.target))
+        return ConfigureStreamingResponse(
+            success=True,
+            message="Streaming configurado exitosamente"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error configurando streaming: {}'.format(rospy.get_name(), str(e)))
+        return ConfigureStreamingResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def start_streaming_callback(req):
+    """
+    Callback para iniciar streaming con período personalizado.
+    """
+    try:
+        # Iniciar streaming
+        asyncio.run(rvr.start_streaming_service(
+            req.period, req.target
+        ))
+        
+        rospy.loginfo('({}) Streaming iniciado con período {}ms para target {}'.format(rospy.get_name(), req.period, req.target))
+        return StartStreamingResponse(
+            success=True,
+            message="Streaming iniciado exitosamente"
+        )
+        
+    except Exception as e:
+        rospy.logerr('({}) Error iniciando streaming: {}'.format(rospy.get_name(), str(e)))
+        return StartStreamingResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+# =======================================================
+# Funciones asíncronas auxiliares
+# =======================================================
+
+
+# =======================================================
 # Funciones de manejo de sensores
 # =======================================================
 async def locator_handler(locator_data):
@@ -547,6 +937,38 @@ async def light_handler(light_data):
     # Publica el mensaje en el tópico '/illuminance'.
     if pub_light is not None:
         pub_light.publish(msg)
+
+
+async def encoder_handler(encoder_data):
+    """
+    Maneja los datos de los encoders.
+    
+    Publica los datos de los encoders en el tópico /encoders.
+    """
+    global pub_encoder
+    
+    if pub_encoder is not None:
+        msg = Encoder()
+        msg.left_wheel_count = encoder_data['Encoders']['Left']
+        msg.right_wheel_count = encoder_data['Encoders']['Right']
+        pub_encoder.publish(msg)
+
+async def infrared_message_handler(infrared_data):
+    """
+    Maneja los mensajes IR recibidos.
+    
+    Publica los mensajes IR recibidos en el tópico /infrared_messages.
+    """
+    global pub_infrared_message
+    
+    if pub_infrared_message is not None:
+        msg = InfraredMessage()
+        msg.code = infrared_data['InfraredMessage']['Code']
+        msg.front_strength = infrared_data['InfraredMessage']['FrontStrength']
+        msg.left_strength = infrared_data['InfraredMessage']['LeftStrength']
+        msg.right_strength = infrared_data['InfraredMessage']['RightStrength']
+        msg.rear_strength = infrared_data['InfraredMessage']['RearStrength']
+        pub_infrared_message.publish(msg)
 
 
 #TODO: Revisar este handler
@@ -716,6 +1138,15 @@ async def reset_sensors():
         service=RvrStreamingServices.ambient_light,
         handler=light_handler,
     )
+    
+    # 9. Encoders
+    try:
+        await rvr.sensor_control.add_sensor_data_handler(
+            service=RvrStreamingServices.encoders,
+            handler=encoder_handler,
+        )
+    except Exception as e:
+        rospy.logwarn('({}) Encoders no disponibles: {}'.format(rospy.get_name(), str(e)))
     # 8. Resultado de drive
     await rvr.on_xy_position_drive_result_notify(
         handler=on_xy_handler
@@ -733,6 +1164,16 @@ async def reset_sensors():
     await rvr.on_will_sleep_notify(
         handler=will_sleep_handler
     )
+    
+    # Habilitar notificaciones de mensajes IR
+    try:
+        await rvr.enable_robot_infrared_message_notify(is_enabled=True)
+        await rvr.on_robot_to_robot_infrared_message_received_notify(
+            handler=infrared_message_handler
+        )
+    except Exception as e:
+        rospy.logwarn('({}) Notificaciones IR no disponibles: {}'.format(rospy.get_name(), str(e)))
+    
 
     # Se inicia el flujo de los sensores con un intervalo de 250ms
     await rvr.sensor_control.start(interval=250)
@@ -1046,6 +1487,10 @@ if __name__ == '__main__':
     pub_color = rospy.Publisher('color', Color, queue_size=10)
     pub_imu = rospy.Publisher('imu', Imu, queue_size=10)
     pub_ir_messages = rospy.Publisher('ir_messages', String, queue_size=10)
+    
+    # Nuevos publishers para funcionalidades adicionales
+    pub_encoder = rospy.Publisher('encoders', Encoder, queue_size=10)
+    pub_infrared_message = rospy.Publisher('infrared_messages', InfraredMessage, queue_size=10)
 
     # Crea los subscribers para los tópicos /cmd_vel, /cmd_degrees y /is_emergency_stop
     rospy.Subscriber('cmd_vel', Twist, cmd_vel_callback, queue_size=1)
@@ -1060,6 +1505,19 @@ if __name__ == '__main__':
     rospy.Service('reset_odom', std_srvs.srv.Empty, reset_odom_callback)
     rospy.Service('release_emergency_stop', std_srvs.srv.Empty, release_emergency_stop_callback)
     rospy.Service('ir_mode', SetIRMode, set_ir_mode_callback)
+    
+    # Nuevos servicios para funcionalidades adicionales
+    rospy.Service('get_encoders', GetEncoders, get_encoders_callback)
+    rospy.Service('raw_motors', RawMotors, raw_motors_callback)
+    rospy.Service('send_infrared_message', SendInfraredMessage, send_infrared_message_callback)
+    rospy.Service('set_ir_evading', SetIREvading, set_ir_evading_callback)
+    rospy.Service('set_led_rgb', SetLEDRGB, set_led_rgb_callback)
+    rospy.Service('set_multiple_leds', SetMultipleLEDs, set_multiple_leds_callback)
+    rospy.Service('get_system_info', GetSystemInfo, get_system_info_callback)
+    rospy.Service('get_control_state', GetControlState, get_control_state_callback)
+    rospy.Service('set_drive_parameters', SetDriveParameters, set_drive_parameters_callback)
+    rospy.Service('configure_streaming', ConfigureStreaming, configure_streaming_callback)
+    rospy.Service('start_streaming', StartStreaming, start_streaming_callback)
         
     # Inicializa el Flag de stop de emergencia en False
     set_emergency_stop(False)

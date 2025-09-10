@@ -52,6 +52,10 @@ add_message_files(
   FILES
   Color.msg
   DegreesTwist.msg
+  Encoder.msg
+  InfraredMessage.msg
+  SystemInfo.msg
+  ControlState.msg
 )
 
 add_service_files(
@@ -63,6 +67,17 @@ add_service_files(
   BatteryState.srv
   SetPosAndYaw.srv
   TriggerLedEvent.srv
+  GetEncoders.srv
+  RawMotors.srv
+  SendInfraredMessage.srv
+  SetIREvading.srv
+  SetLEDRGB.srv
+  SetMultipleLEDs.srv
+  GetSystemInfo.srv
+  GetControlState.srv
+  SetDriveParameters.srv
+  ConfigureStreaming.srv
+  StartStreaming.srv
 )
 
 ## Generate services in the 'srv' folder

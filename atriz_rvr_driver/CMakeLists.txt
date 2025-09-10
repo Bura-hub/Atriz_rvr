@@ -28,7 +28,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   rospy
   message_generation
-  serial
+  atriz_rvr_serial
   tf
   )
 
@@ -38,7 +38,7 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_package(
   #  INCLUDE_DIRS include
-  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime serial
+  CATKIN_DEPENDS roscpp rospy std_msgs message_runtime atriz_rvr_serial
   #  DEPENDS system_lib
 )
 
@@ -49,24 +49,24 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-  ${PROJECT_ROOT}/rvr++/include
+  ${PROJECT_ROOT}/src/rvr++/include
   ${catkin_INCLUDE_DIRS}
 )
 
 set(RVRSOURCES
-  ${PROJECT_ROOT}/rvr++/src/SerialPort.cpp
-  ${PROJECT_ROOT}/rvr++/src/SensorsStream.cpp
-  ${PROJECT_ROOT}/rvr++/src/Response.cpp
-  ${PROJECT_ROOT}/rvr++/src/Request.cpp
-  ${PROJECT_ROOT}/rvr++/src/ApiAndConn.cpp
-  ${PROJECT_ROOT}/rvr++/src/Drive.cpp
-  ${PROJECT_ROOT}/rvr++/src/Blackboard.cpp
-  ${PROJECT_ROOT}/rvr++/src/SensorsDirect.cpp
-  ${PROJECT_ROOT}/rvr++/src/SendPacket.cpp
-  ${PROJECT_ROOT}/rvr++/src/SystemInfo.cpp
-  ${PROJECT_ROOT}/rvr++/src/Power.cpp
-  ${PROJECT_ROOT}/rvr++/src/ReadPacket.cpp
-  ${PROJECT_ROOT}/rvr++/src/IoLed.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/SerialPort.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/SensorsStream.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/Response.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/Request.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/ApiAndConn.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/Drive.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/Blackboard.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/SensorsDirect.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/SendPacket.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/SystemInfo.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/Power.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/ReadPacket.cpp
+  ${PROJECT_ROOT}/src/rvr++/src/IoLed.cpp
   )
 
 

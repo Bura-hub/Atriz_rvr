@@ -5,7 +5,7 @@ import tf2_ros
 import geometry_msgs.msg
 from geometry_msgs.msg import Twist, Quaternion, TransformStamped
 from nav_msgs.msg import Odometry
-from sphero_rvr_msgs.srv import SetPosAndYaw
+from atriz_rvr_msgs.srv import SetPosAndYaw
 import math  
 
 class RvizRvR:

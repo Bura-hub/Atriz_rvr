@@ -1,6 +1,6 @@
 import rospy
 import asyncio
-from sphero_rvr_msgs.srv import SetLeds, SetLedsResponse, \
+from atriz_rvr_msgs.srv import SetLeds, SetLedsResponse, \
                                 TriggerLedEvent, TriggerLedEventRequest, TriggerLedEventResponse
 from sphero_sdk import Colors
 

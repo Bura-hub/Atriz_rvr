@@ -56,11 +56,11 @@ from geometry_msgs.msg import PoseWithCovariance, Pose, TwistWithCovariance, Twi
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Header, String, Bool
-from sphero_rvr_msgs.msg import Color, DegreesTwist, Encoder, InfraredMessage, SystemInfo, ControlState
+from atriz_rvr_msgs.msg import Color, DegreesTwist, Encoder, InfraredMessage, SystemInfo, ControlState
 from sensor_msgs.msg import Illuminance
 import std_srvs.srv
 import rvr_tools
-from sphero_rvr_msgs.srv import (
+from atriz_rvr_msgs.srv import (
     SetIRMode, SetIRModeResponse, MoveToPose, MoveToPoseResponse, MoveToPosAndYaw,
     MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest,
     GetEncoders, GetEncodersResponse, RawMotors, RawMotorsResponse, SendInfraredMessage, 

@@ -7,7 +7,7 @@ Este script usa el nuevo tópico /cmd_degrees que recibe comandos en grados/segu
 
 import rospy
 import time
-from sphero_rvr_msgs.msg import DegreesTwist
+from atriz_rvr_msgs.msg import DegreesTwist
 
 def send_degrees_command(linear_x, angular_z_deg_s, duration=0):
     """

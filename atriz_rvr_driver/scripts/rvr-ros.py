@@ -39,11 +39,11 @@ from geometry_msgs.msg import PoseWithCovariance, \
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Header
 from std_msgs.msg import String
-from sphero_rvr_msgs.srv import MoveToPose, MoveToPoseResponse, \
+from atriz_rvr_msgs.srv import MoveToPose, MoveToPoseResponse, \
                                 MoveToPosAndYaw, MoveToPosAndYawResponse, \
                                 BatteryState, BatteryStateResponse, \
                                 TriggerLedEventRequest
-from sphero_rvr_msgs.msg import Color
+from atriz_rvr_msgs.msg import Color
 from sensor_msgs.msg import Illuminance
 import std_srvs.srv
 from std_msgs.msg import Bool

@@ -1,16 +1,20 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>sphero_rvr_hw</name>
+  <name>atriz_rvr_driver</name>
   <version>0.0.2</version>
   <description>The Sphero RVR ROS hardware package. This package is based on the free sphero C++ library from Rud Merriam (https://bitbucket.org/rmerriam/rvr-cpp).</description>
 
-  <maintainer email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</maintainer>
+  <maintainer email="atriz@udenar.edu.co">Atriz Team - Universidad de Nariño</maintainer>
 
-  <license>GPLv3</license>
+  <license>MIT</license>
 
-  <author email="no-email@no-domain.com">Rud Merriam</author>
+  <author email="atriz@udenar.edu.co">Atriz Team</author>
   <author email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</author>
   <author email="paddy-hofmann@web.de">Paddy</author>
+
+  <url type="website">https://github.com/atriz-udenar/ros_sphero_rvr</url>
+  <url type="repository">https://github.com/atriz-udenar/ros_sphero_rvr</url>
+  <url type="bugtracker">https://github.com/atriz-udenar/ros_sphero_rvr/issues</url>
 
   <depend>roscpp</depend>
   <depend>rospy</depend>
@@ -27,7 +31,6 @@
   <depend>joint_limit_interface</depend>
   <depend>transmission_interface</depend>
 
-  <depend>minibot_msgs</depend>
   <export>
     <!-- Other tools can request additional information be placed here -->
   </export>

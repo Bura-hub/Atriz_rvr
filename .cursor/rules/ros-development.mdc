@@ -1,0 +1,72 @@
+---
+globs: *.launch,*.xml,*.yaml,*.py,*.cpp,*.h
+---
+
+# ROS Development Guidelines
+
+## ROS Package Structure
+- Follow standard ROS package layout with `src/`, `scripts/`, `launch/`, `config/` directories
+- Use descriptive package names following ROS naming conventions
+- Include proper `package.xml` with dependencies and metadata
+- Use `CMakeLists.txt` for C++ packages and `setup.py` for Python packages
+
+## Message and Service Definitions
+- Define custom messages in `msg/` directory with `.msg` files
+- Define custom services in `srv/` directory with `.srv` files
+- Use descriptive names for message fields
+- Follow ROS message naming conventions (snake_case)
+
+## Launch Files
+- Use descriptive launch file names
+- Include proper XML structure with `<launch>` tags
+- Use parameters for configuration instead of hardcoded values
+- Include proper namespacing when needed
+- Add comments explaining launch file purpose
+
+## Node Communication
+- Use appropriate message types for different data
+- Implement proper error handling for service calls
+- Use proper queue sizes for publishers and subscribers
+- Handle node shutdown gracefully
+
+## Configuration Management
+- Use ROS parameters for configuration
+- Store configuration in YAML files when possible
+- Use parameter servers for dynamic configuration
+- Document all configurable parameters
+
+## Safety and Error Handling
+- Implement emergency stop mechanisms
+- Use proper timeout handling for service calls
+- Log important events and errors
+- Implement graceful degradation when hardware is unavailable
+
+## Example Launch File Structure
+```xml
+<launch>
+  <!-- Node configuration -->
+  <node name="sphero_rvr_node" pkg="sphero_rvr_hw" type="Atriz_rvr_node.py" output="screen">
+    <param name="device_path" value="/dev/ttyUSB0" />
+    <param name="publish_rate" value="15.0" />
+  </node>
+  
+  <!-- Include other launch files -->
+  <include file="$(find sphero_rvr_hw)/launch/hw_controller.launch" />
+</launch>
+```
+
+## Example Service Definition
+```python
+# Service file: MoveToPose.srv
+geometry_msgs/Pose target_pose
+float32 timeout
+---
+bool success
+string message
+```
+
+## Hardware Interface Guidelines
+- Implement proper hardware abstraction
+- Use controller manager for robot control
+- Handle hardware initialization and cleanup
+- Implement proper error recovery mechanisms

@@ -67,16 +67,16 @@ launch_driver() {
     print_message "Lanzando driver Atriz RVR..."
     
     # Verificar que el archivo del driver existe
-    if [ ! -f "$PROJECT_ROOT/sphero_rvr_hw/scripts/Atriz_rvr_node.py" ]; then
+    if [ ! -f "$PROJECT_ROOT/atriz_rvr_driver/scripts/Atriz_rvr_node.py" ]; then
         print_error "No se encontró el archivo Atriz_rvr_node.py"
         exit 1
     fi
     
     # Hacer el archivo ejecutable
-    chmod +x "$PROJECT_ROOT/sphero_rvr_hw/scripts/Atriz_rvr_node.py"
+    chmod +x "$PROJECT_ROOT/atriz_rvr_driver/scripts/Atriz_rvr_node.py"
     
     # Lanzar el driver en background
-    python3 "$PROJECT_ROOT/sphero_rvr_hw/scripts/Atriz_rvr_node.py" &
+    python3 "$PROJECT_ROOT/atriz_rvr_driver/scripts/Atriz_rvr_node.py" &
     DRIVER_PID=$!
     
     print_message "Driver lanzado con PID: $DRIVER_PID"

@@ -7,7 +7,7 @@ Este documento detalla las correcciones realizadas para resolver los errores del
 ### **1. Problemas de Importación del SDK de Sphero**
 - **Error**: `ModuleNotFoundError: No module named 'sphero_sdk'`
 - **Solución**: Creado `sphero_sdk_config.py` para configurar automáticamente las rutas del SDK
-- **Archivos**: `scripts/core/sphero_sdk_config.py`
+- **Archivos**: `atriz_rvr_driver/scripts/sphero_sdk_config.py`
 
 ### **2. Problemas con tf.transformations**
 - **Error**: `"transformations" no es un atributo conocido del módulo "tf"`
@@ -66,7 +66,7 @@ def setup_sphero_sdk_path():
 {
   "extraPaths": [
     "./atriz_rvr_driver/scripts",
-    "./scripts/core",
+    "./atriz_rvr_driver/scripts",
     "/opt/ros/noetic/lib/python3/dist-packages"
   ],
   "reportAttributeAccessIssue": "none",
@@ -89,7 +89,7 @@ disable=import-error,no-name-in-module
 {
   "python.analysis.extraPaths": [
     "./atriz_rvr_driver/scripts",
-    "./scripts/core"
+    "./atriz_rvr_driver/scripts"
   ]
 }
 ```
@@ -164,7 +164,7 @@ asyncio.create_task(rvr.close())
 
 ### **Ejecutar el Driver:**
 ```bash
-python3 ./scripts/core/Atriz_rvr_node.py
+python3 ./atriz_rvr_driver/scripts/Atriz_rvr_node.py
 ```
 
 ### **Verificar Importaciones:**

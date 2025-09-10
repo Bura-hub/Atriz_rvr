@@ -18,14 +18,14 @@ def restart_callback(req):
 
     # get rospy namespace
     os.system(  f'export ROS_NAMESPACE={rospy.get_namespace()}/rvr/; ' \
-                f'roslaunch sphero_rvr_hw restart_hw_controller.launch ' \
+                f'roslaunch atriz_rvr_driver restart_hw_controller.launch ' \
                 f'pub_odom_as_tf:={pub_odom_as_tf} as_simulation:={as_simulation} as_visualization:={as_visualization} robot_name:={robot_name} &'
     )
 
     # kill old node
     #os.system(f"rosnode kill {rospy.get_namespace()}rvr/ros_interface")
     #time.sleep(2)
-    #os.system('roslaunch sphero_rvr_hw hw_controller.launch &')
+    #os.system('roslaunch atriz_rvr_driver hw_controller.launch &')
 
     return EmptyResponse()
 

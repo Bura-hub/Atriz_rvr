@@ -11,4 +11,4 @@ roscore > /home/sphero/roscore.log 2>&1 &
 sleep 5
 
 # Iniciar el nodo ROS
-rosrun sphero_rvr_hw Atriz_rvr_node.py > /home/sphero/rosrun.log 2>&1 &
+rosrun atriz_rvr_driver Atriz_rvr_node.py > /home/sphero/rosrun.log 2>&1 &

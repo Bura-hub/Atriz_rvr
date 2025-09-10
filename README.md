@@ -42,6 +42,7 @@ atriz_git/src/ros_sphero_rvr/
 ├── 📁 atriz_rvr_driver/                   # 📦 Driver principal ROS
 │   ├── package.xml                        # Metadatos del paquete
 │   ├── setup.py                           # Configuración Python
+│   ├── CMakeLists.txt                     # Configuración de build
 │   └── scripts/                           # Scripts del driver
 │       ├── cmd_vel_rviz.py               # Control RViz
 │       ├── degrees_control_example.py    # Ejemplo de grados
@@ -63,18 +64,13 @@ atriz_git/src/ros_sphero_rvr/
 │   ├── README.md                          # Guía de scripts
 │   ├── core/                              # Scripts principales
 │   │   ├── Atriz_rvr_node.py             # Driver principal (ÚNICO)
-│   │   ├── sphero_sdk_config.py           # Configuración del SDK
-│   │   ├── emergency_stop.py              # Parada de emergencia
-│   │   └── rvr-ros-restarter.py          # Reiniciador automático
+│   │   └── sphero_sdk_config.py           # Configuración del SDK
 │   ├── examples/                          # Ejemplos de uso
-│   │   ├── degrees_control_example.py    # Control por grados
-│   │   ├── example_degrees_control.py    # Ejemplo de grados
+│   │   ├── example_encoder_test.py       # Prueba de encoders
 │   │   ├── random_walking.py             # Caminata aleatoria
 │   │   └── rvr_joystick_control.py       # Control con joystick
 │   ├── tools/                             # Herramientas
-│   │   ├── cmd_vel_rviz.py               # Control RViz
-│   │   ├── color_listener.py             # Listener de color
-│   │   └── rvr_tools.py                  # Herramientas generales
+│   │   └── color_listener.py             # Listener de color
 │   └── utilities/                         # Utilidades
 │       └── test_both_topics.py           # Prueba de ambos tópicos
 └── 📁 testing_scripts/                    # 🧪 Suite completa de pruebas
@@ -83,7 +79,9 @@ atriz_git/src/ros_sphero_rvr/
     │   ├── test_atriz_rvr_driver.py      # Pruebas del driver
     │   └── run_complete_tests.py         # Pruebas completas
     ├── interactive/                       # Pruebas interactivas
-    │   └── test_individual_functions.py  # Pruebas individuales
+    │   ├── test_individual_functions.py  # Pruebas individuales
+    │   ├── test_interactive.py           # Pruebas interactivas
+    │   └── test_corrected.py             # Pruebas corregidas
     ├── diagnostic/                        # Diagnóstico del sistema
     │   └── diagnose_system.py            # Diagnóstico completo
     └── launch/                            # Scripts de lanzamiento
@@ -136,7 +134,7 @@ python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; pr
 ./start_ros.sh
 
 # Opción 2: Ejecutar directamente
-python3 ./scripts/core/Atriz_rvr_node.py
+python3 ./atriz_rvr_driver/scripts/Atriz_rvr_node.py
 ```
 
 ## ⚙️ Requisitos Previos
@@ -437,7 +435,7 @@ rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.3, linear_y
 
 3. **Ejecutar el driver:**
    ```bash
-   python3 ./scripts/core/Atriz_rvr_node.py
+   python3 ./atriz_rvr_driver/scripts/Atriz_rvr_node.py
    ```
 
 4. **Probar control en grados:**

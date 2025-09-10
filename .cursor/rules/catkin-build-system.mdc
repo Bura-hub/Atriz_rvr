@@ -1,0 +1,424 @@
+---
+globs: CMakeLists.txt,package.xml,setup.py,*.cmake
+description: Guidelines for catkin build system and package management
+---
+
+# Catkin Build System and Package Management Guidelines
+
+## Package Structure and Organization
+
+### Standard ROS Package Layout
+```
+sphero_rvr_hw/
+├── CMakeLists.txt          # Build configuration
+├── package.xml             # Package metadata and dependencies
+├── setup.py                # Python package setup
+├── scripts/                # Executable Python scripts
+│   ├── Atriz_rvr_node.py
+│   ├── emergency_stop.py
+│   └── rvr_tools.py
+├── src/                    # C++ source files
+│   └── sphero_rvr_hw.cpp
+├── include/                # C++ header files
+│   └── sphero_rvr_hw/
+│       └── sphero_rvr_hw.h
+├── launch/                 # Launch files
+│   ├── sphero_rvr.launch
+│   └── simulation.launch
+├── config/                 # Configuration files
+│   ├── sphero_rvr_params.yaml
+│   └── controllers.yaml
+├── msg/                    # Custom message definitions
+│   └── RobotStatus.msg
+├── srv/                    # Custom service definitions
+│   └── SetLEDColor.srv
+└── action/                 # Custom action definitions
+    └── MoveToPose.action
+```
+
+## CMakeLists.txt Configuration
+
+### Basic CMakeLists.txt Template
+```cmake
+cmake_minimum_required(VERSION 3.0.2)
+project(sphero_rvr_hw)
+
+# Find catkin and required packages
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  rospy
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+  tf
+  tf2_ros
+  message_generation
+  message_runtime
+  controller_manager
+  hardware_interface
+  joint_state_interface
+  velocity_controllers
+)
+
+# Generate messages, services, and actions
+add_message_files(
+  FILES
+  RobotStatus.msg
+  DriveCommand.msg
+)
+
+add_service_files(
+  FILES
+  SetLEDColor.srv
+  ConfigureSensors.srv
+)
+
+add_action_files(
+  FILES
+  MoveToPose.action
+)
+
+# Generate message/service/action code
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+  nav_msgs
+)
+
+# Catkin package configuration
+catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES sphero_rvr_hw
+  CATKIN_DEPENDS
+    roscpp
+    rospy
+    std_msgs
+    geometry_msgs
+    sensor_msgs
+    nav_msgs
+    tf
+    tf2_ros
+    message_runtime
+    controller_manager
+    hardware_interface
+    joint_state_interface
+    velocity_controllers
+  DEPENDS system_lib
+)
+
+# Include directories
+include_directories(
+  include
+  ${catkin_INCLUDE_DIRS}
+)
+
+# C++ library
+add_library(${PROJECT_NAME}
+  src/sphero_rvr_hw.cpp
+  src/sphero_rvr_controller.cpp
+)
+
+# Link libraries
+target_link_libraries(${PROJECT_NAME}
+  ${catkin_LIBRARIES}
+)
+
+# Install rules
+install(TARGETS ${PROJECT_NAME}
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+)
+
+install(DIRECTORY launch config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+```
+
+### Advanced CMakeLists.txt Features
+```cmake
+# Find additional packages
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SPHERO_SDK REQUIRED sphero-sdk)
+
+# Compiler flags
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Add compiler-specific flags
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# Debug/Release configurations
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  add_compile_definitions(DEBUG_BUILD)
+  add_compile_options(-g -O0)
+else()
+  add_compile_options(-O2)
+endif()
+
+# Conditional compilation
+option(ENABLE_SIMULATION "Enable simulation mode" OFF)
+if(ENABLE_SIMULATION)
+  add_compile_definitions(SIMULATION_MODE)
+endif()
+
+# External dependencies
+find_library(SERIAL_LIB serial)
+if(NOT SERIAL_LIB)
+  message(FATAL_ERROR "Serial library not found")
+endif()
+
+# Link external libraries
+target_link_libraries(${PROJECT_NAME}
+  ${catkin_LIBRARIES}
+  ${SERIAL_LIB}
+  ${SPHERO_SDK_LIBRARIES}
+)
+```
+
+## Package.xml Configuration
+
+### Complete Package.xml Template
+```xml
+<?xml version="1.0"?>
+<package format="2">
+  <name>sphero_rvr_hw</name>
+  <version>1.0.0</version>
+  <description>Hardware interface and controllers for Sphero RVR robot</description>
+
+  <maintainer email="developer@example.com">Developer Name</maintainer>
+  <license>MIT</license>
+  <url type="website">https://github.com/example/sphero_rvr_hw</url>
+  <url type="repository">https://github.com/example/sphero_rvr_hw.git</url>
+  <url type="bugtracker">https://github.com/example/sphero_rvr_hw/issues</url>
+
+  <author email="developer@example.com">Developer Name</author>
+
+  <!-- Build dependencies -->
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>rospy</build_depend>
+  <build_depend>std_msgs</build_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>nav_msgs</build_depend>
+  <build_depend>tf</build_depend>
+  <build_depend>tf2_ros</build_depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>controller_manager</build_depend>
+  <build_depend>hardware_interface</build_depend>
+  <build_depend>joint_state_interface</build_depend>
+  <build_depend>velocity_controllers</build_depend>
+
+  <!-- Build export dependencies -->
+  <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>rospy</build_export_depend>
+  <build_export_depend>std_msgs</build_export_depend>
+  <build_export_depend>geometry_msgs</build_export_depend>
+  <build_export_depend>sensor_msgs</build_export_depend>
+  <build_export_depend>nav_msgs</build_export_depend>
+  <build_export_depend>tf</build_export_depend>
+  <build_export_depend>tf2_ros</build_export_depend>
+  <build_export_depend>message_runtime</build_export_depend>
+  <build_export_depend>controller_manager</build_export_depend>
+  <build_export_depend>hardware_interface</build_export_depend>
+  <build_export_depend>joint_state_interface</build_export_depend>
+  <build_export_depend>velocity_controllers</build_export_depend>
+
+  <!-- Execution dependencies -->
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>hardware_interface</exec_depend>
+  <exec_depend>joint_state_interface</exec_depend>
+  <exec_depend>velocity_controllers</exec_depend>
+
+  <!-- Test dependencies -->
+  <test_depend>rostest</test_depend>
+  <test_depend>rosunit</test_depend>
+
+  <!-- Export information -->
+  <export>
+    <!-- Other tools can request additional information be placed here -->
+  </export>
+</package>
+```
+
+## Python Package Setup
+
+### setup.py Configuration
+```python
+#!/usr/bin/env python3
+
+from distutils.core import setup
+from catkin_pkg.python_setup import generate_distutils_setup
+
+# Fetch values from package.xml
+setup_args = generate_distutils_setup(
+    packages=['sphero_rvr_hw'],
+    package_dir={'': 'src'},
+    install_requires=[
+        'rospy',
+        'geometry_msgs',
+        'sensor_msgs',
+        'nav_msgs',
+        'std_msgs',
+        'tf',
+        'tf2_ros',
+        'controller_manager',
+        'hardware_interface',
+        'joint_state_interface',
+        'velocity_controllers',
+    ],
+    scripts=[
+        'scripts/Atriz_rvr_node.py',
+        'scripts/emergency_stop.py',
+        'scripts/rvr_tools.py',
+        'scripts/cmd_vel_rviz.py',
+    ],
+)
+
+setup(**setup_args)
+```
+
+## Build System Best Practices
+
+### Workspace Organization
+```bash
+# Catkin workspace structure
+catkin_ws/
+├── src/                    # Source packages
+│   ├── sphero_rvr_hw/
+│   ├── sphero_rvr_msgs/
+│   └── sphero_rvr_launch/
+├── build/                  # Build artifacts
+├── devel/                  # Development environment
+└── install/                # Installation directory
+```
+
+### Build Commands and Workflow
+```bash
+# Initialize workspace
+mkdir -p catkin_ws/src
+cd catkin_ws/src
+catkin_init_workspace
+
+# Clone packages
+git clone <repository_url> sphero_rvr_hw
+
+# Build workspace
+cd ..
+catkin_make
+
+# Source environment
+source devel/setup.bash
+
+# Build specific package
+catkin_make --pkg sphero_rvr_hw
+
+# Build with specific configuration
+catkin_make -DCMAKE_BUILD_TYPE=Release
+catkin_make -DENABLE_SIMULATION=ON
+
+# Clean build
+catkin_make clean
+```
+
+### Dependency Management
+```bash
+# Install system dependencies
+sudo apt-get install ros-noetic-controller-manager
+sudo apt-get install ros-noetic-hardware-interface
+sudo apt-get install ros-noetic-joint-state-interface
+sudo apt-get install ros-noetic-velocity-controllers
+
+# Install Python dependencies
+pip3 install sphero-sdk
+pip3 install pyserial
+
+# Check package dependencies
+rosdep check sphero_rvr_hw
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+## Testing and Validation
+
+### Unit Testing Setup
+```cmake
+# Add testing to CMakeLists.txt
+if(CATKIN_ENABLE_TESTING)
+  find_package(rostest REQUIRED)
+  
+  # Add test executables
+  add_executable(test_sphero_rvr_hw test/test_sphero_rvr_hw.cpp)
+  target_link_libraries(test_sphero_rvr_hw ${PROJECT_NAME} ${catkin_LIBRARIES})
+  
+  # Add rostest
+  add_rostest(test/test_sphero_rvr_hw.test)
+endif()
+```
+
+### Integration Testing
+```xml
+<!-- test/test_sphero_rvr_hw.test -->
+<launch>
+  <test test-name="test_sphero_rvr_hw" pkg="sphero_rvr_hw" type="test_sphero_rvr_hw" />
+</launch>
+```
+
+## Deployment and Installation
+
+### Installation Scripts
+```bash
+#!/bin/bash
+# install_sphero_rvr_hw.sh
+
+# Install system dependencies
+sudo apt-get update
+sudo apt-get install -y ros-noetic-controller-manager
+sudo apt-get install -y ros-noetic-hardware-interface
+
+# Install Python dependencies
+pip3 install sphero-sdk pyserial
+
+# Build and install package
+cd /path/to/catkin_ws
+catkin_make
+source devel/setup.bash
+
+# Install to system
+sudo catkin_make install
+```
+
+### Package Validation
+```bash
+# Validate package.xml
+rospack check sphero_rvr_hw
+
+# Check package dependencies
+rosdep check sphero_rvr_hw
+
+# Validate launch files
+roslaunch sphero_rvr_hw sphero_rvr.launch --screen
+
+# Test package installation
+rospack find sphero_rvr_hw
+rosrun sphero_rvr_hw Atriz_rvr_node.py --help
+```

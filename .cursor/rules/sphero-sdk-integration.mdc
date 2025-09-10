@@ -1,0 +1,80 @@
+---
+description: Guidelines for Sphero SDK integration and robot control
+---
+
+# Sphero SDK Integration Guidelines
+
+## SDK Usage Patterns
+- Use `SpheroRvrAsync` for asynchronous robot control
+- Implement proper connection management with `SerialAsyncDal`
+- Use `RvrStreamingServices` for sensor data streaming
+- Handle robot wake/sleep states appropriately
+
+## Connection Management
+```python
+# Proper connection setup
+async def setup_rvr_connection():
+    rvr = SpheroRvrAsync()
+    await rvr.connect()
+    await rvr.wake()
+    return rvr
+
+# Proper cleanup
+async def cleanup_rvr_connection(rvr):
+    await rvr.sleep()
+    await rvr.disconnect()
+```
+
+## Sensor Data Handling
+- Use appropriate sensor streaming services
+- Handle sensor data callbacks properly
+- Implement data validation for sensor readings
+- Use proper units and coordinate frames
+
+## Motor Control
+- Use `RawMotorModesEnum` for motor control modes
+- Implement proper velocity and position control
+- Handle motor safety limits
+- Use appropriate drive flags for different behaviors
+
+## LED Control
+- Use `RvrLedGroups` for LED management
+- Implement color control with `Colors` enum
+- Handle LED patterns and animations
+- Use LED feedback for robot status indication
+
+## Error Handling
+- Handle connection timeouts gracefully
+- Implement retry mechanisms for failed operations
+- Log SDK errors appropriately
+- Provide fallback behaviors when robot is unavailable
+
+## Battery Management
+- Monitor battery state using `BatteryVoltageStatesEnum`
+- Implement low battery warnings
+- Handle battery-related errors
+- Use appropriate power management strategies
+
+## Example Robot Control
+```python
+async def control_robot(rvr, linear_vel, angular_vel):
+    try:
+        # Convert ROS velocities to Sphero format
+        left_velocity = int(linear_vel * 1000)  # Convert to mm/s
+        right_velocity = int(angular_vel * 1000)
+        
+        # Send drive command
+        await rvr.drive_control.drive_with_heading(
+            speed=abs(left_velocity),
+            heading=0,
+            flags=DriveFlagsBitmask.none.value
+        )
+    except Exception as e:
+        rospy.logerr(f"Robot control error: {e}")
+```
+
+## Safety Considerations
+- Always implement emergency stop functionality
+- Validate input parameters before sending commands
+- Use appropriate timeouts for all operations
+- Implement proper error recovery mechanisms

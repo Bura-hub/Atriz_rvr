@@ -1,0 +1,282 @@
+---
+globs: *.msg,*.srv,*.action
+---
+
+# ROS Message and Service Development Guidelines
+
+## Message Definition Best Practices
+
+### Message File Structure
+- Use descriptive field names in snake_case
+- Include comprehensive comments
+- Use appropriate data types
+- Follow ROS message naming conventions
+
+```msg
+# sphero_rvr_msgs/msg/RobotStatus.msg
+# Robot status information including battery, connection, and error states
+
+# Header with timestamp and frame_id
+std_msgs/Header header
+
+# Battery information
+float32 battery_voltage
+uint8 battery_percentage
+bool low_battery_warning
+
+# Connection status
+bool connected
+string connection_type
+float32 signal_strength
+
+# Error states
+bool error_detected
+string[] error_messages
+uint8 error_code
+
+# Robot capabilities
+bool imu_enabled
+bool odometry_enabled
+bool led_enabled
+bool motor_enabled
+```
+
+### Service Definition Best Practices
+- Use descriptive service names ending with appropriate verbs
+- Include request and response sections with clear separators
+- Use appropriate data types for parameters
+- Include success/failure indicators
+
+```srv
+# sphero_rvr_msgs/srv/SetLEDColor.srv
+# Service to set LED color on the Sphero RVR
+
+# Request
+uint8 red          # Red component (0-255)
+uint8 green        # Green component (0-255)
+uint8 blue         # Blue component (0-255)
+uint8 alpha        # Alpha component (0-255)
+string led_group   # LED group identifier
+float32 duration   # Duration in seconds (0 for permanent)
+
+---
+
+# Response
+bool success       # True if command was successful
+string message     # Status message or error description
+```
+
+### Action Definition Best Practices
+- Use descriptive action names ending with "Action"
+- Include goal, result, and feedback sections
+- Use appropriate data types for all sections
+- Include progress indicators in feedback
+
+```action
+# sphero_rvr_msgs/action/MoveToPose.action
+# Action to move robot to a specific pose
+
+# Goal
+geometry_msgs/Pose target_pose    # Target pose
+float32 timeout                   # Maximum time to complete (seconds)
+float32 tolerance                 # Position tolerance (meters)
+
+---
+
+# Result
+bool success                      # True if goal was achieved
+string message                    # Status message
+geometry_msgs/Pose final_pose    # Final achieved pose
+float32 execution_time            # Time taken to complete
+
+---
+
+# Feedback
+geometry_msgs/Pose current_pose  # Current robot pose
+float32 progress                 # Progress percentage (0.0-1.0)
+string status_message            # Current status
+```
+
+## Custom Message Types for Sphero RVR
+
+### Robot Control Messages
+```msg
+# sphero_rvr_msgs/msg/DriveCommand.msg
+# Custom drive command with additional Sphero-specific parameters
+
+geometry_msgs/Twist twist        # Standard twist command
+uint8 drive_flags               # Sphero drive flags
+float32 heading                 # Target heading in degrees
+bool use_heading                # Whether to use heading control
+```
+
+### Sensor Data Messages
+```msg
+# sphero_rvr_msgs/msg/SpheroIMU.msg
+# Enhanced IMU data with Sphero-specific information
+
+std_msgs/Header header
+geometry_msgs/Vector3 linear_acceleration
+geometry_msgs/Vector3 angular_velocity
+geometry_msgs/Quaternion orientation
+float32 temperature             # IMU temperature
+uint8 calibration_status       # Calibration status flags
+```
+
+### LED Control Messages
+```msg
+# sphero_rvr_msgs/msg/LEDCommand.msg
+# LED control command for Sphero RVR
+
+std_msgs/Header header
+uint8 red                       # Red component (0-255)
+uint8 green                     # Green component (0-255)
+uint8 blue                      # Blue component (0-255)
+uint8 alpha                     # Alpha component (0-255)
+string led_group                # LED group identifier
+float32 duration                # Duration in seconds
+bool fade                       # Whether to fade to color
+```
+
+## Service Definitions for Sphero RVR
+
+### Robot Control Services
+```srv
+# sphero_rvr_msgs/srv/SetDriveMode.srv
+# Service to set robot drive mode
+
+uint8 drive_mode               # Drive mode (0=normal, 1=raw, 2=heading)
+float32 max_speed              # Maximum speed limit
+bool enable_heading_control    # Enable heading control
+
+---
+
+bool success
+string message
+```
+
+### Configuration Services
+```srv
+# sphero_rvr_msgs/srv/ConfigureSensors.srv
+# Service to configure sensor streaming
+
+bool enable_imu                # Enable IMU streaming
+bool enable_odometry           # Enable odometry streaming
+bool enable_battery            # Enable battery monitoring
+float32 streaming_rate         # Sensor streaming rate (Hz)
+
+---
+
+bool success
+string message
+```
+
+## Message Generation and Build Process
+
+### CMakeLists.txt Configuration
+```cmake
+# Add message generation
+find_package(catkin REQUIRED COMPONENTS
+  message_generation
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+)
+
+# Generate messages
+add_message_files(
+  FILES
+  RobotStatus.msg
+  DriveCommand.msg
+  SpheroIMU.msg
+  LEDCommand.msg
+)
+
+# Generate services
+add_service_files(
+  FILES
+  SetLEDColor.srv
+  SetDriveMode.srv
+  ConfigureSensors.srv
+)
+
+# Generate actions
+add_action_files(
+  FILES
+  MoveToPose.action
+)
+
+# Generate message/service/action code
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  geometry_msgs
+  sensor_msgs
+)
+
+# Export message runtime
+catkin_package(
+  CATKIN_DEPENDS message_runtime
+)
+```
+
+### Package.xml Dependencies
+```xml
+<build_depend>message_generation</build_depend>
+<build_export_depend>message_generation</build_export_depend>
+<exec_depend>message_runtime</exec_depend>
+<depend>std_msgs</depend>
+<depend>geometry_msgs</depend>
+<depend>sensor_msgs</depend>
+```
+
+## Usage Examples
+
+### Publishing Custom Messages
+```python
+from sphero_rvr_msgs.msg import RobotStatus, LEDCommand
+import rospy
+
+# Create publisher
+status_pub = rospy.Publisher('/sphero_rvr/status', RobotStatus, queue_size=10)
+
+# Create and publish message
+status_msg = RobotStatus()
+status_msg.header.stamp = rospy.Time.now()
+status_msg.header.frame_id = 'sphero_rvr'
+status_msg.battery_voltage = 7.4
+status_msg.battery_percentage = 85
+status_msg.connected = True
+status_pub.publish(status_msg)
+```
+
+### Using Custom Services
+```python
+from sphero_rvr_msgs.srv import SetLEDColor
+import rospy
+
+# Wait for service
+rospy.wait_for_service('/sphero_rvr/set_led_color')
+
+# Create service proxy
+set_led = rospy.ServiceProxy('/sphero_rvr/set_led_color', SetLEDColor)
+
+# Call service
+try:
+    response = set_led(red=255, green=0, blue=0, alpha=255, 
+                      led_group='front', duration=5.0)
+    if response.success:
+        rospy.loginfo("LED color set successfully")
+    else:
+        rospy.logwarn(f"Failed to set LED color: {response.message}")
+except rospy.ServiceException as e:
+    rospy.logerr(f"Service call failed: {e}")
+```
+
+## Documentation and Testing
+- Document all message fields with clear descriptions
+- Include units and valid ranges for numeric fields
+- Provide usage examples in comments
+- Test message serialization/deserialization
+- Validate service calls with different parameters
+- Test action goals, feedback, and results

@@ -1,0 +1,523 @@
+---
+globs: *.launch,*.world,*.urdf,*.xacro,*.py
+description: Guidelines for simulation and testing in ROS Sphero RVR development
+---
+
+# Simulation and Testing Guidelines
+
+## Simulation Setup and Configuration
+
+### Gazebo Simulation Environment
+```xml
+<!-- launch/sphero_rvr_simulation.launch -->
+<launch>
+  <!-- Arguments -->
+  <arg name="world_name" default="empty_world" />
+  <arg name="paused" default="false" />
+  <arg name="use_sim_time" default="true" />
+  <arg name="gui" default="true" />
+  <arg name="headless" default="false" />
+  <arg name="debug" default="false" />
+  
+  <!-- Launch Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_name)" />
+    <arg name="paused" value="$(arg paused)" />
+    <arg name="use_sim_time" value="$(arg use_sim_time)" />
+    <arg name="gui" value="$(arg gui)" />
+    <arg name="headless" value="$(arg headless)" />
+    <arg name="debug" value="$(arg debug)" />
+  </include>
+  
+  <!-- Spawn Sphero RVR model -->
+  <node name="sphero_rvr_spawn" pkg="gazebo_ros" type="spawn_model" 
+        args="-file $(find sphero_rvr_hw)/models/sphero_rvr.urdf -urdf -model sphero_rvr" />
+  
+  <!-- Robot state publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+  
+  <!-- Controllers -->
+  <include file="$(find sphero_rvr_hw)/launch/sphero_rvr_controllers.launch" />
+</launch>
+```
+
+### URDF/XACRO Model Definition
+```xml
+<!-- urdf/sphero_rvr.urdf.xacro -->
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="sphero_rvr">
+  
+  <!-- Base link -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <cylinder radius="0.08" length="0.06" />
+      </geometry>
+      <material name="sphero_blue">
+        <color rgba="0.0 0.5 1.0 1.0" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.08" length="0.06" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.5" />
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
+               iyy="0.001" iyz="0.0"
+               izz="0.001" />
+    </inertial>
+  </link>
+  
+  <!-- Left wheel -->
+  <link name="left_wheel">
+    <visual>
+      <geometry>
+        <cylinder radius="0.025" length="0.01" />
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.025" length="0.01" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1" />
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+               iyy="0.0001" iyz="0.0"
+               izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <!-- Right wheel -->
+  <link name="right_wheel">
+    <visual>
+      <geometry>
+        <cylinder radius="0.025" length="0.01" />
+      </geometry>
+      <material name="black">
+        <color rgba="0.0 0.0 0.0 1.0" />
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.025" length="0.01" />
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.1" />
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+               iyy="0.0001" iyz="0.0"
+               izz="0.0001" />
+    </inertial>
+  </link>
+  
+  <!-- Joints -->
+  <joint name="left_wheel_joint" type="continuous">
+    <parent link="base_link" />
+    <child link="left_wheel" />
+    <origin xyz="0.0 0.08 0.0" rpy="0 1.5708 0" />
+    <axis xyz="0 0 1" />
+  </joint>
+  
+  <joint name="right_wheel_joint" type="continuous">
+    <parent link="base_link" />
+    <child link="right_wheel" />
+    <origin xyz="0.0 -0.08 0.0" rpy="0 1.5708 0" />
+    <axis xyz="0 0 1" />
+  </joint>
+  
+  <!-- Gazebo plugins -->
+  <gazebo>
+    <plugin name="differential_drive_controller" filename="libgazebo_ros_diff_drive.so">
+      <leftJoint>left_wheel_joint</leftJoint>
+      <rightJoint>right_wheel_joint</rightJoint>
+      <wheelSeparation>0.16</wheelSeparation>
+      <wheelDiameter>0.05</wheelDiameter>
+      <wheelAcceleration>1.0</wheelAcceleration>
+      <wheelTorque>20</wheelTorque>
+      <commandTopic>cmd_vel</commandTopic>
+      <odometryTopic>odom</odometryTopic>
+      <odometryFrame>odom</odometryFrame>
+      <robotBaseFrame>base_link</robotBaseFrame>
+      <odometrySource>world</odometrySource>
+      <publishWheelTF>true</publishWheelTF>
+      <publishOdom>true</publishOdom>
+      <publishWheelJointState>true</publishWheelJointState>
+      <legacyMode>false</legacyMode>
+    </plugin>
+  </gazebo>
+  
+</robot>
+```
+
+## Testing Framework and Strategies
+
+### Unit Testing with Python
+```python
+#!/usr/bin/env python3
+
+import unittest
+import rospy
+import rostest
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from std_msgs.msg import Bool
+import time
+
+class TestSpheroRvrNode(unittest.TestCase):
+    """Unit tests for Sphero RVR node functionality."""
+    
+    def setUp(self):
+        """Set up test environment."""
+        rospy.init_node('test_sphero_rvr_node', anonymous=True)
+        
+        # Publishers and subscribers for testing
+        self.cmd_vel_pub = rospy.Publisher('/sphero_rvr/cmd_vel', Twist, queue_size=1)
+        self.emergency_stop_pub = rospy.Publisher('/emergency_stop', Bool, queue_size=1)
+        
+        # Test data storage
+        self.odom_data = None
+        self.status_data = None
+        
+        # Subscribers for verification
+        rospy.Subscriber('/sphero_rvr/odom', Odometry, self.odom_callback)
+        rospy.Subscriber('/sphero_rvr/status', RobotStatus, self.status_callback)
+        
+        # Wait for connections
+        rospy.sleep(1.0)
+        
+    def odom_callback(self, data):
+        """Callback for odometry data."""
+        self.odom_data = data
+        
+    def status_callback(self, data):
+        """Callback for robot status data."""
+        self.status_data = data
+        
+    def test_emergency_stop(self):
+        """Test emergency stop functionality."""
+        # Send movement command
+        cmd = Twist()
+        cmd.linear.x = 0.5
+        self.cmd_vel_pub.publish(cmd)
+        rospy.sleep(0.1)
+        
+        # Activate emergency stop
+        emergency = Bool()
+        emergency.data = True
+        self.emergency_stop_pub.publish(emergency)
+        rospy.sleep(0.5)
+        
+        # Verify robot stopped
+        self.assertIsNotNone(self.odom_data)
+        self.assertAlmostEqual(self.odom_data.twist.twist.linear.x, 0.0, places=2)
+        
+    def test_velocity_commands(self):
+        """Test velocity command processing."""
+        # Send forward command
+        cmd = Twist()
+        cmd.linear.x = 0.3
+        self.cmd_vel_pub.publish(cmd)
+        rospy.sleep(0.5)
+        
+        # Verify odometry reflects movement
+        self.assertIsNotNone(self.odom_data)
+        self.assertGreater(self.odom_data.twist.twist.linear.x, 0.0)
+        
+    def test_battery_monitoring(self):
+        """Test battery monitoring functionality."""
+        rospy.sleep(2.0)  # Wait for status updates
+        
+        self.assertIsNotNone(self.status_data)
+        self.assertGreaterEqual(self.status_data.battery_percentage, 0)
+        self.assertLessEqual(self.status_data.battery_percentage, 100)
+        
+    def test_connection_status(self):
+        """Test connection status reporting."""
+        rospy.sleep(2.0)  # Wait for status updates
+        
+        self.assertIsNotNone(self.status_data)
+        self.assertIsInstance(self.status_data.connected, bool)
+
+if __name__ == '__main__':
+    rostest.rosrun('sphero_rvr_hw', 'test_sphero_rvr_node', TestSpheroRvrNode)
+```
+
+### Integration Testing
+```python
+#!/usr/bin/env python3
+
+import unittest
+import rospy
+import rostest
+from actionlib import SimpleActionClient
+from sphero_rvr_msgs.msg import MoveToPoseAction, MoveToPoseGoal
+from geometry_msgs.msg import Pose, Point, Quaternion
+
+class TestSpheroRvrIntegration(unittest.TestCase):
+    """Integration tests for Sphero RVR system."""
+    
+    def setUp(self):
+        """Set up integration test environment."""
+        rospy.init_node('test_sphero_rvr_integration', anonymous=True)
+        
+        # Action client for move to pose
+        self.move_client = SimpleActionClient('/sphero_rvr/move_to_pose', MoveToPoseAction)
+        
+        # Wait for action server
+        self.assertTrue(self.move_client.wait_for_server(timeout=rospy.Duration(10.0)))
+        
+    def test_move_to_pose_action(self):
+        """Test move to pose action functionality."""
+        # Create goal
+        goal = MoveToPoseGoal()
+        goal.target_pose.position = Point(x=1.0, y=0.0, z=0.0)
+        goal.target_pose.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
+        goal.timeout = 10.0
+        goal.tolerance = 0.1
+        
+        # Send goal
+        self.move_client.send_goal(goal)
+        
+        # Wait for result
+        success = self.move_client.wait_for_result(timeout=rospy.Duration(15.0))
+        self.assertTrue(success)
+        
+        # Check result
+        result = self.move_client.get_result()
+        self.assertIsNotNone(result)
+        self.assertTrue(result.success)
+        
+    def test_led_control_service(self):
+        """Test LED control service functionality."""
+        # This would test the LED control service
+        pass
+        
+    def test_sensor_data_streaming(self):
+        """Test sensor data streaming functionality."""
+        # This would test IMU, odometry, and other sensor data
+        pass
+```
+
+## Simulation Testing Procedures
+
+### Gazebo Testing Workflow
+```bash
+#!/bin/bash
+# test_simulation.sh
+
+# Launch simulation
+roslaunch sphero_rvr_hw sphero_rvr_simulation.launch &
+SIM_PID=$!
+
+# Wait for simulation to start
+sleep 10
+
+# Run tests
+rostest sphero_rvr_hw test_sphero_rvr_simulation.test
+
+# Cleanup
+kill $SIM_PID
+```
+
+### Hardware-in-the-Loop Testing
+```python
+class HardwareInTheLoopTest:
+    """Hardware-in-the-loop testing framework."""
+    
+    def __init__(self):
+        self.simulation_mode = False
+        self.hardware_available = False
+        
+    def detect_hardware(self):
+        """Detect if hardware is available for testing."""
+        try:
+            # Try to connect to Sphero RVR
+            # If successful, hardware is available
+            self.hardware_available = True
+            return True
+        except:
+            self.hardware_available = False
+            return False
+            
+    def run_test_suite(self):
+        """Run appropriate test suite based on available resources."""
+        if self.detect_hardware():
+            rospy.loginfo("Hardware detected, running hardware tests")
+            self.run_hardware_tests()
+        else:
+            rospy.loginfo("No hardware detected, running simulation tests")
+            self.run_simulation_tests()
+            
+    def run_hardware_tests(self):
+        """Run tests with actual hardware."""
+        # Hardware-specific tests
+        pass
+        
+    def run_simulation_tests(self):
+        """Run tests in simulation mode."""
+        # Simulation-specific tests
+        pass
+```
+
+## Performance Testing
+
+### Latency Testing
+```python
+class LatencyTest:
+    """Test system latency and performance."""
+    
+    def __init__(self):
+        self.command_times = []
+        self.response_times = []
+        
+    def test_command_latency(self):
+        """Test command processing latency."""
+        start_time = time.time()
+        
+        # Send command
+        cmd = Twist()
+        cmd.linear.x = 0.1
+        self.cmd_vel_pub.publish(cmd)
+        
+        # Measure response time
+        rospy.sleep(0.1)
+        end_time = time.time()
+        
+        latency = end_time - start_time
+        self.command_times.append(latency)
+        
+        rospy.loginfo(f"Command latency: {latency:.3f}s")
+        
+    def test_emergency_stop_latency(self):
+        """Test emergency stop response time."""
+        start_time = time.time()
+        
+        # Activate emergency stop
+        emergency = Bool()
+        emergency.data = True
+        self.emergency_stop_pub.publish(emergency)
+        
+        # Measure stop time
+        rospy.sleep(0.1)
+        end_time = time.time()
+        
+        latency = end_time - start_time
+        self.response_times.append(latency)
+        
+        rospy.loginfo(f"Emergency stop latency: {latency:.3f}s")
+        
+        # Emergency stop should be very fast (< 100ms)
+        self.assertLess(latency, 0.1)
+```
+
+## Test Data Management
+
+### Test Data Collection
+```python
+class TestDataCollector:
+    """Collect and manage test data."""
+    
+    def __init__(self):
+        self.test_results = {}
+        self.performance_metrics = {}
+        
+    def collect_test_data(self, test_name, results):
+        """Collect test results and performance data."""
+        self.test_results[test_name] = {
+            'timestamp': rospy.Time.now(),
+            'results': results,
+            'success': all(results.values())
+        }
+        
+    def save_test_report(self, filename):
+        """Save test report to file."""
+        import json
+        
+        report = {
+            'test_results': self.test_results,
+            'performance_metrics': self.performance_metrics,
+            'timestamp': rospy.Time.now().to_sec()
+        }
+        
+        with open(filename, 'w') as f:
+            json.dump(report, f, indent=2, default=str)
+            
+    def generate_test_summary(self):
+        """Generate test summary report."""
+        total_tests = len(self.test_results)
+        passed_tests = sum(1 for result in self.test_results.values() if result['success'])
+        
+        summary = f"""
+Test Summary:
+- Total Tests: {total_tests}
+- Passed: {passed_tests}
+- Failed: {total_tests - passed_tests}
+- Success Rate: {(passed_tests/total_tests)*100:.1f}%
+        """
+        
+        return summary
+```
+
+## Continuous Integration
+
+### CI/CD Pipeline Configuration
+```yaml
+# .github/workflows/ros_testing.yml
+name: ROS Testing
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up ROS
+      uses: ros-tooling/setup-ros@v0.2
+      with:
+        required-ros-distributions: noetic
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ros-noetic-gazebo-ros-pkgs
+        sudo apt-get install -y ros-noetic-rostest
+        
+    - name: Build workspace
+      run: |
+        cd $GITHUB_WORKSPACE
+        catkin_make
+        
+    - name: Run tests
+      run: |
+        source devel/setup.bash
+        rostest sphero_rvr_hw test_sphero_rvr_node.test
+```
+
+## Testing Best Practices
+
+### Test Organization
+- Separate unit tests from integration tests
+- Use descriptive test names and documentation
+- Implement proper test setup and teardown
+- Use appropriate assertions and error messages
+
+### Test Coverage
+- Test all critical functionality
+- Test error conditions and edge cases
+- Test performance and latency requirements
+- Test safety mechanisms thoroughly
+
+### Test Automation
+- Automate test execution where possible
+- Integrate tests into CI/CD pipeline
+- Generate test reports and metrics
+- Maintain test data and documentation

@@ -1,0 +1,402 @@
+---
+alwaysApply: true
+description: Safety mechanisms and emergency procedures for Sphero RVR development
+---
+
+# Safety Mechanisms and Emergency Procedures
+
+## Critical Safety Requirements
+
+### Emergency Stop Implementation
+- **ALWAYS** implement emergency stop functionality before any robot movement
+- Emergency stop must be accessible and immediately effective
+- Multiple emergency stop mechanisms should be available
+- Emergency stop must override all other commands
+
+```python
+#!/usr/bin/env python3
+
+import rospy
+from std_msgs.msg import Bool
+from geometry_msgs.msg import Twist
+import signal
+import sys
+
+class EmergencyStop:
+    """Emergency stop handler for Sphero RVR."""
+    
+    def __init__(self):
+        self.emergency_stop_active = False
+        self.cmd_vel_pub = rospy.Publisher('/sphero_rvr/cmd_vel', Twist, queue_size=1)
+        self.emergency_pub = rospy.Publisher('/sphero_rvr/emergency_stop', Bool, queue_size=1)
+        
+        # Subscribe to emergency stop commands
+        rospy.Subscriber('/emergency_stop', Bool, self.emergency_stop_callback)
+        
+        # Set up signal handlers for keyboard interrupt
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
+    def emergency_stop_callback(self, msg):
+        """Handle emergency stop commands."""
+        if msg.data:
+            self.activate_emergency_stop()
+            
+    def activate_emergency_stop(self):
+        """Activate emergency stop - IMMEDIATELY STOP ALL MOTION."""
+        rospy.logfatal("EMERGENCY STOP ACTIVATED!")
+        self.emergency_stop_active = True
+        
+        # Send zero velocity command
+        stop_cmd = Twist()
+        self.cmd_vel_pub.publish(stop_cmd)
+        
+        # Publish emergency stop status
+        emergency_msg = Bool()
+        emergency_msg.data = True
+        self.emergency_pub.publish(emergency_msg)
+        
+        # Log emergency stop
+        rospy.logfatal("All robot motion has been stopped")
+        
+    def signal_handler(self, signum, frame):
+        """Handle system signals for emergency stop."""
+        rospy.logwarn(f"Received signal {signum}, activating emergency stop")
+        self.activate_emergency_stop()
+        sys.exit(0)
+```
+
+### Safety Monitoring and Validation
+```python
+class SafetyMonitor:
+    """Continuous safety monitoring for robot operations."""
+    
+    def __init__(self):
+        self.last_cmd_time = rospy.Time.now()
+        self.cmd_timeout = rospy.Duration(1.0)  # 1 second timeout
+        self.max_velocity = 1.0  # m/s
+        self.max_angular_velocity = 2.0  # rad/s
+        self.safety_violations = 0
+        self.max_violations = 5
+        
+    def validate_velocity_command(self, twist_msg):
+        """Validate velocity commands for safety limits."""
+        # Check linear velocity limits
+        if abs(twist_msg.linear.x) > self.max_velocity:
+            rospy.logwarn(f"Linear velocity {twist_msg.linear.x} exceeds limit {self.max_velocity}")
+            return False
+            
+        # Check angular velocity limits
+        if abs(twist_msg.angular.z) > self.max_angular_velocity:
+            rospy.logwarn(f"Angular velocity {twist_msg.angular.z} exceeds limit {self.max_angular_velocity}")
+            return False
+            
+        return True
+        
+    def check_command_timeout(self):
+        """Check for command timeout and activate emergency stop if needed."""
+        now = rospy.Time.now()
+        if now - self.last_cmd_time > self.cmd_timeout:
+            rospy.logwarn("Command timeout detected, stopping robot")
+            self.activate_emergency_stop()
+            return False
+        return True
+        
+    def update_command_time(self):
+        """Update last command timestamp."""
+        self.last_cmd_time = rospy.Time.now()
+```
+
+## Hardware Safety Mechanisms
+
+### Connection Safety
+```python
+class ConnectionSafety:
+    """Safety mechanisms for robot connection management."""
+    
+    def __init__(self):
+        self.connection_retries = 0
+        self.max_connection_retries = 3
+        self.connection_timeout = 10.0  # seconds
+        self.heartbeat_timeout = 5.0  # seconds
+        self.last_heartbeat = rospy.Time.now()
+        
+    async def safe_connect(self, rvr):
+        """Safely connect to robot with timeout and retry logic."""
+        for attempt in range(self.max_connection_retries):
+            try:
+                rospy.loginfo(f"Connection attempt {attempt + 1}/{self.max_connection_retries}")
+                
+                # Set connection timeout
+                await asyncio.wait_for(
+                    rvr.connect(),
+                    timeout=self.connection_timeout
+                )
+                
+                # Verify connection with wake command
+                await asyncio.wait_for(
+                    rvr.wake(),
+                    timeout=5.0
+                )
+                
+                rospy.loginfo("Robot connected successfully")
+                return True
+                
+            except asyncio.TimeoutError:
+                rospy.logwarn(f"Connection timeout on attempt {attempt + 1}")
+            except Exception as e:
+                rospy.logwarn(f"Connection error on attempt {attempt + 1}: {e}")
+                
+            if attempt < self.max_connection_retries - 1:
+                await asyncio.sleep(2.0)  # Wait before retry
+                
+        rospy.logerr("Failed to connect to robot after maximum retries")
+        return False
+        
+    def monitor_connection_health(self):
+        """Monitor connection health and handle disconnections."""
+        now = rospy.Time.now()
+        if now - self.last_heartbeat > rospy.Duration(self.heartbeat_timeout):
+            rospy.logwarn("Robot heartbeat timeout - connection may be lost")
+            return False
+        return True
+```
+
+### Battery Safety
+```python
+class BatterySafety:
+    """Battery monitoring and safety mechanisms."""
+    
+    def __init__(self):
+        self.low_battery_threshold = 20  # percentage
+        self.critical_battery_threshold = 10  # percentage
+        self.battery_voltage_min = 6.0  # volts
+        self.battery_voltage_critical = 5.5  # volts
+        
+    def check_battery_safety(self, battery_voltage, battery_percentage):
+        """Check battery levels and activate safety measures if needed."""
+        # Check voltage levels
+        if battery_voltage < self.battery_voltage_critical:
+            rospy.logfatal(f"Critical battery voltage: {battery_voltage}V")
+            self.activate_low_battery_emergency_stop()
+            return False
+            
+        # Check percentage levels
+        if battery_percentage < self.critical_battery_threshold:
+            rospy.logfatal(f"Critical battery level: {battery_percentage}%")
+            self.activate_low_battery_emergency_stop()
+            return False
+            
+        # Warning levels
+        if battery_voltage < self.battery_voltage_min:
+            rospy.logwarn(f"Low battery voltage: {battery_voltage}V")
+            
+        if battery_percentage < self.low_battery_threshold:
+            rospy.logwarn(f"Low battery level: {battery_percentage}%")
+            
+        return True
+        
+    def activate_low_battery_emergency_stop(self):
+        """Activate emergency stop due to low battery."""
+        rospy.logfatal("LOW BATTERY EMERGENCY STOP ACTIVATED")
+        # Implement emergency stop logic
+        # Put robot to sleep to conserve battery
+        # Send emergency stop command
+```
+
+## Operational Safety Procedures
+
+### Pre-Operation Safety Checklist
+```python
+class SafetyChecklist:
+    """Pre-operation safety checklist validation."""
+    
+    def __init__(self):
+        self.checks_passed = False
+        
+    def run_safety_checks(self):
+        """Run comprehensive safety checks before operation."""
+        rospy.loginfo("Running pre-operation safety checks...")
+        
+        checks = [
+            self.check_emergency_stop_functionality,
+            self.check_connection_stability,
+            self.check_battery_levels,
+            self.check_sensor_functionality,
+            self.check_environment_safety,
+            self.check_communication_links
+        ]
+        
+        for check in checks:
+            if not check():
+                rospy.logerr(f"Safety check failed: {check.__name__}")
+                return False
+                
+        rospy.loginfo("All safety checks passed")
+        self.checks_passed = True
+        return True
+        
+    def check_emergency_stop_functionality(self):
+        """Verify emergency stop is working."""
+        rospy.loginfo("Testing emergency stop functionality...")
+        # Test emergency stop mechanism
+        return True
+        
+    def check_connection_stability(self):
+        """Verify robot connection is stable."""
+        rospy.loginfo("Checking connection stability...")
+        # Test connection stability
+        return True
+        
+    def check_battery_levels(self):
+        """Verify battery levels are adequate."""
+        rospy.loginfo("Checking battery levels...")
+        # Check battery levels
+        return True
+        
+    def check_sensor_functionality(self):
+        """Verify all sensors are working."""
+        rospy.loginfo("Checking sensor functionality...")
+        # Test sensor functionality
+        return True
+        
+    def check_environment_safety(self):
+        """Verify environment is safe for operation."""
+        rospy.loginfo("Checking environment safety...")
+        # Check for obstacles, people, etc.
+        return True
+        
+    def check_communication_links(self):
+        """Verify all communication links are working."""
+        rospy.loginfo("Checking communication links...")
+        # Test ROS communication
+        return True
+```
+
+### Safe Shutdown Procedures
+```python
+class SafeShutdown:
+    """Safe shutdown procedures for robot operations."""
+    
+    def __init__(self):
+        self.shutdown_in_progress = False
+        
+    async def safe_shutdown(self, rvr):
+        """Perform safe shutdown sequence."""
+        if self.shutdown_in_progress:
+            return
+            
+        self.shutdown_in_progress = True
+        rospy.loginfo("Initiating safe shutdown sequence...")
+        
+        try:
+            # 1. Stop all motion immediately
+            rospy.loginfo("Stopping all robot motion...")
+            await self.stop_all_motion(rvr)
+            
+            # 2. Disable all sensors
+            rospy.loginfo("Disabling sensors...")
+            await self.disable_sensors(rvr)
+            
+            # 3. Turn off LEDs
+            rospy.loginfo("Turning off LEDs...")
+            await self.turn_off_leds(rvr)
+            
+            # 4. Put robot to sleep
+            rospy.loginfo("Putting robot to sleep...")
+            await rvr.sleep()
+            
+            # 5. Disconnect from robot
+            rospy.loginfo("Disconnecting from robot...")
+            await rvr.disconnect()
+            
+            rospy.loginfo("Safe shutdown completed successfully")
+            
+        except Exception as e:
+            rospy.logerr(f"Error during safe shutdown: {e}")
+            
+    async def stop_all_motion(self, rvr):
+        """Stop all robot motion."""
+        try:
+            await rvr.drive_control.drive_with_heading(
+                speed=0,
+                heading=0,
+                flags=DriveFlagsBitmask.none.value
+            )
+        except Exception as e:
+            rospy.logwarn(f"Error stopping motion: {e}")
+            
+    async def disable_sensors(self, rvr):
+        """Disable all sensor streaming."""
+        try:
+            await rvr.sensor_control.stop()
+        except Exception as e:
+            rospy.logwarn(f"Error disabling sensors: {e}")
+            
+    async def turn_off_leds(self, rvr):
+        """Turn off all LEDs."""
+        try:
+            await rvr.led_control.set_all_leds(
+                led_group=RvrLedGroups.all_lights,
+                led_brightness_values=[0] * 12
+            )
+        except Exception as e:
+            rospy.logwarn(f"Error turning off LEDs: {e}")
+```
+
+## Emergency Response Procedures
+
+### Emergency Stop Activation
+1. **Immediate Response**: Stop all robot motion within 100ms
+2. **Communication**: Broadcast emergency stop status to all nodes
+3. **Logging**: Log emergency stop activation with timestamp and reason
+4. **Recovery**: Require manual intervention to resume operation
+
+### Error Recovery Procedures
+1. **Connection Loss**: Attempt reconnection with exponential backoff
+2. **Sensor Failure**: Disable failed sensors and continue with available data
+3. **Battery Low**: Activate low-power mode and prepare for shutdown
+4. **Communication Error**: Switch to local control mode if possible
+
+### Safety Documentation Requirements
+- Document all safety mechanisms and their activation conditions
+- Maintain safety logs for all operations
+- Regular safety testing and validation
+- Emergency contact information and procedures
+- Safety training requirements for operators
+
+## Testing and Validation
+
+### Safety Testing Procedures
+```python
+def test_emergency_stop():
+    """Test emergency stop functionality."""
+    # Test emergency stop activation
+    # Verify immediate motion stop
+    # Check status broadcasting
+    # Validate recovery procedures
+    pass
+
+def test_battery_safety():
+    """Test battery safety mechanisms."""
+    # Test low battery warnings
+    # Test critical battery shutdown
+    # Verify battery monitoring
+    pass
+
+def test_connection_safety():
+    """Test connection safety mechanisms."""
+    # Test connection timeout handling
+    # Test reconnection procedures
+    # Verify heartbeat monitoring
+    pass
+```
+
+### Safety Validation Checklist
+- [ ] Emergency stop stops all motion within 100ms
+- [ ] Battery monitoring prevents operation below critical levels
+- [ ] Connection monitoring handles disconnections gracefully
+- [ ] All safety mechanisms are tested regularly
+- [ ] Safety procedures are documented and accessible
+- [ ] Emergency contacts and procedures are current
+- [ ] Safety training is completed by all operators

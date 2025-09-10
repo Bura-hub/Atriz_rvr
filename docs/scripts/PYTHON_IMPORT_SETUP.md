@@ -16,7 +16,7 @@ Se han creado varios archivos para resolver las importaciones:
 
 #### **sphero_sdk_config.py**
 ```python
-# scripts/core/sphero_sdk_config.py
+# atriz_rvr_driver/scripts/sphero_sdk_config.py
 # Configura automáticamente la ruta del SDK de Sphero
 ```
 
@@ -25,7 +25,7 @@ Se han creado varios archivos para resolver las importaciones:
 {
   "extraPaths": [
     "./atriz_rvr_driver/scripts",
-    "./scripts/core"
+    "./atriz_rvr_driver/scripts"
   ]
 }
 ```
@@ -41,7 +41,7 @@ init-hook='import sys; sys.path.append("./atriz_rvr_driver/scripts")'
 {
   "python.analysis.extraPaths": [
     "./atriz_rvr_driver/scripts",
-    "./scripts/core"
+    "./atriz_rvr_driver/scripts"
   ]
 }
 ```
@@ -68,7 +68,7 @@ Si aún hay problemas, ejecuta:
 python3 setup_python_path.py
 
 # O agregar manualmente
-export PYTHONPATH="${PYTHONPATH}:$(pwd)/atriz_rvr_driver/scripts:$(pwd)/scripts/core"
+export PYTHONPATH="${PYTHONPATH}:$(pwd)/atriz_rvr_driver/scripts"
 ```
 
 ## 🚀 Verificación
@@ -85,7 +85,7 @@ print('✅ Importaciones funcionan correctamente')
 
 ### **Probar Script Principal**
 ```bash
-python3 ./scripts/core/Atriz_rvr_node.py --help
+python3 ./atriz_rvr_driver/scripts/Atriz_rvr_node.py --help
 ```
 
 ## 🔍 Solución de Problemas
@@ -93,7 +93,7 @@ python3 ./scripts/core/Atriz_rvr_node.py --help
 ### **Error: "No module named 'sphero_sdk'"**
 1. Verificar que `atriz_rvr_driver/scripts/sphero_sdk/` existe
 2. Ejecutar `python3 setup_python_path.py`
-3. Verificar que el archivo `sphero_sdk_config.py` está en `scripts/core/`
+3. Verificar que el archivo `sphero_sdk_config.py` está en `atriz_rvr_driver/scripts/`
 
 ### **Error del Linter: "No se ha podido resolver la importación"**
 1. Reiniciar el editor/IDE
@@ -108,7 +108,7 @@ python3 ./scripts/core/Atriz_rvr_node.py --help
 ## 📁 Estructura de Archivos
 
 ```
-scripts/core/
+atriz_rvr_driver/scripts/
 ├── Atriz_rvr_node.py          # Script principal (con configuración)
 ├── sphero_sdk_config.py       # Configuración del SDK
 └── __init__.py                # Paquete Python

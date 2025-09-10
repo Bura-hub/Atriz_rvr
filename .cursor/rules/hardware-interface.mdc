@@ -1,0 +1,306 @@
+---
+globs: *.cpp,*.h,*.py
+description: Guidelines for hardware interface and controller development
+---
+
+# Hardware Interface and Controller Development Guidelines
+
+## Hardware Interface Architecture
+
+### Controller Manager Integration
+- Implement proper hardware interface classes
+- Use controller manager for robot control
+- Handle hardware initialization and cleanup
+- Implement proper error recovery mechanisms
+
+```cpp
+// C++ Hardware Interface Example
+class SpheroRvrHardwareInterface : public hardware_interface::RobotHW
+{
+public:
+    SpheroRvrHardwareInterface();
+    virtual ~SpheroRvrHardwareInterface();
+    
+    // Hardware interface methods
+    virtual bool init(ros::NodeHandle& root_nh, ros::NodeHandle& robot_hw_nh);
+    virtual void read(const ros::Time& time, const ros::Duration& period);
+    virtual void write(const ros::Time& time, const ros::Duration& period);
+    
+private:
+    // Hardware resources
+    hardware_interface::JointStateInterface joint_state_interface_;
+    hardware_interface::VelocityJointInterface velocity_joint_interface_;
+    
+    // Joint data
+    std::vector<std::string> joint_names_;
+    std::vector<double> joint_positions_;
+    std::vector<double> joint_velocities_;
+    std::vector<double> joint_efforts_;
+    std::vector<double> joint_velocity_commands_;
+    
+    // Sphero RVR connection
+    SpheroRvrAsync* rvr_;
+};
+```
+
+### Python Hardware Interface
+```python
+#!/usr/bin/env python3
+
+import rospy
+from hardware_interface import HardwareInterface
+from controller_manager import ControllerManager
+from sphero_sdk.asyncio.client.toys.sphero_rvr_async import SpheroRvrAsync
+
+class SpheroRvrHardwareInterface:
+    """Hardware interface for Sphero RVR robot."""
+    
+    def __init__(self):
+        self.rvr = None
+        self.connected = False
+        self.joint_names = ['left_wheel', 'right_wheel']
+        self.joint_positions = [0.0, 0.0]
+        self.joint_velocities = [0.0, 0.0]
+        self.joint_efforts = [0.0, 0.0]
+        self.joint_velocity_commands = [0.0, 0.0]
+        
+    async def init_hardware(self):
+        """Initialize hardware connection."""
+        try:
+            self.rvr = SpheroRvrAsync()
+            await self.rvr.connect()
+            await self.rvr.wake()
+            self.connected = True
+            rospy.loginfo("Sphero RVR hardware initialized successfully")
+        except Exception as e:
+            rospy.logerr(f"Failed to initialize hardware: {e}")
+            self.connected = False
+            
+    async def cleanup_hardware(self):
+        """Cleanup hardware connection."""
+        if self.rvr and self.connected:
+            try:
+                await self.rvr.sleep()
+                await self.rvr.disconnect()
+                self.connected = False
+                rospy.loginfo("Hardware cleanup completed")
+            except Exception as e:
+                rospy.logerr(f"Error during hardware cleanup: {e}")
+```
+
+## Joint State Management
+
+### Joint State Interface
+- Implement proper joint state publishing
+- Handle joint limits and safety constraints
+- Provide accurate position, velocity, and effort data
+- Use appropriate coordinate frames
+
+```python
+def update_joint_states(self):
+    """Update joint state information."""
+    if not self.connected:
+        return
+        
+    try:
+        # Get current robot state from Sphero RVR
+        # This would typically involve reading from the robot's sensors
+        current_pose = self.get_current_pose()
+        current_velocity = self.get_current_velocity()
+        
+        # Update joint positions (odometry-based)
+        self.joint_positions[0] = current_pose.x  # Left wheel
+        self.joint_positions[1] = current_pose.x  # Right wheel
+        
+        # Update joint velocities
+        self.joint_velocities[0] = current_velocity.linear.x
+        self.joint_velocities[1] = current_velocity.linear.x
+        
+        # Update joint efforts (if available from robot)
+        self.joint_efforts[0] = 0.0  # Not directly available from RVR
+        self.joint_efforts[1] = 0.0
+        
+    except Exception as e:
+        rospy.logwarn(f"Error updating joint states: {e}")
+```
+
+### Velocity Command Interface
+```python
+def execute_velocity_commands(self):
+    """Execute velocity commands on hardware."""
+    if not self.connected:
+        return
+        
+    try:
+        # Convert joint velocities to robot motion
+        left_vel = self.joint_velocity_commands[0]
+        right_vel = self.joint_velocity_commands[1]
+        
+        # Convert to Sphero RVR drive command
+        linear_vel = (left_vel + right_vel) / 2.0
+        angular_vel = (right_vel - left_vel) / 2.0
+        
+        # Send command to robot
+        asyncio.create_task(self.send_drive_command(linear_vel, angular_vel))
+        
+    except Exception as e:
+        rospy.logerr(f"Error executing velocity commands: {e}")
+```
+
+## Controller Configuration
+
+### Controller Manager Setup
+```yaml
+# config/sphero_rvr_controllers.yaml
+sphero_rvr_controller:
+  type: diff_drive_controller/DiffDriveController
+  left_wheel: left_wheel
+  right_wheel: right_wheel
+  wheel_separation: 0.15
+  wheel_radius: 0.05
+  wheel_separation_multiplier: 1.0
+  wheel_radius_multiplier: 1.0
+  publish_rate: 50.0
+  cmd_vel_timeout: 0.5
+  base_frame_id: base_link
+  odom_frame_id: odom
+  enable_odom_tf: true
+  pose_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
+  twist_covariance_diagonal: [0.001, 0.001, 0.001, 0.001, 0.001, 0.01]
+  open_loop: false
+  canx_velocity_commands: false
+  use_stamped_vel: false
+  velocity_rolling_window_size: 10
+  min_radius: 0.1
+  max_radius: 0.0
+  min_rot_velocity: 0.1
+  max_rot_velocity: 0.0
+  accel_lim_v: 0.0
+  accel_lim_w: 0.0
+  decel_lim_v: 0.0
+  decel_lim_w: 0.0
+```
+
+### Launch File for Controllers
+```xml
+<launch>
+  <!-- Load controller configuration -->
+  <rosparam file="$(find sphero_rvr_hw)/config/sphero_rvr_controllers.yaml" command="load"/>
+  
+  <!-- Start controller manager -->
+  <node name="controller_manager" pkg="controller_manager" type="spawner" 
+        args="sphero_rvr_controller" output="screen"/>
+  
+  <!-- Start hardware interface -->
+  <node name="sphero_rvr_hw" pkg="sphero_rvr_hw" type="sphero_rvr_hw_node" 
+        output="screen">
+    <param name="device_path" value="$(arg device_path)" />
+  </node>
+</launch>
+```
+
+## Error Handling and Recovery
+
+### Connection Management
+```python
+class ConnectionManager:
+    """Manages Sphero RVR connection with automatic recovery."""
+    
+    def __init__(self):
+        self.rvr = None
+        self.connected = False
+        self.connection_retries = 0
+        self.max_retries = 5
+        self.retry_delay = 2.0
+        
+    async def ensure_connection(self):
+        """Ensure robot connection with retry logic."""
+        if self.connected:
+            return True
+            
+        for attempt in range(self.max_retries):
+            try:
+                await self.connect()
+                self.connected = True
+                self.connection_retries = 0
+                rospy.loginfo("Robot connected successfully")
+                return True
+            except Exception as e:
+                rospy.logwarn(f"Connection attempt {attempt + 1} failed: {e}")
+                await asyncio.sleep(self.retry_delay)
+                
+        rospy.logerr("Failed to connect to robot after maximum retries")
+        return False
+        
+    async def handle_connection_error(self, error):
+        """Handle connection errors with recovery."""
+        rospy.logerr(f"Connection error: {error}")
+        self.connected = False
+        
+        # Attempt to reconnect
+        if await self.ensure_connection():
+            rospy.loginfo("Connection recovered successfully")
+        else:
+            rospy.logerr("Failed to recover connection")
+```
+
+### Hardware State Monitoring
+```python
+class HardwareMonitor:
+    """Monitors hardware state and health."""
+    
+    def __init__(self):
+        self.last_heartbeat = rospy.Time.now()
+        self.heartbeat_timeout = rospy.Duration(5.0)
+        self.error_count = 0
+        self.max_errors = 10
+        
+    def update_heartbeat(self):
+        """Update heartbeat timestamp."""
+        self.last_heartbeat = rospy.Time.now()
+        
+    def check_health(self):
+        """Check hardware health status."""
+        now = rospy.Time.now()
+        if now - self.last_heartbeat > self.heartbeat_timeout:
+            rospy.logwarn("Hardware heartbeat timeout")
+            return False
+        return True
+        
+    def handle_error(self, error):
+        """Handle hardware errors."""
+        self.error_count += 1
+        rospy.logerr(f"Hardware error #{self.error_count}: {error}")
+        
+        if self.error_count >= self.max_errors:
+            rospy.logfatal("Maximum error count reached, shutting down")
+            rospy.signal_shutdown("Hardware error limit exceeded")
+```
+
+## Performance Optimization
+
+### Efficient Data Handling
+- Use appropriate data structures for sensor data
+- Implement data buffering for high-frequency sensors
+- Use efficient serialization for message passing
+- Minimize memory allocations in critical paths
+
+### Real-time Considerations
+- Use appropriate thread priorities for control loops
+- Implement proper synchronization for shared data
+- Use lock-free data structures where possible
+- Monitor and log timing performance
+
+## Testing and Validation
+
+### Hardware-in-the-Loop Testing
+- Test with actual hardware when possible
+- Use simulation for development and testing
+- Implement comprehensive unit tests
+- Validate controller performance with different loads
+
+### Safety Testing
+- Test emergency stop functionality
+- Validate error recovery mechanisms
+- Test with various failure scenarios
+- Ensure graceful degradation when hardware fails

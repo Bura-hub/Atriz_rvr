@@ -47,7 +47,23 @@ case "$1" in
     "interactive"|"2")
         echo -e "${GREEN}Ejecutando pruebas interactivas...${NC}"
         cd "$TESTING_DIR/interactive"
-        python3 test_individual_functions.py
+        echo "Opciones disponibles:"
+        echo "1. test_individual_functions.py"
+        echo "2. test_interactive.py"
+        echo "3. test_corrected.py"
+        echo "4. Ejecutar todos"
+        read -p "Selecciona una opción (1-4): " choice
+        case $choice in
+            1) python3 test_individual_functions.py ;;
+            2) python3 test_interactive.py ;;
+            3) python3 test_corrected.py ;;
+            4) 
+                python3 test_individual_functions.py
+                python3 test_interactive.py
+                python3 test_corrected.py
+                ;;
+            *) echo "Opción inválida" ;;
+        esac
         ;;
     "diagnostic"|"3")
         echo -e "${GREEN}Ejecutando diagnóstico del sistema...${NC}"

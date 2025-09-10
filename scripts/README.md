@@ -91,7 +91,7 @@ scripts/
 
 ### **1. Ejecutar el Driver Principal**
 ```bash
-cd scripts/core
+cd atriz_rvr_driver/scripts
 python3 Atriz_rvr_node.py
 ```
 

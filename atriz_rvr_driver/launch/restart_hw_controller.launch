@@ -10,7 +10,7 @@
     <remap from="/tf" to="/$(arg robot_name)/tf" />
     <remap from="/tf_static" to="/$(arg robot_name)/tf_static" />
 
-    <include file="$(find sphero_rvr_hw)/launch/hw_controller.launch" >
+    <include file="$(find atriz_rvr_driver)/launch/hw_controller.launch" >
         <arg name="as_simulation" value="$(arg as_simulation)" />
         <arg name="as_visualization" value="$(arg as_visualization)" />
         <arg name="pub_odom_as_tf" value="$(arg pub_odom_as_tf)" />           <!-- prevents the odom node to publish a separate tf. This is needed when an external tool, eg. ekf is handling the tf publish of the odom frame -->

@@ -1,0 +1,164 @@
+---
+globs: *.launch
+---
+
+# ROS Launch File Development Guidelines
+
+## Launch File Structure and Best Practices
+
+### Basic Launch File Template
+```xml
+<launch>
+  <!-- Parameters -->
+  <param name="robot_name" value="sphero_rvr" />
+  <param name="device_path" value="/dev/ttyUSB0" />
+  <param name="publish_rate" value="15.0" />
+  
+  <!-- Node definitions -->
+  <node name="sphero_rvr_node" pkg="sphero_rvr_hw" type="Atriz_rvr_node.py" output="screen">
+    <param name="device_path" value="$(arg device_path)" />
+    <param name="publish_rate" value="$(arg publish_rate)" />
+    <remap from="cmd_vel" to="sphero_rvr/cmd_vel" />
+  </node>
+  
+  <!-- Include other launch files -->
+  <include file="$(find sphero_rvr_hw)/launch/hw_controller.launch" />
+</launch>
+```
+
+### Argument Handling
+- Use `<arg>` tags for configurable parameters
+- Provide default values for all arguments
+- Use descriptive argument names
+- Document argument purposes in comments
+
+```xml
+<launch>
+  <!-- Arguments with defaults -->
+  <arg name="device_path" default="/dev/ttyUSB0" />
+  <arg name="publish_rate" default="15.0" />
+  <arg name="enable_imu" default="true" />
+  <arg name="enable_odometry" default="true" />
+  
+  <!-- Use arguments in nodes -->
+  <node name="sphero_rvr_node" pkg="sphero_rvr_hw" type="Atriz_rvr_node.py" output="screen">
+    <param name="device_path" value="$(arg device_path)" />
+    <param name="publish_rate" value="$(arg publish_rate)" />
+    <param name="enable_imu" value="$(arg enable_imu)" />
+    <param name="enable_odometry" value="$(arg enable_odometry)" />
+  </node>
+</launch>
+```
+
+### Namespacing and Remapping
+- Use namespaces for multiple robots or components
+- Remap topics to avoid conflicts
+- Use descriptive topic names
+
+```xml
+<launch>
+  <!-- Namespace for robot -->
+  <group ns="sphero_rvr">
+    <node name="controller" pkg="sphero_rvr_hw" type="Atriz_rvr_node.py" output="screen">
+      <!-- Remap topics to namespaced versions -->
+      <remap from="cmd_vel" to="cmd_vel" />
+      <remap from="odom" to="odom" />
+      <remap from="imu" to="imu" />
+    </node>
+  </group>
+</launch>
+```
+
+### Conditional Launching
+- Use `<if>` and `<unless>` tags for conditional logic
+- Test conditions based on parameters or arguments
+
+```xml
+<launch>
+  <arg name="enable_rviz" default="false" />
+  <arg name="enable_teleop" default="false" />
+  
+  <!-- Conditional RViz launch -->
+  <group if="$(arg enable_rviz)">
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find sphero_rvr_hw)/config/sphero_rvr.rviz" />
+  </group>
+  
+  <!-- Conditional teleop launch -->
+  <group if="$(arg enable_teleop)">
+    <node name="teleop_twist_keyboard" pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py" output="screen">
+      <remap from="cmd_vel" to="sphero_rvr/cmd_vel" />
+    </node>
+  </group>
+</launch>
+```
+
+### Error Handling and Safety
+- Include emergency stop mechanisms
+- Add timeout parameters for critical operations
+- Include health monitoring nodes
+
+```xml
+<launch>
+  <!-- Emergency stop node -->
+  <node name="emergency_stop" pkg="sphero_rvr_hw" type="emergency_stop.py" output="screen">
+    <param name="timeout" value="5.0" />
+    <remap from="cmd_vel" to="sphero_rvr/cmd_vel" />
+  </node>
+  
+  <!-- Health monitoring -->
+  <node name="health_monitor" pkg="sphero_rvr_hw" type="health_monitor.py" output="screen">
+    <param name="check_interval" value="1.0" />
+  </node>
+</launch>
+```
+
+### Configuration Management
+- Use YAML files for complex configurations
+- Load configurations with `<rosparam>` tags
+- Organize parameters logically
+
+```xml
+<launch>
+  <!-- Load configuration from YAML -->
+  <rosparam file="$(find sphero_rvr_hw)/config/sphero_rvr_params.yaml" command="load" />
+  
+  <!-- Override specific parameters -->
+  <param name="device_path" value="$(arg device_path)" />
+</launch>
+```
+
+### Launch File Organization
+- Create separate launch files for different scenarios
+- Use descriptive file names (e.g., `sphero_rvr_simulation.launch`)
+- Include proper documentation in launch files
+
+```xml
+<launch>
+  <!--
+    Sphero RVR Simulation Launch File
+    
+    This launch file starts the Sphero RVR robot in simulation mode.
+    
+    Usage:
+      roslaunch sphero_rvr_hw sphero_rvr_simulation.launch
+      
+    Arguments:
+      - enable_rviz: Start RViz visualization (default: true)
+      - enable_teleop: Start keyboard teleop (default: false)
+  -->
+</launch>
+```
+
+### Common Launch Patterns for Sphero RVR
+- Always include device path configuration
+- Set appropriate publish rates for sensors
+- Include IMU and odometry publishing options
+- Add LED control capabilities
+- Include battery monitoring
+
+### Testing Launch Files
+- Test with different argument combinations
+- Verify all nodes start correctly
+- Check topic connections and remapping
+- Validate parameter loading
+- Test emergency stop functionality

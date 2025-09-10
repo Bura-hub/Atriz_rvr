@@ -1,0 +1,80 @@
+---
+description: Debugging and testing guidelines for ROS Sphero RVR development
+---
+
+# Debugging and Testing Guidelines
+
+## ROS Debugging Tools
+- Use `rostopic echo` to monitor message flow
+- Use `rosnode list` to check node status
+- Use `rosparam list` to inspect parameters
+- Use `rosbag record` to capture data for analysis
+
+## Logging Best Practices
+- Use appropriate ROS log levels:
+  - `rospy.logdebug()` for detailed debugging info
+  - `rospy.loginfo()` for general information
+  - `rospy.logwarn()` for warnings
+  - `rospy.logerr()` for errors
+  - `rospy.logfatal()` for critical errors
+
+## Common Debugging Commands
+```bash
+# Check if ROS master is running
+roscore
+
+# List all running nodes
+rosnode list
+
+# Monitor specific topics
+rostopic echo /cmd_vel
+rostopic echo /odom
+
+# Check node information
+rosnode info /sphero_rvr_node
+
+# View parameter values
+rosparam get /sphero_rvr_node/device_path
+```
+
+## Testing Strategies
+- Test individual components in isolation
+- Use simulation when hardware is unavailable
+- Implement unit tests for utility functions
+- Test error conditions and edge cases
+
+## Hardware Testing
+- Always test with robot in safe environment
+- Implement emergency stop before testing
+- Test connection stability and recovery
+- Validate sensor readings against known values
+
+## Performance Monitoring
+- Monitor CPU usage during operation
+- Check memory usage for leaks
+- Monitor network/communication delays
+- Profile critical code sections
+
+## Common Issues and Solutions
+- **Connection Issues**: Check device permissions and paths
+- **Message Flow Problems**: Verify topic names and types
+- **Timing Issues**: Check loop rates and synchronization
+- **Hardware Errors**: Implement proper error handling and recovery
+
+## Debug Output Example
+```python
+def debug_callback(data):
+    rospy.logdebug(f"Received data: {data}")
+    rospy.loginfo(f"Processing message with timestamp: {data.header.stamp}")
+    
+    if data.linear.x > 1.0:
+        rospy.logwarn("High velocity detected: {data.linear.x}")
+```
+
+## Testing Checklist
+- [ ] Robot connects successfully
+- [ ] All sensors provide valid data
+- [ ] Motor control responds correctly
+- [ ] Emergency stop works
+- [ ] Error handling functions properly
+- [ ] Performance meets requirements

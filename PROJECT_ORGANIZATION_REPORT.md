@@ -154,7 +154,7 @@ atriz_rvr_serial/
 - ✅ **`atriz_rvr_driver/scripts/test_both_topics.py`** - Duplicado eliminado
 
 ### **✅ Archivos Únicos Confirmados**
-- ✅ **`scripts/core/Atriz_rvr_node.py`** - Driver principal (ÚNICO)
+- ✅ **`atriz_rvr_driver/scripts/Atriz_rvr_node.py`** - Driver principal (ÚNICO)
 - ✅ **`scripts/utilities/test_both_topics.py`** - Script de prueba (ÚNICO)
 
 ---
@@ -195,7 +195,7 @@ atriz_rvr_serial/
 
 ### **🚀 Para Desarrolladores**
 1. **Lee la documentación** en `docs/README.md`
-2. **Usa el driver** desde `scripts/core/Atriz_rvr_node.py`
+2. **Usa el driver** desde `atriz_rvr_driver/scripts/Atriz_rvr_node.py`
 3. **Ejecuta pruebas** con `./run_tests.sh`
 4. **Configura el entorno** con `python3 setup_python_path.py`
 

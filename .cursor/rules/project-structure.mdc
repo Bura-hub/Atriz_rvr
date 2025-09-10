@@ -1,0 +1,33 @@
+---
+alwaysApply: true
+---
+
+# Sphero RVR ROS Project Structure
+
+This is a ROS (Robot Operating System) project for controlling a Sphero RVR robot. The main components are:
+
+## Key Entry Points
+- **Main ROS Node**: [Atriz_rvr_node.py](mdc:sphero_rvr_hw/scripts/Atriz_rvr_node.py) - Primary entry point for the Sphero RVR control
+- **Alternative Node**: [rvr-ros.py](mdc:sphero_rvr_hw/scripts/rvr-ros.py) - Alternative ROS interface implementation
+- **Startup Script**: [start_ros.sh](mdc:start_ros.sh) - Automated startup script for ROS environment
+
+## Project Structure
+- **Hardware Interface**: [sphero_rvr_hw/](mdc:sphero_rvr_hw/) - Hardware abstraction layer and main package
+- **ROS Messages**: [sphero_rvr_msgs/](mdc:sphero_rvr_msgs/) - Custom ROS message definitions
+- **Sphero SDK**: [sphero_sdk/](mdc:sphero_rvr_hw/scripts/sphero_sdk/) - Sphero SDK integration
+- **Serial Library**: [serial_lib/](mdc:serial_lib/) - Serial communication utilities
+- **Build System**: [build/](mdc:build/) - Catkin build artifacts
+- **Development Environment**: [devel/](mdc:devel/) - Development setup files
+
+## Key Configuration Files
+- **Package Definition**: [package.xml](mdc:sphero_rvr_hw/package.xml) - ROS package metadata
+- **Build Configuration**: [CMakeLists.txt](mdc:sphero_rvr_hw/CMakeLists.txt) - Catkin build configuration
+- **Python Setup**: [setup.py](mdc:sphero_rvr_hw/setup.py) - Python package setup
+
+## Important Scripts
+- **Tools**: [rvr_tools.py](mdc:sphero_rvr_hw/scripts/rvr_tools.py) - Utility functions
+- **Emergency Stop**: [emergency_stop.py](mdc:sphero_rvr_hw/scripts/emergency_stop.py) - Safety mechanisms
+- **RViz Control**: [cmd_vel_rviz.py](mdc:sphero_rvr_hw/scripts/cmd_vel_rviz.py) - RViz integration
+- **ROS Restarter**: [rvr-ros-restarter.py](mdc:sphero_rvr_hw/scripts/rvr-ros-restarter.py) - Automatic restart functionality
+
+The project follows ROS conventions with catkin workspace structure and uses both Python and C++ components for robot control.

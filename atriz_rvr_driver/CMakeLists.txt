@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 2.8.3)
-project(sphero_rvr_hw)
+cmake_minimum_required(VERSION 3.0.2)
+project(atriz_rvr_driver)
 
 add_compile_options(-std=c++17 -fconcepts)
 

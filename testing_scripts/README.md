@@ -91,7 +91,7 @@ cd testing_scripts/launch
 
 2. **Driver Atriz RVR ejecutándose**:
    ```bash
-   python3 ../sphero_rvr_hw/scripts/Atriz_rvr_node.py
+   python3 ../atriz_rvr_driver/scripts/Atriz_rvr_node.py
    ```
 
 3. **Robot Sphero RVR conectado y emparejado**

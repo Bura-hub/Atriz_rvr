@@ -1,0 +1,73 @@
+---
+globs: *.py
+---
+
+# Python ROS Development Standards
+
+## Code Style and Structure
+- Use Python 3.8+ syntax and features
+- Follow PEP 8 style guidelines
+- Use meaningful variable and function names
+- Add comprehensive docstrings for all functions and classes
+- Use type hints where appropriate
+
+## ROS-Specific Conventions
+- Always use `#!/usr/bin/env python3` shebang
+- Import ROS modules in this order:
+  1. Standard library imports
+  2. Third-party imports (including ROS)
+  3. Local application imports
+- Use `rospy.loginfo()`, `rospy.logwarn()`, `rospy.logerr()` for logging instead of print statements
+- Initialize ROS node with descriptive names: `rospy.init_node('descriptive_node_name')`
+
+## Async/Await Patterns
+- Use `asyncio` for asynchronous operations with Sphero SDK
+- Properly handle async context managers
+- Use `asyncio.ensure_future()` for background tasks
+- Handle exceptions in async functions with try/catch blocks
+
+## Error Handling
+- Always wrap main execution in try/except blocks
+- Use specific exception types when possible
+- Log errors with appropriate ROS log levels
+- Implement graceful shutdown with signal handlers
+
+## Import Organization Example
+```python
+#!/usr/bin/env python3
+
+# Standard library
+import asyncio
+import signal
+import time
+
+# ROS imports
+import rospy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+
+# Sphero SDK imports
+from sphero_sdk.asyncio.client.toys.sphero_rvr_async import SpheroRvrAsync
+
+# Local imports
+import rvr_tools
+```
+
+## Function Documentation
+```python
+def example_function(param1: str, param2: int) -> bool:
+    """
+    Brief description of what the function does.
+    
+    Args:
+        param1 (str): Description of parameter 1
+        param2 (int): Description of parameter 2
+        
+    Returns:
+        bool: Description of return value
+        
+    Raises:
+        ValueError: When invalid parameters are provided
+    """
+    pass
+```

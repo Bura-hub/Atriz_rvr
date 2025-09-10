@@ -15,7 +15,7 @@ def setup_sphero_sdk_path():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Construir la ruta al SDK de Sphero
-    sdk_path = os.path.join(current_dir, '..', '..', 'atriz_rvr_driver', 'scripts')
+    sdk_path = os.path.join(current_dir, 'sphero_sdk')
     sdk_path = os.path.abspath(sdk_path)
     
     # Verificar que la ruta existe

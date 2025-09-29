@@ -75,6 +75,7 @@ add_service_files(
   SetMultipleLEDs.srv
   GetSystemInfo.srv
   GetControlState.srv
+  GetRGBCSensorValues.srv
   SetDriveParameters.srv
   ConfigureStreaming.srv
   StartStreaming.srv

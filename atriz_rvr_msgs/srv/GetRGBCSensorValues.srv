@@ -1,0 +1,9 @@
+# Request
+---
+# Response
+uint16 red_channel_value
+uint16 green_channel_value
+uint16 blue_channel_value
+uint16 clear_channel_value
+bool success
+string message

@@ -67,7 +67,8 @@ from atriz_rvr_msgs.srv import (
     SendInfraredMessageResponse, SetIREvading, SetIREvadingResponse, SetLEDRGB, SetLEDRGBResponse,
     SetMultipleLEDs, SetMultipleLEDsResponse, GetSystemInfo, GetSystemInfoResponse,
     GetControlState, GetControlStateResponse, SetDriveParameters, SetDriveParametersResponse,
-    ConfigureStreaming, ConfigureStreamingResponse, StartStreaming, StartStreamingResponse)
+    ConfigureStreaming, ConfigureStreamingResponse, StartStreaming, StartStreamingResponse,
+    GetRGBCSensorValues, GetRGBCSensorValuesResponse)
 
 # =======================================================
 # Variables globales
@@ -537,9 +538,32 @@ def set_led_rgb_callback(req):
                 message="Valores RGB deben estar entre 0 y 255"
             )
         
-        # Controlar LED
-        asyncio.run(rvr.led_control.set_led_rgb(
-            req.led_id, req.red, req.green, req.blue
+        # Mapear led_id a RvrLedGroups
+        led_groups_map = {
+            0: RvrLedGroups.status_indication_left,
+            1: RvrLedGroups.status_indication_right,
+            2: RvrLedGroups.headlight_left,
+            3: RvrLedGroups.headlight_right,
+            4: RvrLedGroups.battery_door_front,
+            5: RvrLedGroups.battery_door_rear,
+            6: RvrLedGroups.power_button_front,
+            7: RvrLedGroups.power_button_rear,
+            8: RvrLedGroups.brakelight_left,
+            9: RvrLedGroups.brakelight_right,
+            10: RvrLedGroups.all_lights,
+            11: RvrLedGroups.undercarriage_white
+        }
+        
+        if req.led_id not in led_groups_map:
+            return SetLEDRGBResponse(
+                success=False,
+                message=f"LED ID {req.led_id} no válido. Use 0-11"
+            )
+        
+        # Controlar LED usando set_all_leds con el grupo específico
+        asyncio.run(rvr.set_all_leds(
+            led_groups_map[req.led_id].value,
+            [req.red, req.green, req.blue]
         ))
         
         return SetLEDRGBResponse(
@@ -572,15 +596,36 @@ def set_multiple_leds_callback(req):
                 message="Valores RGB deben estar entre 0 y 255"
             )
         
-        # Preparar datos
-        rgb_values = []
-        for i in range(len(req.led_ids)):
-            rgb_values.extend([req.red_values[i], req.green_values[i], req.blue_values[i]])
+        # Mapear led_ids a RvrLedGroups
+        led_groups_map = {
+            0: RvrLedGroups.status_indication_left,
+            1: RvrLedGroups.status_indication_right,
+            2: RvrLedGroups.headlight_left,
+            3: RvrLedGroups.headlight_right,
+            4: RvrLedGroups.battery_door_front,
+            5: RvrLedGroups.battery_door_rear,
+            6: RvrLedGroups.power_button_front,
+            7: RvrLedGroups.power_button_rear,
+            8: RvrLedGroups.brakelight_left,
+            9: RvrLedGroups.brakelight_right,
+            10: RvrLedGroups.all_lights,
+            11: RvrLedGroups.undercarriage_white
+        }
         
-        # Controlar LEDs
-        asyncio.run(rvr.led_control.set_multiple_leds_with_rgb(
-            req.led_ids, rgb_values
-        ))
+        # Validar que todos los led_ids sean válidos
+        for led_id in req.led_ids:
+            if led_id not in led_groups_map:
+                return SetMultipleLEDsResponse(
+                    success=False,
+                    message=f"LED ID {led_id} no válido. Use 0-11"
+                )
+        
+        # Controlar cada LED individualmente usando set_all_leds
+        for i, led_id in enumerate(req.led_ids):
+            asyncio.run(rvr.set_all_leds(
+                led_groups_map[led_id].value,
+                [req.red_values[i], req.green_values[i], req.blue_values[i]]
+            ))
         
         return SetMultipleLEDsResponse(
             success=True,
@@ -762,6 +807,62 @@ def start_streaming_callback(req):
     except Exception as e:
         rospy.logerr('({}) Error iniciando streaming: {}'.format(rospy.get_name(), str(e)))
         return StartStreamingResponse(
+            success=False,
+            message=f"Error: {str(e)}"
+        )
+
+def get_rgbc_sensor_values_callback(req):
+    """
+    Callback para obtener valores RGBC del sensor sin activar el LED.
+    
+    Este callback usa get_rgbc_sensor_values directamente de la SDK,
+    que NO activa el LED del sensor, a diferencia de enable_color_detection.
+    
+    Returns:
+        GetRGBCSensorValuesResponse: Valores RGBC del sensor
+    """
+    try:
+        rospy.loginfo('({}) Solicitando datos RGBC del sensor (SIN activar LED)'.format(rospy.get_name()))
+        
+        # Usar get_rgbc_sensor_values directamente (sin activar LED)
+        result = asyncio.run(rvr.get_rgbc_sensor_values(timeout=5.0))
+        
+        if result:
+            # Extraer valores RGBC
+            red = result.get('red_channel_value', 0)
+            green = result.get('green_channel_value', 0)
+            blue = result.get('blue_channel_value', 0)
+            clear = result.get('clear_channel_value', 0)
+            
+            rospy.loginfo('({}) Datos RGBC obtenidos: R={}, G={}, B={}, C={}'.format(
+                rospy.get_name(), red, green, blue, clear))
+            
+            return GetRGBCSensorValuesResponse(
+                red_channel_value=red,
+                green_channel_value=green,
+                blue_channel_value=blue,
+                clear_channel_value=clear,
+                success=True,
+                message="Datos RGBC obtenidos exitosamente (SIN activar LED)"
+            )
+        else:
+            rospy.logwarn('({}) No se recibieron datos del sensor RGBC'.format(rospy.get_name()))
+            return GetRGBCSensorValuesResponse(
+                red_channel_value=0,
+                green_channel_value=0,
+                blue_channel_value=0,
+                clear_channel_value=0,
+                success=False,
+                message="No se recibieron datos del sensor"
+            )
+            
+    except Exception as e:
+        rospy.logerr('({}) Error obteniendo datos RGBC: {}'.format(rospy.get_name(), str(e)))
+        return GetRGBCSensorValuesResponse(
+            red_channel_value=0,
+            green_channel_value=0,
+            blue_channel_value=0,
+            clear_channel_value=0,
             success=False,
             message=f"Error: {str(e)}"
         )
@@ -1518,6 +1619,7 @@ if __name__ == '__main__':
     rospy.Service('set_drive_parameters', SetDriveParameters, set_drive_parameters_callback)
     rospy.Service('configure_streaming', ConfigureStreaming, configure_streaming_callback)
     rospy.Service('start_streaming', StartStreaming, start_streaming_callback)
+    rospy.Service('get_rgbc_sensor_values', GetRGBCSensorValues, get_rgbc_sensor_values_callback)
         
     # Inicializa el Flag de stop de emergencia en False
     set_emergency_stop(False)

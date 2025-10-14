@@ -66,7 +66,7 @@ python3 01_avanzar.py
 
 ## 📚 ¿Qué Hay en Esta Carpeta?
 
-### 🎯 9 Scripts Organizados por Nivel
+### 🎯 10 Scripts Organizados por Nivel
 
 ```
 NIVEL 1: Básico (⭐-⭐⭐)
@@ -80,18 +80,22 @@ NIVEL 2: Intermedio (⭐⭐⭐)
 ├── 10_movimiento_completo.py   Control total
 └── 11_sensor_avanzado.py       Calibración + modos
 
-NIVEL 3: Herramientas
+NIVEL 3: Proyecto Final (⭐⭐⭐⭐)
+└── seguidor_linea_profesional.py   🏁 Seguidor de línea con PID
+
+NIVEL 4: Herramientas
 ├── 90_template.py        Crear tus scripts
 └── 99_test_ctrl_c.py     Probar Ctrl+C
 ```
 
-### 📖 3 Documentos Esenciales
+### 📖 4 Documentos Esenciales
 
 | Archivo | Contenido |
 |---------|-----------|
 | **00_LEEME_PRIMERO.md** | 🚀 Este archivo - Todo lo que necesitas |
 | **GUIA_PASO_A_PASO.md** | 📚 Tutorial detallado de cada script |
 | **REFERENCIAS.md** | 📐 Fórmulas, tablas y datos técnicos |
+| **SEGUIDOR_LINEA_DOCS.md** | 🏁 Documentación completa del seguidor profesional |
 
 ---
 
@@ -128,8 +132,22 @@ python3 10_movimiento_completo.py
 python3 11_sensor_avanzado.py
 ```
 
-### Día 5: Seguidor de Línea (4 horas)
-Ver `GUIA_PASO_A_PASO.md` → Proyecto Final
+### Día 5: Seguidor de Línea Profesional (4 horas)
+```bash
+# Leer documentación completa
+cat SEGUIDOR_LINEA_DOCS.md
+
+# Ejecutar con calibración automática
+python3 seguidor_linea_profesional.py
+
+# Ajustar parámetros
+nano seguidor_config.json
+
+# Optimizar para competencia
+python3 seguidor_linea_profesional.py
+```
+
+**📚 Documentación completa:** `SEGUIDOR_LINEA_DOCS.md`
 
 ---
 
@@ -243,14 +261,15 @@ rostopic pub -1 /cmd_vel geometry_msgs/Twist '{}'
 ## 📊 Estadísticas de la Carpeta
 
 ```
-📁 Total archivos: 15
-   ├── 🐍 Scripts Python: 9
-   └── 📄 Documentación: 6
+📁 Total archivos: 17
+   ├── 🐍 Scripts Python: 10
+   ├── 📄 Documentación: 6
+   └── ⚙️  Configuración: 1 (JSON)
 
-📏 Líneas de código: ~3,100
-💾 Tamaño total: 116 KB
+📏 Líneas de código: ~3,700
+💾 Tamaño total: 175 KB
 
-⏱️ Tiempo estimado curso: 14 horas
+⏱️ Tiempo estimado curso: 16 horas
 🎯 Nivel final: Seguidor de línea
 ```
 

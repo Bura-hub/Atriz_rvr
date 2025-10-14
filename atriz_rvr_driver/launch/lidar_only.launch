@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- ========================================== -->
+  <!-- YDLIDAR X2 Launch File -->
+  <!-- Parte del proyecto Sphero RVR -->
+  <!-- ========================================== -->
+  
+  <arg name="port" default="/dev/ttyUSB0" />
+  <arg name="frame_id" default="laser" />
+  
+  <node name="ydlidar_lidar_publisher" pkg="ydlidar_ros_driver" type="ydlidar_ros_driver_node" output="screen" respawn="false">
+    <param name="port"         type="string" value="$(arg port)"/>  
+    <param name="baudrate"     type="int"    value="115200"/>  
+    <param name="frame_id"     type="string" value="$(arg frame_id)"/>
+    <param name="ignore_array" type="string" value=""/>
+    
+    <param name="lidar_type"       type="int" value="1"/>
+    <param name="device_type"      type="int" value="0"/>
+    <param name="sample_rate"      type="int" value="3"/>
+    <param name="abnormal_check_count" type="int" value="4"/>
+    
+    <param name="resolution_fixed"    type="bool" value="true"/>
+    <param name="auto_reconnect"      type="bool" value="true"/>
+    <param name="reversion"           type="bool" value="false"/>
+    <param name="inverted"            type="bool" value="true"/>
+    <param name="isSingleChannel"     type="bool" value="true"/>
+    <param name="intensity"           type="bool" value="false"/>
+    <param name="support_motor_dtr"   type="bool" value="true"/>
+    <param name="invalid_range_is_inf" type="bool" value="false"/>
+    <param name="point_cloud_preservative" type="bool" value="false"/>
+    
+    <param name="angle_min"    type="double" value="-180" />
+    <param name="angle_max"    type="double" value="180" />
+    <param name="range_min"    type="double" value="0.1" />
+    <param name="range_max"    type="double" value="12.0" />
+    <param name="frequency"    type="double" value="10.0"/>
+  </node>
+  
+  <node pkg="tf" type="static_transform_publisher" name="base_to_laser"
+    args="0.0 0.0 0.10 0.0 0.0 0.0 /base_link /$(arg frame_id) 50" />
+    
+</launch>
+

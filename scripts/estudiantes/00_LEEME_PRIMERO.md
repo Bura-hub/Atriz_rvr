@@ -34,7 +34,7 @@ ssh sphero@[IP_del_robot]`
 ### 2️⃣ Abrir Carpeta del Proyecto (en VS Code)
 ```
 File → Open Folder...
-Ruta: /home/sphero/atriz_git/src/ros_sphero_rvr
+Ruta: /home/sphero/atriz_git/src/Atriz_rvr
 ```
 
 ### 3️⃣ Iniciar ROS (Terminal 1)
@@ -44,13 +44,13 @@ roscore
 
 ### 4️⃣ Iniciar Driver del Robot (Terminal 2)
 ```bash
-cd ~/atriz_git/src/ros_sphero_rvr/atriz_rvr_driver/scripts
+cd ~/atriz_git/src/Atriz_rvr/atriz_rvr_driver/scripts
 python3 Atriz_rvr_node.py
 ```
 
 ### 5️⃣ Ejecutar Primer Script (Terminal 3)
 ```bash
-cd ~/atriz_git/src/ros_sphero_rvr/scripts/estudiantes
+cd ~/atriz_git/src/Atriz_rvr/scripts/estudiantes
 python3 01_avanzar.py
 ```
 
@@ -333,7 +333,7 @@ killall -9 roscore rosmaster rosout
 
 **Paso 3: Abrir Proyecto**
 1. File → Open Folder...
-2. Ruta: `/home/sphero/atriz_git/src/ros_sphero_rvr`
+2. Ruta: `/home/sphero/atriz_git/src/Atriz_rvr`
 3. Click OK
 
 **Paso 4: Abrir Terminal**

@@ -67,7 +67,7 @@ Aprender a programar el robot Sphero RVR de forma **práctica y progresiva**, en
    ```bash
    # En terminal de VS Code
    pwd
-   # Debe mostrar: /home/sphero/atriz_git/src/ros_sphero_rvr
+   # Debe mostrar: /home/sphero/atriz_git/src/Atriz_rvr
    ```
 
 **✅ Todos conectados → Continuar**
@@ -84,14 +84,14 @@ roscore
 
 **Terminal 2 - Iniciar driver del robot:**
 ```bash
-cd ~/atriz_git/src/ros_sphero_rvr/atriz_rvr_driver/scripts
+cd ~/atriz_git/src/Atriz_rvr/atriz_rvr_driver/scripts
 python3 Atriz_rvr_node.py
 ```
 > Dejar esta terminal corriendo. Esperar ~30 segundos hasta ver mensajes del robot.
 
 **Terminal 3 - Verificar:**
 ```bash
-cd ~/atriz_git/src/ros_sphero_rvr/scripts/estudiantes
+cd ~/atriz_git/src/Atriz_rvr/scripts/estudiantes
 rostopic list
 ```
 

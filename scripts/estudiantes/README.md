@@ -22,5 +22,5 @@
 
 ---
 
-*Versión 3.0 - Documentación consolidada y sin redundancias*
+*Versión 3.0 - Documentación consolidada*
 

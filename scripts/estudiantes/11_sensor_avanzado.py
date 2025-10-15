@@ -3,21 +3,28 @@
 Script 2: Sensor de Color del Sphero RVR
 Este script enseña cómo leer el sensor de color y tomar decisiones
 
+ESTE SCRIPT ENSEÑA PROGRAMACIÓN AVANZADA CON SENSORES
+- Demuestra el uso de callbacks en tiempo real
+- Enseña identificación de colores por umbrales
+- Muestra diferentes modos de operación
+- Introduce conceptos de calibración de sensores
+- Enseña toma de decisiones basada en sensores
+
 INSTRUCCIONES:
 1. Asegúrate de que el robot esté conectado y ROS esté corriendo
-2. Ejecuta: python3 2_sensor_color.py
+2. Ejecuta: python3 11_sensor_avanzado.py
 3. Selecciona el modo que deseas probar
 4. Experimenta con diferentes colores
 """
 
 # ============================================
-# IMPORTACIONES
+# IMPORTACIONES NECESARIAS
 # ============================================
-import rospy
-from atriz_rvr_msgs.msg import Color  # Mensaje personalizado para color
-from geometry_msgs.msg import Twist   # Para controlar movimiento
-from std_srvs.srv import SetBool     # Servicio para activar/desactivar sensor
-import time
+import rospy                          # Biblioteca principal de ROS para Python
+from atriz_rvr_msgs.msg import Color  # Mensaje personalizado para datos de color
+from geometry_msgs.msg import Twist   # Para controlar movimiento del robot
+from std_srvs.srv import SetBool      # Servicio para activar/desactivar sensor
+import time                           # Para controlar tiempos y mediciones
 import signal                         # Para manejar señales del sistema (Ctrl+C)
 import sys                            # Para salir del programa
 
@@ -26,20 +33,40 @@ import sys                            # Para salir del programa
 # ============================================
 class DetectorColor:
     """
-    Esta clase lee el sensor de color y controla el robot según el color detectado
+    Esta clase lee el sensor de color y controla el robot según el color detectado.
+    
+    CONCEPTOS AVANZADOS DE PROGRAMACIÓN:
+    - Callbacks en tiempo real para procesar datos de sensores
+    - Identificación de colores usando umbrales RGB
+    - Múltiples modos de operación (monitoreo, reacción, calibración)
+    - Toma de decisiones basada en datos de sensores
+    - Manejo de servicios ROS para activar/desactivar sensores
     """
     
     def __init__(self):
         """
-        Constructor: Inicializa el detector de color
+        Constructor: Inicializa el detector de color.
+        
+        Esta función:
+        - Configura la conexión con ROS
+        - Crea suscriptores y publicadores
+        - Configura servicios para controlar el sensor
+        - Inicializa variables de estado
         """
+        # Inicializar el nodo ROS con un nombre único
         rospy.init_node('detector_color', anonymous=True)
         
-        # Variables para almacenar información
-        self.ultimo_color = None        # Último color detectado
+        # ============================================
+        # VARIABLES DE ESTADO
+        # ============================================
+        # Variables para almacenar información del sensor
+        self.ultimo_color = None        # Último color detectado [R, G, B]
         self.confianza = 0              # Confianza de la detección (0-100)
-        self.contador_lecturas = 0      # Contador de lecturas
+        self.contador_lecturas = 0      # Contador de lecturas del sensor
         
+        # ============================================
+        # CONFIGURACIÓN DE ROS
+        # ============================================
         # Crear suscriptor al tópico de color
         # Cada vez que llegue un mensaje, se llamará a self.callback_color
         rospy.Subscriber('/color', Color, self.callback_color)
@@ -47,6 +74,9 @@ class DetectorColor:
         # Crear publicador para controlar el robot
         self.publisher_movimiento = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         
+        # ============================================
+        # CONFIGURACIÓN DEL SENSOR
+        # ============================================
         # Esperar a que el servicio esté disponible
         rospy.loginfo("⏳ Esperando servicio /enable_color...")
         rospy.wait_for_service('/enable_color')
@@ -54,10 +84,14 @@ class DetectorColor:
         # Crear cliente del servicio para habilitar el sensor
         self.servicio_color = rospy.ServiceProxy('/enable_color', SetBool)
         
-        # Configurar manejador de señales para Ctrl+C
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
+        # ============================================
+        # CONFIGURACIÓN DE SEGURIDAD
+        # ============================================
+        # Configurar manejador de señales para Ctrl+C y terminación del sistema
+        signal.signal(signal.SIGINT, self.signal_handler)   # Ctrl+C
+        signal.signal(signal.SIGTERM, self.signal_handler)   # Terminación del sistema
         
+        # Mostrar información de inicialización
         rospy.loginfo("=" * 60)
         rospy.loginfo("✅ Detector de color iniciado")
         rospy.loginfo("📡 Suscrito a: /color")

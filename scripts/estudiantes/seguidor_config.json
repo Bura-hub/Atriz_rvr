@@ -1,0 +1,15 @@
+{
+  "velocidad_maxima": 0.05,
+  "velocidad_minima": 0.02,
+  "velocidad_busqueda": 0.05,
+  "velocidad_angular_max": 1.0,
+  "pid_kp": 0.5,
+  "pid_ki": 0.0,
+  "pid_kd": 0.4,
+  "umbral_negro": 50,
+  "umbral_blanco": 200,
+  "timeout_linea_perdida": 20.0,
+  "timeout_calibracion": 5.0,
+  "tamano_buffer": 5
+}
+

@@ -1,0 +1,5 @@
+{
+  "umbral_negro": 60,
+  "umbral_blanco": 247,
+  "hysteresis_margin": 5.0
+}

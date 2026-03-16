@@ -110,7 +110,7 @@ chmod +x diagnostic/*.py
 ### **Configurar PATH (Opcional)**
 ```bash
 # Agregar al .bashrc para usar desde cualquier lugar
-export ATRIZ_TESTING_PATH="/home/sphero/atriz_git/src/ros_sphero_rvr/testing_scripts"
+export ATRIZ_TESTING_PATH="/home/sphero/atriz_git/src/Atriz_rvr/testing_scripts"
 ```
 
 ## 📊 Reportes Generados
@@ -155,7 +155,7 @@ chmod +x testing_scripts/diagnostic/*.py
 ### **2. Driver no encontrado**
 ```bash
 # Asegúrate de estar en la carpeta correcta
-cd /home/sphero/atriz_git/src/ros_sphero_rvr
+cd /home/sphero/atriz_git/src/Atriz_rvr
 ```
 
 ### **3. ROS no ejecutándose**

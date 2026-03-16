@@ -34,7 +34,7 @@ rostopic echo /odom
 rostopic echo /imu
 ```
 
-### 3. `/color` (sphero_rvr_msgs/Color)
+### 3. `/color` (atriz_rvr_msgs/Color)
 **Descripción**: Publica datos del sensor de color
 **Frecuencia**: Variable (solo cuando está habilitado)
 **Contenido**:
@@ -89,7 +89,7 @@ angular:
   z: 0.5"
 ```
 
-### 2. `/cmd_degrees` (sphero_rvr_msgs/DegreesTwist)
+### 2. `/cmd_degrees` (atriz_rvr_msgs/DegreesTwist)
 **Descripción**: Recibe comandos de velocidad en grados/segundo
 **Contenido**:
 - `linear_x`: Velocidad lineal en m/s
@@ -97,7 +97,7 @@ angular:
 
 **Uso**:
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "linear_x: 0.2
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "linear_x: 0.2
 angular_z: 30.0"
 ```
 
@@ -120,7 +120,7 @@ rostopic pub /is_emergency_stop std_msgs/Empty
 rosservice call /enable_color "data: true"
 ```
 
-### 2. `/battery_state` (sphero_rvr_msgs/BatteryState)
+### 2. `/battery_state` (atriz_rvr_msgs/BatteryState)
 **Descripción**: Obtiene el estado de la batería
 **Respuesta**:
 - `battery_percentage`: Porcentaje de carga (0-100)
@@ -161,7 +161,7 @@ rostopic echo /odom
 rosservice call /release_emergency_stop
 ```
 
-### 5. `/ir_mode` (sphero_rvr_msgs/SetIRMode)
+### 5. `/ir_mode` (atriz_rvr_msgs/SetIRMode)
 **Descripción**: Configura el modo de comunicación IR
 **Parámetros**:
 - `mode`: "broadcast", "following", o "off"

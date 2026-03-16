@@ -20,32 +20,32 @@ float32 angular_z   # Velocidad angular en grados/s (PRINCIPAL)
 ## Comandos Directos con Grados
 
 ### 1. Girar 90 grados por segundo
-```bashesstopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 90.0}" -r 10
+```bashesstopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 90.0}" -r 10
 ```
 
 ### 2. Girar 45 grados por segundo
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 45.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 45.0}" -r 10
 ```
 
 ### 3. Girar 10 grados por segundo
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 10.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 10.0}" -r 10
 ```
 
 ### 4. Mover hacia adelante a 0.5 m/s
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.5, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 0.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.5, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 0.0}" -r 10
 ```
 
 ### 5. Movimiento combinado (adelante + giro)
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.3, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 30.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.3, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 30.0}" -r 10
 ```
 
 ### 6. Parar el robot
 ```bash
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 0.0}" -r 1
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 0.0}" -r 1
 ```
 
 ## Ejemplos Prácticos
@@ -53,25 +53,25 @@ rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y
 ### Girar 360 grados en 10 segundos
 ```bash
 # 36 grados/s = 360° en 10s
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 36.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 36.0}" -r 10
 ```
 
 ### Girar 90 grados en 1 segundo
 ```bash
 # 90 grados/s = 90° en 1s
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 90.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 90.0}" -r 10
 ```
 
 ### Girar 1 grado por segundo (muy lento)
 ```bash
 # 1 grado/s = 360° en 6 minutos
-rostopic pub /cmd_degrees sphero_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 1.0}" -r 10
+rostopic pub /cmd_degrees atriz_rvr_msgs/DegreesTwist "{linear_x: 0.0, linear_y: 0.0, linear_z: 0.0, angular_x: 0.0, angular_y: 0.0, angular_z: 1.0}" -r 10
 ```
 
 ## Script de Ejemplo Interactivo
 
 ```bash
-python3 /home/sphero/atriz_git/src/ros_sphero_rvr/sphero_rvr_hw/scripts/degrees_control_example.py
+python3 /home/sphero/atriz_git/src/Atriz_rvr/sphero_rvr_hw/scripts/degrees_control_example.py
 ```
 
 ## Comparación de Tópicos

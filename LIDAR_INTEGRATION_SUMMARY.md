@@ -155,7 +155,12 @@ roslaunch ros_sphero_rvr rvr_with_lidar.launch
 ## 📚 Documentación Disponible
 
 1. **GUIA_COMPLETA_LIDAR.md**
-   - Instalación, configuración, troubleshooting
+   - **Paso 1**: Conexión física y regla udev (nombre fijo `/dev/ydlidar`)
+   - **Paso 2**: Instalación del SDK YDLIDAR (C++)
+   - **Paso 4**: Parámetros del modelo X2 (port, baudrate, frame_id)
+   - **Paso 5**: Fusión TF (rvr_base_link → laser) y launch maestro
+   - **Paso 6**: Ejecución y verificación (roslaunch, RViz con Fixed Frame odom)
+   - Instalación del driver ROS, configuración, troubleshooting, SLAM
    - Todo sobre el YDLIDAR X2
 
 2. **INTEGRACION_RVR_LIDAR.md**

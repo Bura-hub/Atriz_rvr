@@ -7,7 +7,7 @@ Script interactivo para probar las funcionalidades del Sphero RVR una por una.
 import rospy
 import time
 import sys
-from sphero_rvr_msgs.srv import (
+from atriz_rvr_msgs.srv import (
     GetEncoders, RawMotors, GetSystemInfo, GetControlState, 
     SetLEDRGB, SetMultipleLEDs, SendInfraredMessage, SetIREvading,
     SetDriveParameters, ConfigureStreaming, StartStreaming

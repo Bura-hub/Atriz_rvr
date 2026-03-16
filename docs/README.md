@@ -100,7 +100,7 @@ docs/
 - **Diagnóstico**: `testing_scripts/diagnostic/`
 
 ### **Archivos de Configuración**
-- **Driver Principal**: `sphero_rvr_hw/scripts/Atriz_rvr_node.py`
+- **Driver Principal**: `atriz_rvr_driver/scripts/Atriz_rvr_node.py`
 - **Scripts de Lanzamiento**: `testing_scripts/launch/`
 
 ## 📞 Soporte

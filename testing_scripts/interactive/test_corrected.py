@@ -6,7 +6,7 @@ Script de prueba corregido para las funcionalidades del Sphero RVR.
 
 import rospy
 import time
-from sphero_rvr_msgs.srv import GetEncoders, RawMotors, GetSystemInfo, GetControlState
+from atriz_rvr_msgs.srv import GetEncoders, RawMotors, GetSystemInfo, GetControlState
 
 def test_corrected_functionalities():
     """Prueba las funcionalidades corregidas."""

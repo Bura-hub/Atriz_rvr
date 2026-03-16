@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import rospy
-from sphero_rvr_msgs.msg import Color  # Reemplaza 'your_package' con el nombre del paquete que define el mensaje 'Color'
+from atriz_rvr_msgs.msg import Color
 
 def color_callback(msg):
     rospy.loginfo("Color detected: R: {}, G: {}, B: {}, Confidence: {}".format(

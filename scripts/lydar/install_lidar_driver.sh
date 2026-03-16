@@ -119,12 +119,26 @@ case $option in
         echo -e "${GREEN}📦 Instalando driver para YDLidar...${NC}"
         echo ""
         
-        # Instalar dependencias
+        # Instalar dependencias (incl. build-essential para SDK)
         echo -e "${YELLOW}📚 Instalando dependencias...${NC}"
         sudo apt-get update
-        sudo apt-get install -y cmake pkg-config python3-pip
+        sudo apt-get install -y cmake pkg-config build-essential python3-pip
         
         cd "$SRC_DIR"
+        
+        # Regla udev para nombre fijo /dev/ydlidar y permisos
+        echo ""
+        echo -e "${YELLOW}🔌 Configurando regla udev para YDLIDAR (nombre fijo /dev/ydlidar)...${NC}"
+        UDEV_RULE="/etc/udev/rules.d/ydlidar.rules"
+        if [ -f "$UDEV_RULE" ]; then
+            echo -e "${YELLOW}⚠️  La regla $UDEV_RULE ya existe${NC}"
+        else
+            echo 'KERNEL=="ttyUSB*", MODE="0666", SYMLINK+="ydlidar"' | sudo tee "$UDEV_RULE" > /dev/null
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger
+            echo -e "${GREEN}✅ Regla udev creada. El LIDAR estará en /dev/ydlidar (y en /dev/ttyUSB0)${NC}"
+        fi
+        echo ""
         
         # Instalar driver ROS
         if [ -d "ydlidar_ros_driver" ]; then
@@ -181,7 +195,7 @@ case $option in
 <launch>
   <node name="ydlidar_lidar_publisher" pkg="ydlidar_ros_driver" type="ydlidar_ros_driver_node" output="screen" respawn="false">
     <!-- YDLIDAR X2 - Configuración específica -->
-    <param name="port"         type="string" value="/dev/ttyUSB0"/>  
+    <param name="port"         type="string" value="/dev/ydlidar"/>  
     <param name="baudrate"     type="int"    value="115200"/>  
     <param name="frame_id"     type="string" value="laser"/>
     <param name="ignore_array" type="string" value=""/>
@@ -308,7 +322,7 @@ EOF
 <launch>
   <node name="ydlidar_lidar_publisher" pkg="ydlidar_ros_driver" type="ydlidar_ros_driver_node" output="screen" respawn="false">
     <!-- YDLIDAR X2 - Configuración específica -->
-    <param name="port"         type="string" value="/dev/ttyUSB0"/>  
+    <param name="port"         type="string" value="/dev/ydlidar"/>  
     <param name="baudrate"     type="int"    value="115200"/>  
     <param name="frame_id"     type="string" value="laser"/>
     <param name="ignore_array" type="string" value=""/>
@@ -405,16 +419,11 @@ echo ""
 echo "Para dar permisos temporales al puerto:"
 echo "  sudo chmod 666 /dev/ttyUSB0"
 echo ""
-echo "Para configurar permisos permanentes:"
-echo "  1. Crear regla udev:"
-echo "     sudo nano /etc/udev/rules.d/99-lidar.rules"
-echo ""
-echo "  2. Añadir la siguiente línea:"
-echo "     KERNEL==\"ttyUSB*\", ATTRS{idVendor}==\"10c4\", ATTRS{idProduct}==\"ea60\", MODE:=\"0666\", SYMLINK+=\"lidar\""
-echo ""
-echo "  3. Recargar reglas:"
-echo "     sudo udevadm control --reload-rules"
-echo "     sudo udevadm trigger"
+echo "Para YDLidar, si usaste este script ya se creó /etc/udev/rules.d/ydlidar.rules"
+echo "  y el dispositivo está en /dev/ydlidar. Para otros LIDAR o permisos manuales:"
+echo "  1. Crear regla udev: sudo nano /etc/udev/rules.d/ydlidar.rules"
+echo "  2. Añadir: KERNEL==\"ttyUSB*\", MODE=\"0666\", SYMLINK+=\"ydlidar\""
+echo "  3. Recargar: sudo udevadm control --reload-rules && sudo udevadm trigger"
 echo ""
 
 read -p "¿Deseas configurar permisos temporales ahora? (s/n): " perms
@@ -430,7 +439,7 @@ echo "=========================================="
 echo ""
 echo -e "${GREEN}📊 Configuración Confirmada del LIDAR:${NC}"
 echo "   Modelo:    YDLIDAR X2"
-echo "   Puerto:    /dev/ttyUSB0"
+echo "   Puerto:    /dev/ydlidar (o /dev/ttyUSB0 si no aplicaste la regla udev)"
 echo "   Baudrate:  115200"
 echo "   Protocolo: AA 55 (YDLidar)"
 echo "   Estado:    ✅ Listo para usar"
@@ -438,7 +447,7 @@ echo ""
 echo "📋 Próximos pasos:"
 echo ""
 echo "1. Probar el LIDAR (si aún no lo hiciste):"
-echo "   cd $CATKIN_WS/src/ros_sphero_rvr/scripts/lydar"
+echo "   cd $CATKIN_WS/src/Atriz_rvr/scripts/lydar"
 echo "   python3 test_lidar.py --scan"
 echo ""
 echo "2. Ejecutar el driver ROS:"
@@ -449,9 +458,8 @@ case $option in
         echo "   roslaunch rplidar_ros rplidar_a2.launch serial_port:=/dev/ttyUSB0 serial_baudrate:=115200"
         ;;
     2)
-        echo -e "   ${GREEN}roslaunch ydlidar_ros_driver x2_custom.launch${NC} ⭐ YDLIDAR X2"
-        echo "   # o con parámetros genéricos:"
-        echo "   roslaunch ydlidar_ros_driver ydlidar.launch serial_port:=/dev/ttyUSB0 serial_baudrate:=115200"
+        echo -e "   ${GREEN}roslaunch ydlidar_ros_driver x2_custom.launch${NC} ⭐ YDLIDAR X2 (puerto /dev/ydlidar)"
+        echo "   # si usas otro puerto: roslaunch ydlidar_ros_driver x2_custom.launch port:=/dev/ttyUSB0"
         ;;
     3)
         echo "   roslaunch ldlidar_stl_ros ld06.launch serial_port:=/dev/ttyUSB0"
@@ -470,8 +478,8 @@ echo "   - Topic: /scan"
 echo "   - Fixed Frame: laser"
 echo ""
 echo "4. Ver documentación completa:"
-echo "   cat $CATKIN_WS/src/ros_sphero_rvr/scripts/lydar/GUIA_COMPLETA_LIDAR.md"
-echo "   cat $CATKIN_WS/src/ros_sphero_rvr/scripts/lydar/YDLIDAR_X2_RESUMEN.md"
+echo "   cat $CATKIN_WS/src/Atriz_rvr/scripts/lydar/GUIA_COMPLETA_LIDAR.md"
+echo "   cat $CATKIN_WS/src/Atriz_rvr/scripts/lydar/YDLIDAR_X2_RESUMEN.md"
 echo ""
 echo "¡Listo! 🎉"
 

@@ -17,7 +17,7 @@
 
 ```
 Modelo:       YDLIDAR X2
-Puerto:       /dev/ttyUSB0
+Puerto:       /dev/ttyUSB0 o /dev/ydlidar (si configuraste la regla udev)
 Chip:         Silicon Labs CP2102 USB to UART Bridge
 Baudrate:     115200 bps
 Tasa datos:   ~7024 bytes/segundo
@@ -78,11 +78,73 @@ Estado:       ✅ FUNCIONANDO CORRECTAMENTE
 
 ## 🚀 Instalación Completada
 
-### Proceso Realizado
+Sigue estos pasos en orden para conectar el YDLIDAR X2 y preparar el sistema.
+
+### Paso 1: Conexión Física y Permisos de Puerto (Udev)
+
+El YDLIDAR se conecta mediante un adaptador USB. Cuando lo conectes a la Raspberry Pi, Linux le asignará un puerto (usualmente `/dev/ttyUSB0`). Para evitar que este puerto cambie si conectas otros dispositivos, conviene fijar un **nombre estático** con una regla udev.
+
+1. **Conecta el YDLIDAR X2** a un puerto USB de la Raspberry Pi.
+
+2. **Comprueba que fue detectado** en una terminal:
+   ```bash
+   ls -l /dev/ttyUSB*
+   ```
+   Deberías ver algo como `ttyUSB0` (o `ttyUSB1`, etc.).
+
+3. **Crea una regla udev** para nombre fijo y permisos permanentes:
+   ```bash
+   sudo nano /etc/udev/rules.d/ydlidar.rules
+   ```
+   Pega esta línea (crea el enlace simbólico `ydlidar` y da permisos de lectura/escritura):
+   ```
+   KERNEL=="ttyUSB*", MODE="0666", SYMLINK+="ydlidar"
+   ```
+   Guarda (`Ctrl+O`, `Enter`) y cierra (`Ctrl+X`).
+
+4. **Recarga las reglas udev**:
+   ```bash
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+   ```
+
+A partir de ahora el LiDAR estará disponible de forma estable en **`/dev/ydlidar`** (y seguirá existiendo en `/dev/ttyUSB0` si es el único dispositivo USB-serial).
+
+---
+
+### Paso 2: Instalar el SDK de YDLIDAR (C++)
+
+El driver de ROS para YDLIDAR necesita el **SDK base** instalado en el sistema.
+
+1. **Instala las herramientas de compilación**:
+   ```bash
+   sudo apt update
+   sudo apt install cmake pkg-config build-essential
+   ```
+
+2. **Clona, compila e instala el SDK**:
+   ```bash
+   cd ~
+   git clone https://github.com/YDLIDAR/YDLidar-SDK.git
+   cd YDLidar-SDK
+   mkdir build && cd build
+   cmake ..
+   make
+   sudo make install
+   ```
+   **Importante**: Sin `sudo make install` y (si aplica) `sudo ldconfig`, el paquete ROS no encontrará el SDK y la compilación fallará.
+
+Después de este paso puedes instalar el **driver ROS** (ydlidar_ros_driver) y compilar tu workspace; el script de instalación automática incluye ambos.
+
+---
+
+### Proceso Realizado (detalle)
+
+A continuación se detalla el flujo completo incluyendo verificación y driver ROS.
 
 #### 1. Detección Inicial ✅
 ```bash
-cd /home/sphero/atriz_git/src/ros_sphero_rvr/scripts/lydar
+cd /home/sphero/atriz_git/src/Atriz_rvr/scripts/lydar
 python3 test_lidar.py
 ```
 **Resultado**: 
@@ -131,7 +193,7 @@ source devel/setup.bash
 Todo el proceso se puede ejecutar automáticamente con:
 
 ```bash
-cd /home/sphero/atriz_git/src/ros_sphero_rvr/scripts/lydar
+cd /home/sphero/atriz_git/src/Atriz_rvr/scripts/lydar
 ./install_lidar_driver.sh
 # Seleccionar opción 2 (YDLidar)
 ```
@@ -494,6 +556,104 @@ scan_filter_chain:
 
 ## 🤖 Integración con Sphero RVR
 
+### Paso 4: Configurar los Parámetros para el Modelo X2
+
+El paquete `ydlidar_ros_driver` trae configuraciones para varios modelos. Para el **X2** hay que asegurarse de usar puerto, baudrate y `frame_id` correctos.
+
+**Opción A – Usar el launch del paquete YDLIDAR (X2.launch)**
+
+Si usas el launch que viene en el repositorio del driver:
+
+```bash
+nano ~/atriz_git/src/ydlidar_ros_driver/launch/X2.launch
+```
+
+**Opción B – Usar los launch de este proyecto (recomendado)**
+
+En este proyecto el X2 se configura en:
+
+- `atriz_rvr_driver/launch/rvr_with_lidar.launch` (RVR + LIDAR)
+- `atriz_rvr_driver/launch/lidar_only.launch` (solo LIDAR)
+- O el `x2_custom.launch` que genera `install_lidar_driver.sh` en `ydlidar_ros_driver/launch/`
+
+Verifica que los parámetros clave sean:
+
+- `port`: **`/dev/ydlidar`** (o `/dev/ttyUSB0` si no usas la regla udev)
+- `baudrate`: **`115200`**
+- `frame_id`: **`laser_frame`** (o `laser`; en este proyecto se usa `laser` por defecto; para RViz con Fixed Frame `odom` puedes usar `laser_frame`)
+
+Ejemplo de bloque XML:
+
+```xml
+<param name="port"         type="string" value="/dev/ydlidar"/>  
+<param name="baudrate"     type="int"    value="115200"/>  
+<param name="frame_id"     type="string" value="laser_frame"/>
+```
+
+---
+
+### Paso 5: Fusión de TF (Transformaciones) con el Sphero RVR
+
+El nodo **Atriz_rvr_node** publica el marco **`rvr_base_link`** (y la odometría en **`odom`**). El YDLIDAR publica los datos en su propio frame (p. ej. **`laser`** o **`laser_frame`**). Para que ROS sitúe los obstáculos respecto al robot, hay que publicar la transformación fija desde `rvr_base_link` hasta el frame del LIDAR.
+
+En este proyecto el **archivo launch maestro** que une RVR y LIDAR es:
+
+```text
+atriz_rvr_driver/launch/rvr_with_lidar.launch
+```
+
+Equivale al “rvr_lidar.launch” que se suele crear a mano: incluye el nodo del RVR, el driver del LIDAR y un `static_transform_publisher` con la posición del LIDAR respecto al RVR.
+
+En ese launch, la etiqueta relevante es algo como:
+
+```xml
+<node pkg="tf" type="static_transform_publisher" name="base_link_to_laser"
+      args="0 0 0.1 0 0 0 rvr_base_link laser_frame 50" />
+```
+
+Los argumentos **`0 0 0.1 0 0 0`** son **X Y Z Yaw Pitch Roll** en metros y radianes. Ahí se asume que el LIDAR está en el centro del RVR y **0,1 m (10 cm) por encima**. Ajusta estos valores a tu montaje real.
+
+**Árbol TF resultante:**
+
+- `odom` → `rvr_base_link` (lo publica el driver del RVR)
+- `rvr_base_link` → `laser` / `laser_frame` (static_transform_publisher)
+
+Así, los puntos del LIDAR quedan correctamente referidos al robot y a la odometría.
+
+---
+
+### Paso 6: Ejecución y Verificación
+
+1. **Lanzar el sistema RVR + LIDAR**
+
+   Desde el workspace:
+
+   ```bash
+   cd ~/atriz_git
+   source devel/setup.bash
+   roslaunch atriz_rvr_driver rvr_with_lidar.launch
+   ```
+
+   (Si solo quieres probar el LIDAR sin RVR: `roslaunch atriz_rvr_driver lidar_only.launch`.)
+
+2. **Abrir RViz** (en otra terminal o desde un PC con `ROS_MASTER_URI` apuntando a la Raspberry):
+
+   ```bash
+   rviz
+   ```
+
+3. **Configurar RViz**
+
+   - **Fixed Frame**: `odom` (así ves el robot y el LIDAR en el mismo marco).
+   - Añadir **TF**: para ver `rvr_base_link` y el frame del LIDAR (`laser` o `laser_frame`) moverse juntos.
+   - Añadir **LaserScan**: tópico **`/scan`**.
+
+Si todo está bien, verás el Sphero (su TF) en el centro moviéndose con la odometría y los puntos del LIDAR (en rojo) detectando paredes y obstáculos alrededor.
+
+¿Quieres seguir con un nodo de **Gmapping (SLAM)** para que el RVR construya mapas 2D con estos datos? Puedes usar la sección [SLAM con gmapping](#slam-con-gmapping) más abajo.
+
+---
+
 ### Montaje Físico
 
 1. **Posición**: Montar el LIDAR en la parte superior del RVR
@@ -503,43 +663,36 @@ scan_filter_chain:
 
 ### Configuración de TF (Transform)
 
-Crear `robot_description.launch`:
+El driver del RVR publica **odom → rvr_base_link**. Para que el LIDAR esté en el mismo árbol, publica **rvr_base_link → laser** (o **laser_frame**):
 
 ```xml
-<launch>
-  <!-- TF estático entre base_link y el LIDAR -->
-  <node pkg="tf" type="static_transform_publisher" name="base_to_laser"
-    args="0.0 0.0 0.15 0 0 0 base_link laser 50"/>
-  
-  <!-- 
-    Parámetros: x y z yaw pitch roll frame_id child_frame_id period_ms
-    Ajustar según posición real del LIDAR en el robot
-  -->
-</launch>
+<!-- TF estático: rvr_base_link -> laser (X Y Z Yaw Pitch Roll en m y rad) -->
+<node pkg="tf" type="static_transform_publisher" name="base_link_to_laser"
+  args="0.0 0.0 0.10 0.0 0.0 0.0 rvr_base_link laser 50"/>
 ```
+
+Ajusta los valores según la posición real del LIDAR sobre el RVR.
 
 ### Launch File Completo RVR + LIDAR
 
+El archivo **`atriz_rvr_driver/launch/rvr_with_lidar.launch`** ya hace esto. Equivalente manual:
+
 ```xml
 <launch>
-  <!-- Sphero RVR Driver -->
-  <include file="$(find sphero_rvr_hw)/launch/rvr.launch"/>
+  <!-- Sphero RVR Driver (publica odom -> rvr_base_link) -->
+  <include file="$(find atriz_rvr_driver)/launch/atriz_rvr_node.launch"/>
   
-  <!-- LIDAR Driver -->
-  <node name="ydlidar_node" pkg="ydlidar_ros_driver" type="ydlidar_ros_driver_node">
-    <param name="port" value="/dev/ttyUSB0"/>
-    <param name="baudrate" value="115200"/>
-    <param name="frame_id" value="laser"/>
-  </node>
+  <!-- LIDAR X2 (parámetros en el launch; frame_id laser o laser_frame) -->
+  <include file="$(find ydlidar_ros_driver)/launch/x2_custom.launch"/>
+  <!-- O incluir el nodo con params como en rvr_with_lidar.launch -->
   
-  <!-- Transform base_link -> laser -->
-  <node pkg="tf" type="static_transform_publisher" name="base_to_laser"
-    args="0.0 0.0 0.15 0 0 0 base_link laser 50"/>
-  
-  <!-- RViz para visualización -->
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find your_package)/rviz/rvr_lidar.rviz"/>
+  <!-- Transform rvr_base_link -> laser (Paso 5) -->
+  <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser"
+    args="0.0 0.0 0.10 0.0 0.0 0.0 rvr_base_link laser 50"/>
 </launch>
 ```
+
+Para visualizar: `rviz` con Fixed Frame **odom**, display **TF** y **LaserScan** en `/scan`.
 
 ### SLAM con gmapping
 
@@ -553,12 +706,12 @@ sudo apt-get install ros-noetic-gmapping
 `slam.launch`:
 ```xml
 <launch>
-  <!-- RVR + LIDAR -->
-  <include file="$(find your_package)/launch/rvr_lidar.launch"/>
+  <!-- RVR + LIDAR (usa rvr_with_lidar.launch) -->
+  <include file="$(find atriz_rvr_driver)/launch/rvr_with_lidar.launch"/>
   
   <!-- SLAM gmapping -->
   <node pkg="gmapping" type="slam_gmapping" name="slam_gmapping">
-    <param name="base_frame" value="base_link"/>
+    <param name="base_frame" value="rvr_base_link"/>
     <param name="odom_frame" value="odom"/>
     <param name="map_frame" value="map"/>
     

@@ -5,8 +5,12 @@
   <!-- ========================================== -->
   
   <!-- Arguments -->
-  <arg name="lidar_port" default="/dev/ttyUSB0" />
+  <!-- LIDAR: /dev/ydlidar si configuraste udev (ver GUIA_COMPLETA_LIDAR.md); si no, lidar_port:=/dev/ttyUSB0 -->
+  <arg name="lidar_port" default="/dev/ydlidar" />
   <arg name="lidar_frame" default="laser" />
+  <arg name="laser_x" default="0.0" />
+  <arg name="laser_y" default="0.0" />
+  <arg name="laser_z" default="0.10" />
   <arg name="rvr_serial_port" default="/dev/ttyS0" />
   
   <!-- ========================================== -->
@@ -26,7 +30,8 @@
     <param name="abnormal_check_count" type="int" value="4"/>
 
     <!-- Boolean Configuration -->
-    <param name="resolution_fixed"    type="bool" value="true"/>
+    <!-- false: acepta número variable de puntos (evita warning "Real point count > fixed") -->
+    <param name="resolution_fixed"    type="bool" value="false"/>
     <param name="auto_reconnect"      type="bool" value="true"/>
     <param name="reversion"           type="bool" value="false"/>
     <param name="inverted"            type="bool" value="true"/>
@@ -36,36 +41,33 @@
     <param name="invalid_range_is_inf" type="bool" value="false"/>
     <param name="point_cloud_preservative" type="bool" value="false"/>
 
-    <!-- Range Settings -->
+    <!-- Range Settings (X2 spec: 0.12–8 m, resolución ~2%, 5–8 Hz) -->
     <param name="angle_min"    type="double" value="-180" />
     <param name="angle_max"    type="double" value="180" />
     <param name="range_min"    type="double" value="0.1" />
-    <param name="range_max"    type="double" value="12.0" />
-    <param name="frequency"    type="double" value="10.0"/>
+    <param name="range_max"    type="double" value="8.0" />
+    <param name="frequency"    type="double" value="8.0"/>
   </node>
   
   <!-- ========================================== -->
-  <!-- 2. Sphero RVR Driver (uncomment when ready) -->
+  <!-- 2. Atriz RVR Driver -->
   <!-- ========================================== -->
-  <!-- 
-  <include file="$(find sphero_rvr_hw)/launch/sphero_rvr.launch">
-    <arg name="serial_port" value="$(arg rvr_serial_port)" />
-  </include>
-  -->
+  <include file="$(find atriz_rvr_driver)/launch/atriz_rvr_node.launch" />
   
   <!-- ========================================== -->
-  <!-- 3. Static TF: base_link -> laser -->
+  <!-- 3. Static TF: rvr_base_link -> laser (Paso 5 de GUIA_COMPLETA_LIDAR.md) -->
   <!-- ========================================== -->
-  <!-- Adjust x,y,z values based on LIDAR position on RVR -->
+  <!-- El driver Atriz publica odom -> rvr_base_link; aquí enlazamos el LiDAR al RVR -->
+  <!-- Ajusta laser_x, laser_y, laser_z según la posición física del LiDAR sobre el RVR -->
   <node pkg="tf" type="static_transform_publisher" name="base_to_laser_tf"
-    args="0.0 0.0 0.10 0.0 0.0 0.0 /base_link /$(arg lidar_frame) 50" />
+    args="$(arg laser_x) $(arg laser_y) $(arg laser_z) 0.0 0.0 0.0 rvr_base_link $(arg lidar_frame) 50" />
   
   <!-- ========================================== -->
   <!-- 4. Optional: RViz Visualization -->
   <!-- ========================================== -->
   <!-- Uncomment to launch RViz automatically -->
   <!--
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find ros_sphero_rvr)/config/rvr_lidar.rviz" />
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find atriz_rvr_driver)/config/rvr_lidar.rviz" />
   -->
   
 </launch>

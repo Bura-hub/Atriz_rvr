@@ -16,8 +16,8 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Imu, Illuminance
 from std_msgs.msg import String, Bool, Empty
-from sphero_rvr_msgs.msg import Color, DegreesTwist
-from sphero_rvr_msgs.srv import SetIRMode, BatteryState
+from atriz_rvr_msgs.msg import Color, DegreesTwist
+from atriz_rvr_msgs.srv import SetIRMode, BatteryState
 from std_srvs.srv import SetBool, Empty as EmptySrv
 
 class CompleteTester:

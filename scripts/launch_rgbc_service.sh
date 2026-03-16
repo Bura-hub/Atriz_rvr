@@ -24,4 +24,4 @@ echo "🛑 Presiona Ctrl+C para detener"
 echo ""
 
 # Lanzar el servicio
-python3 /home/sphero/atriz_git/src/ros_sphero_rvr/scripts/rgbc_sensor_service.py
+python3 /home/sphero/atriz_git/src/Atriz_rvr/scripts/rgbc_sensor_service.py

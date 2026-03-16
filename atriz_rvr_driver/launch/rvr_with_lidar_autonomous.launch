@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- ========================================== -->
+  <!-- RVR + LiDAR + Evitación de obstáculos     -->
+  <!-- ========================================== -->
+  
+  <!-- Puerto LIDAR: /dev/ydlidar si configuraste udev; si no, lidar_port:=/dev/ttyUSB0 -->
+  <arg name="lidar_port" default="/dev/ydlidar" />
+  <arg name="lidar_frame" default="laser" />
+  <arg name="laser_x" default="0.0" />
+  <arg name="laser_y" default="0.0" />
+  <arg name="laser_z" default="0.10" />
+  
+  <!-- Evitación de obstáculos -->
+  <arg name="safe_distance" default="0.20" />
+  <arg name="warning_distance" default="0.45" />
+  <arg name="max_linear_speed" default="0.25" />
+  <arg name="max_angular_speed" default="0.6" />
+  <arg name="num_sectors" default="16" />
+  <arg name="hysteresis_margin" default="0.12" />
+  <arg name="recovery_blocked_time" default="2.0" />
+  <arg name="recovery_reverse_time" default="0.7" />
+  <arg name="recovery_reverse_speed" default="-0.12" />
+  <!-- 180: el 0° del LiDAR apunta atrás del RVR; con 180 el "frente" del código = delante real -->
+  <arg name="angle_offset_deg" default="180.0" />
+  <!-- obstacle_avoidance usa range_min/range_max del mensaje /scan (driver X2: 0.1 m, 8.0 m); control_rate 15 Hz > /scan ~8 Hz -->
+  
+  <!-- Incluir RVR y LiDAR -->
+  <include file="$(find atriz_rvr_driver)/launch/rvr_with_lidar.launch">
+    <arg name="lidar_port" value="$(arg lidar_port)" />
+    <arg name="lidar_frame" value="$(arg lidar_frame)" />
+    <arg name="laser_x" value="$(arg laser_x)" />
+    <arg name="laser_y" value="$(arg laser_y)" />
+    <arg name="laser_z" value="$(arg laser_z)" />
+  </include>
+  
+  <!-- Nodo de evitación de obstáculos -->
+  <node name="obstacle_avoidance" pkg="atriz_rvr_driver" type="obstacle_avoidance.py" output="screen">
+    <param name="safe_distance"           value="$(arg safe_distance)" />
+    <param name="warning_distance"        value="$(arg warning_distance)" />
+    <param name="max_linear_speed"        value="$(arg max_linear_speed)" />
+    <param name="max_angular_speed"       value="$(arg max_angular_speed)" />
+    <param name="num_sectors"             value="$(arg num_sectors)" />
+    <param name="hysteresis_margin"       value="$(arg hysteresis_margin)" />
+    <param name="recovery_blocked_time"  value="$(arg recovery_blocked_time)" />
+    <param name="recovery_reverse_time"   value="$(arg recovery_reverse_time)" />
+    <param name="recovery_reverse_speed" value="$(arg recovery_reverse_speed)" />
+    <param name="control_rate"            value="15" />
+    <param name="angle_offset_deg"        value="$(arg angle_offset_deg)" />
+  </node>
+</launch>

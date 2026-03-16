@@ -8,7 +8,7 @@ import time
 from geometry_msgs.msg import Twist
 
 # Importar el SDK de Sphero
-sys.path.append('/home/sphero/atriz_git/src/ros_sphero_rvr/atriz_rvr_driver/scripts/sphero_sdk')
+sys.path.append('/home/sphero/atriz_git/src/Atriz_rvr/atriz_rvr_driver/scripts/sphero_sdk')
 from sphero_sdk.asyncio.client.dal.serial_async_dal import SerialAsyncDal
 from sphero_sdk.asyncio.client.toys.sphero_rvr_async import SpheroRvrAsync
 

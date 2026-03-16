@@ -33,7 +33,7 @@ cd /home/sphero/atriz_git
 source devel/setup.bash
 
 # Ejecutar un ejemplo
-python3 ./src/ros_sphero_rvr/scripts/examples/example_encoder_test.py
+python3 ./src/Atriz_rvr/scripts/examples/example_encoder_test.py
 ```
 
 ### Verificar que todo esté funcionando
@@ -88,13 +88,13 @@ rostopic list | grep cmd_vel
 | Tópico | Tipo | Descripción |
 |--------|------|-------------|
 | `/cmd_vel` | `geometry_msgs/Twist` | Comandos de velocidad |
-| `/cmd_degrees` | `sphero_rvr_msgs/DegreesTwist` | Comandos de velocidad en grados |
-| `/encoders` | `sphero_rvr_msgs/Encoder` | Datos de encoders en tiempo real |
+| `/cmd_degrees` | `atriz_rvr_msgs/DegreesTwist` | Comandos de velocidad en grados |
+| `/encoders` | `atriz_rvr_msgs/Encoder` | Datos de encoders en tiempo real |
 | `/odom` | `nav_msgs/Odometry` | Odometría del robot |
 | `/imu` | `sensor_msgs/Imu` | Datos del IMU |
 | `/ambient_light` | `sensor_msgs/Illuminance` | Luz ambiental |
-| `/color` | `sphero_rvr_msgs/Color` | Color detectado |
-| `/infrared_messages` | `sphero_rvr_msgs/InfraredMessage` | Mensajes IR recibidos |
+| `/color` | `atriz_rvr_msgs/Color` | Color detectado |
+| `/infrared_messages` | `atriz_rvr_msgs/InfraredMessage` | Mensajes IR recibidos |
 
 ## 🐛 Solución de Problemas
 

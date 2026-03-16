@@ -20,7 +20,7 @@
 ├── src/
 │   ├── ydlidar_ros_driver/          # Driver del LIDAR (paquete ROS)
 │   ├── YDLidar-SDK/                 # SDK del LIDAR
-│   └── ros_sphero_rvr/              # Proyecto Sphero RVR
+│   └── Atriz_rvr/              # Proyecto Sphero RVR
 │       ├── launch/                  # ← Launch files de integración
 │       │   ├── lidar_only.launch
 │       │   └── rvr_with_lidar.launch
@@ -34,16 +34,16 @@
 ### ¿Por qué esta estructura?
 
 1. **Paquetes en `/src`**: Los paquetes ROS (`ydlidar_ros_driver`) se instalan en el nivel superior del workspace
-2. **Integración en `ros_sphero_rvr/`**: Los launch files y scripts que **integran** LIDAR+RVR están dentro del proyecto
-3. **Ventaja**: Puedes usar el LIDAR desde cualquier proyecto, y tener configuraciones específicas en `ros_sphero_rvr`
+2. **Integración en `Atriz_rvr/`**: Los launch files y scripts que **integran** LIDAR+RVR están dentro del proyecto
+3. **Ventaja**: Puedes usar el LIDAR desde cualquier proyecto, y tener configuraciones específicas en `Atriz_rvr`
 
 ---
 
 ## 🚀 Launch Files Disponibles
 
-### 1. LIDAR Solo (desde ros_sphero_rvr)
+### 1. LIDAR Solo (desde Atriz_rvr)
 
-**Archivo**: `~/atriz_git/src/ros_sphero_rvr/launch/lidar_only.launch`
+**Archivo**: `~/atriz_git/src/Atriz_rvr/launch/lidar_only.launch`
 
 ```bash
 cd ~/atriz_git
@@ -64,7 +64,7 @@ roslaunch atriz_rvr_driver lidar_only.launch port:=/dev/ttyUSB0
 
 ### 2. RVR + LIDAR Integrado
 
-**Archivo**: `~/atriz_git/src/ros_sphero_rvr/launch/rvr_with_lidar.launch`
+**Archivo**: `~/atriz_git/src/Atriz_rvr/launch/rvr_with_lidar.launch`
 
 ```bash
 roslaunch atriz_rvr_driver rvr_with_lidar.launch
@@ -96,7 +96,7 @@ roslaunch ydlidar_ros_driver x2_custom.launch
 
 ### Script Principal: `rvr_lidar_integration.py`
 
-**Ubicación**: `~/atriz_git/src/ros_sphero_rvr/scripts/rvr_lidar_integration.py`
+**Ubicación**: `~/atriz_git/src/Atriz_rvr/scripts/rvr_lidar_integration.py`
 
 **Funcionalidades**:
 
@@ -336,7 +336,7 @@ sudo apt-get install ros-noetic-navigation
 
 ### 4. Crear Configuración RViz
 
-Guarda configuración en: `~/atriz_git/src/ros_sphero_rvr/config/rvr_lidar.rviz`
+Guarda configuración en: `~/atriz_git/src/Atriz_rvr/config/rvr_lidar.rviz`
 
 ---
 
@@ -353,7 +353,7 @@ Guarda configuración en: `~/atriz_git/src/ros_sphero_rvr/config/rvr_lidar.rviz`
 ## ✅ Checklist de Integración
 
 - [x] LIDAR instalado y funcionando
-- [x] Launch files creados en `ros_sphero_rvr/launch/`
+- [x] Launch files creados en `Atriz_rvr/launch/`
 - [x] Script de integración básico creado
 - [x] TF entre base_link y laser configurado
 - [ ] RVR driver configurado

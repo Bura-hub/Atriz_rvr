@@ -7,7 +7,7 @@ Script de prueba para demostrar que ambos tópicos funcionan:
 
 import rospy
 from geometry_msgs.msg import Twist
-from sphero_rvr_msgs.msg import DegreesTwist
+from atriz_rvr_msgs.msg import DegreesTwist
 import time
 
 def test_both_topics():

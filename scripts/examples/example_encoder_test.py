@@ -18,7 +18,7 @@ Basado en example_degrees_control.py
 import rospy
 import time
 from geometry_msgs.msg import Twist
-from sphero_rvr_msgs.srv import GetEncoders
+from atriz_rvr_msgs.srv import GetEncoders
 
 def test_encoders_with_movement():
     """Probar los encoders moviendo el robot correctamente."""

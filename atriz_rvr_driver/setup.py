@@ -15,7 +15,8 @@ setup_args = generate_distutils_setup(
         'scripts/rvr_tools.py',
         'scripts/degrees_control_example.py',
         'scripts/example_degrees_control.py',
-        'scripts/setup_python_path.py'
+        'scripts/setup_python_path.py',
+        'scripts/obstacle_avoidance.py',
     ],
 )
 

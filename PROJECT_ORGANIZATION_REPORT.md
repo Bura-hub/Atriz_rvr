@@ -10,7 +10,7 @@ Este documento proporciona un resumen completo de la organización, documentaci�
 
 ### **📁 Organización Principal**
 ```
-atriz_git/src/ros_sphero_rvr/
+atriz_git/src/Atriz_rvr/
 ├── 📄 README.md                    # Documentación principal del proyecto
 ├── 🚀 run_tests.sh                 # Script principal de pruebas
 ├── 🚀 start_ros.sh                 # Script de inicio de ROS

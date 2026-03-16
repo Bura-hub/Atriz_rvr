@@ -18,9 +18,10 @@ Este repositorio contiene el código necesario para operar el robot Sphero RVR u
 ## 📁 Estructura del Proyecto
 
 ```
-atriz_git/src/ros_sphero_rvr/
+atriz_git/src/Atriz_rvr/
 ├── 📄 README.md                           # Este archivo
 ├── 📄 PROJECT_ORGANIZATION_REPORT.md     # Reporte de organización
+├── 📄 GUIA_COMPLETA_LIDAR.md              # Guía LIDAR YDLIDAR X2 (udev, SDK, integración)
 ├── 🚀 run_tests.sh                        # Script principal de pruebas
 ├── 🚀 start_ros.sh                        # Script de inicio de ROS
 ├── ⚙️ setup_python_path.py                # Configuración automática de Python
@@ -43,13 +44,20 @@ atriz_git/src/ros_sphero_rvr/
 │   ├── package.xml                        # Metadatos del paquete
 │   ├── setup.py                           # Configuración Python
 │   ├── CMakeLists.txt                     # Configuración de build
+│   ├── launch/                            # Launch files
+│   │   ├── lidar_only.launch             # Solo LIDAR X2
+│   │   ├── rvr_with_lidar.launch         # RVR + LIDAR
+│   │   └── rvr_with_lidar_autonomous.launch  # RVR + LIDAR + evitación obstáculos
 │   └── scripts/                           # Scripts del driver
+│       ├── Atriz_rvr_node.py            # Driver principal (ÚNICO)
 │       ├── cmd_vel_rviz.py               # Control RViz
 │       ├── degrees_control_example.py    # Ejemplo de grados
 │       ├── emergency_stop.py             # Parada de emergencia
+│       ├── obstacle_avoidance.py        # Evitación autónoma con LIDAR
 │       ├── rvr-ros-restarter.py          # Reiniciador automático
 │       ├── rvr-ros.py                    # Driver alternativo
 │       ├── rvr_tools.py                  # Herramientas
+│       ├── rvr_lidar_integration.py      # Integración LIDAR
 │       └── sphero_sdk/                   # SDK completo de Sphero
 ├── 📁 atriz_rvr_msgs/                     # 📦 Mensajes personalizados ROS
 │   ├── package.xml                        # Metadatos del paquete
@@ -62,17 +70,18 @@ atriz_git/src/ros_sphero_rvr/
 │   └── tests/                             # Pruebas de la biblioteca
 ├── 📁 scripts/                            # 🚀 Scripts organizados por funcionalidad
 │   ├── README.md                          # Guía de scripts
-│   ├── core/                              # Scripts principales
-│   │   ├── Atriz_rvr_node.py             # Driver principal (ÚNICO)
-│   │   └── sphero_sdk_config.py           # Configuración del SDK
 │   ├── examples/                          # Ejemplos de uso
 │   │   ├── example_encoder_test.py       # Prueba de encoders
-│   │   ├── random_walking.py             # Caminata aleatoria
-│   │   └── rvr_joystick_control.py       # Control con joystick
+│   │   └── rgbc_direct_test.py           # Prueba sensor RGB
 │   ├── tools/                             # Herramientas
 │   │   └── color_listener.py             # Listener de color
-│   └── utilities/                         # Utilidades
-│       └── test_both_topics.py           # Prueba de ambos tópicos
+│   ├── utilities/                         # Utilidades
+│   │   └── test_both_topics.py           # Prueba de ambos tópicos
+│   └── lydar/                             # LIDAR YDLIDAR
+│       ├── README.md                     # Inicio rápido LIDAR
+│       ├── INTEGRACION_RVR_LIDAR.md      # Integración RVR + LIDAR
+│       ├── install_lidar_driver.sh       # Instalador driver + SDK
+│       └── test_lidar.py                 # Prueba LIDAR
 └── 📁 testing_scripts/                    # 🧪 Suite completa de pruebas
     ├── README.md                          # Guía de testing
     ├── automated/                         # Pruebas automáticas
@@ -94,6 +103,7 @@ Toda la documentación está organizada en la carpeta `docs/`:
 
 - **[Índice de Documentación](docs/README.md)** - Guía principal de documentación
 - **[Guía del Driver](docs/driver/DRIVER_FUNCTIONALITY_GUIDE.md)** - Funcionalidades completas del driver
+- **[Guía LIDAR YDLIDAR X2](GUIA_COMPLETA_LIDAR.md)** - Instalación udev/SDK, integración RVR, evitación de obstáculos
 - **[Guía de Pruebas](docs/testing/README_TESTING.md)** - Scripts y testing detallado
 - **[Scripts de Prueba](testing_scripts/README.md)** - Pruebas organizadas y documentadas
 - **[Scripts del Proyecto](scripts/README.md)** - Scripts organizados por funcionalidad
@@ -107,7 +117,7 @@ Toda la documentación está organizada en la carpeta `docs/`:
 python3 setup_python_path.py
 
 # Verificar configuración
-python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
+python3 -c "from sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
 ```
 
 ### **2. Pruebas Rápidas**
@@ -156,8 +166,8 @@ cd ~/catkin_ws/src
 ### 2. Clonar el Repositorio
 
 ```bash
-git clone https://github.com/atriz-udenar/ros_sphero_rvr.git
-cd ros_sphero_rvr
+git clone https://github.com/atriz-udenar/Atriz_rvr.git
+cd Atriz_rvr
 ```
 
 ### 3. Configurar el Entorno
@@ -179,7 +189,7 @@ source devel/setup.bash
 ./run_tests.sh diagnostic
 
 # Probar configuración
-python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('✅ Configuración exitosa')"
+python3 -c "import sys; sys.path.insert(0, 'atriz_rvr_driver/scripts'); from sphero_sdk_config import setup_sphero_sdk_path; print('✅ Configuración exitosa')"
 ```
 
 ## 🎮 Control de Movimiento
@@ -352,7 +362,7 @@ El proyecto incluye configuración completa para linters:
 python3 setup_python_path.py
 
 # Verificar configuración
-python3 -c "from scripts.core.sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
+python3 -c "from sphero_sdk_config import setup_sphero_sdk_path; print('SDK path:', setup_sphero_sdk_path())"
 ```
 
 ## 📊 Monitoreo del Sistema

@@ -21,20 +21,23 @@ Se ha integrado completamente el **YDLIDAR X2** en el proyecto **Sphero RVR**, c
 └── YDLidar-SDK/           # SDK del fabricante
 ```
 
-### 2. **Integración en ros_sphero_rvr**
+### 2. **Integración en Atriz_rvr**
 ```
-~/atriz_git/src/ros_sphero_rvr/
-├── launch/
-│   ├── lidar_only.launch       # ⚡ Solo LIDAR
-│   └── rvr_with_lidar.launch   # 🤖 RVR + LIDAR
-├── scripts/
-│   ├── rvr_lidar_integration.py  # 🐍 Script de integración
-│   └── lydar/
-│       ├── GUIA_COMPLETA_LIDAR.md
-│       ├── INTEGRACION_RVR_LIDAR.md
-│       ├── README.md
-│       ├── install_lidar_driver.sh
-│       └── test_lidar.py
+~/atriz_git/src/Atriz_rvr/
+├── GUIA_COMPLETA_LIDAR.md              # Guía LIDAR (raíz del proyecto)
+├── atriz_rvr_driver/
+│   ├── launch/
+│   │   ├── lidar_only.launch           # ⚡ Solo LIDAR
+│   │   ├── rvr_with_lidar.launch      # 🤖 RVR + LIDAR
+│   │   └── rvr_with_lidar_autonomous.launch  # 🤖 RVR + LIDAR + evitación
+│   └── scripts/
+│       ├── rvr_lidar_integration.py    # Script de integración
+│       └── obstacle_avoidance.py       # Evitación autónoma
+└── scripts/lydar/
+    ├── INTEGRACION_RVR_LIDAR.md
+    ├── README.md
+    ├── install_lidar_driver.sh
+    └── test_lidar.py
 ```
 
 ---
@@ -84,8 +87,8 @@ rosrun atriz_rvr_driver rvr_lidar_integration.py
    - Se puede usar desde cualquier proyecto
 
 2. **Integración Específica**
-   - Launch files en `ros_sphero_rvr/launch/` para integración
-   - Scripts personalizados en `ros_sphero_rvr/scripts/`
+   - Launch files en `atriz_rvr_driver/launch/` para integración
+   - Scripts de LIDAR en `atriz_rvr_driver/scripts/` y `scripts/lydar/`
 
 3. **Facilidad de Desarrollo**
    - Puedes probar el LIDAR solo
@@ -101,9 +104,11 @@ rosrun atriz_rvr_driver rvr_lidar_integration.py
 
 | Archivo | Propósito |
 |---------|-----------|
-| `launch/lidar_only.launch` | Lanzar solo LIDAR desde ros_sphero_rvr |
-| `launch/rvr_with_lidar.launch` | Sistema completo RVR+LIDAR |
-| `scripts/rvr_lidar_integration.py` | Control reactivo con LIDAR |
+| `atriz_rvr_driver/launch/lidar_only.launch` | Lanzar solo LIDAR |
+| `atriz_rvr_driver/launch/rvr_with_lidar.launch` | Sistema completo RVR+LIDAR |
+| `atriz_rvr_driver/launch/rvr_with_lidar_autonomous.launch` | RVR+LIDAR+evitación de obstáculos |
+| `atriz_rvr_driver/scripts/rvr_lidar_integration.py` | Control reactivo con LIDAR |
+| `atriz_rvr_driver/scripts/obstacle_avoidance.py` | Evitación autónoma con LIDAR |
 | `scripts/lydar/INTEGRACION_RVR_LIDAR.md` | Guía de integración completa |
 
 ---
@@ -114,14 +119,14 @@ rosrun atriz_rvr_driver rvr_lidar_integration.py
 
 ```bash
 cd ~/atriz_git && source devel/setup.bash
-roslaunch ros_sphero_rvr lidar_only.launch
+roslaunch atriz_rvr_driver lidar_only.launch
 ```
 
 ### 2. Ver datos en tiempo real
 
 ```bash
 # Terminal 1: LIDAR
-roslaunch ros_sphero_rvr lidar_only.launch
+roslaunch atriz_rvr_driver lidar_only.launch
 
 # Terminal 2: Visualizar
 rviz
@@ -132,22 +137,24 @@ rviz
 
 ```bash
 # Terminal 1: LIDAR
-roslaunch ros_sphero_rvr lidar_only.launch
+roslaunch atriz_rvr_driver lidar_only.launch
 
 # Terminal 2: Integración
-rosrun ros_sphero_rvr rvr_lidar_integration.py
+rosrun atriz_rvr_driver rvr_lidar_integration.py
 
 # Verás estadísticas del LIDAR en tiempo real
 ```
 
-### 4. Cuando el RVR esté listo
+### 4. Sistema completo (RVR + LIDAR)
 
 ```bash
-# Editar launch/rvr_with_lidar.launch
-# Descomentar la sección del RVR
+roslaunch atriz_rvr_driver rvr_with_lidar.launch
+```
 
-# Ejecutar sistema completo
-roslaunch ros_sphero_rvr rvr_with_lidar.launch
+### 5. Modo autónomo (RVR + LIDAR + evitación de obstáculos)
+
+```bash
+roslaunch atriz_rvr_driver rvr_with_lidar_autonomous.launch
 ```
 
 ---
@@ -197,12 +204,12 @@ roslaunch atriz_rvr_driver lidar_only.launch
 
 **Ver guía de integración**:
 ```bash
-cat ~/atriz_git/src/ros_sphero_rvr/scripts/lydar/INTEGRACION_RVR_LIDAR.md
+cat ~/atriz_git/src/Atriz_rvr/scripts/lydar/INTEGRACION_RVR_LIDAR.md
 ```
 
 **Ver guía del LIDAR**:
 ```bash
-cat ~/atriz_git/src/ros_sphero_rvr/scripts/lydar/GUIA_COMPLETA_LIDAR.md
+cat ~/atriz_git/src/Atriz_rvr/GUIA_COMPLETA_LIDAR.md
 ```
 
 ---
@@ -212,7 +219,7 @@ cat ~/atriz_git/src/ros_sphero_rvr/scripts/lydar/GUIA_COMPLETA_LIDAR.md
 **¡La integración está completa!** 
 
 - ✅ Los paquetes del LIDAR están correctamente en `~/atriz_git/src/`
-- ✅ La integración con RVR está en `~/atriz_git/src/ros_sphero_rvr/`
+- ✅ La integración con RVR está en `~/atriz_git/src/Atriz_rvr/`
 - ✅ Launch files listos para usar
 - ✅ Scripts de ejemplo funcionales
 - ✅ Documentación completa

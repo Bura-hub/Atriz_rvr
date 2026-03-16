@@ -2,7 +2,7 @@
 
 ## 📖 Documentación Principal
 
-### ⭐ [GUIA_COMPLETA_LIDAR.md](GUIA_COMPLETA_LIDAR.md) - **LEE ESTO PRIMERO**
+### ⭐ [GUIA_COMPLETA_LIDAR.md](../../GUIA_COMPLETA_LIDAR.md) - **LEE ESTO PRIMERO** (en la raíz del proyecto)
 
 **Guía unificada con TODO lo necesario:**
 - ✅ Estado actual y especificaciones
@@ -30,10 +30,10 @@ python3 test_lidar.py --scan   # Escanear baudrates
 
 Tu LIDAR está **completamente configurado y operativo**:
 - ✅ Modelo: **YDLIDAR X2**
-- ✅ Puerto: `/dev/ttyUSB0`
+- ✅ Puerto: `/dev/ydlidar` o `/dev/ttyUSB0`
 - ✅ Baudrate: `115200`
 - ✅ Sample Rate: `3K` (3000 muestras/seg)
-- ✅ Frecuencia: `10 Hz`
+- ✅ Frecuencia: `8 Hz` (X2 spec)
 - ✅ Driver: ydlidar_ros_driver instalado
 - ✅ SDK: YDLidar-SDK instalado
 - ✅ Workspace: Compilado exitosamente
@@ -114,18 +114,22 @@ cat INTEGRACION_RVR_LIDAR.md
 
 ```
 lydar/
-├── GUIA_COMPLETA_LIDAR.md        ⭐ Guía completa (TODO-EN-UNO)
 ├── INTEGRACION_RVR_LIDAR.md      🤖 Integración con Sphero RVR
 ├── README.md                      📖 Este archivo
 ├── install_lidar_driver.sh        🔧 Instalador automático
 └── test_lidar.py                  🧪 Script de prueba
 
+En la raíz del proyecto (Atriz_rvr/):
+└── GUIA_COMPLETA_LIDAR.md        ⭐ Guía completa LIDAR (TODO-EN-UNO)
+
 Integración en atriz_rvr_driver/:
 ├── launch/
-│   ├── lidar_only.launch         ⚡ Solo LIDAR
-│   └── rvr_with_lidar.launch     🤖 RVR + LIDAR
+│   ├── lidar_only.launch              ⚡ Solo LIDAR
+│   ├── rvr_with_lidar.launch          🤖 RVR + LIDAR
+│   └── rvr_with_lidar_autonomous.launch  🤖 RVR + LIDAR + evitación
 └── scripts/
-    └── rvr_lidar_integration.py  🐍 Script de integración
+    ├── rvr_lidar_integration.py  🐍 Script de integración
+    └── obstacle_avoidance.py     🤖 Evitación autónoma de obstáculos
 ```
 
 **Documentación completa** - Todo funcionando correctamente.
@@ -134,11 +138,11 @@ Integración en atriz_rvr_driver/:
 
 ## 🔗 Enlaces de Referencia
 
-- **Guía Completa**: [GUIA_COMPLETA_LIDAR.md](GUIA_COMPLETA_LIDAR.md)
+- **Guía Completa**: [GUIA_COMPLETA_LIDAR.md](../../GUIA_COMPLETA_LIDAR.md)
 - **YDLidar GitHub**: https://github.com/YDLIDAR/ydlidar_ros_driver
 - **ROS LaserScan**: http://docs.ros.org/api/sensor_msgs/html/msg/LaserScan.html
 
 ---
 
-**¿Problemas?** → Consulta la sección "Solución de Problemas" en [GUIA_COMPLETA_LIDAR.md](GUIA_COMPLETA_LIDAR.md)
+**¿Problemas?** → Consulta la sección "Solución de Problemas" en [GUIA_COMPLETA_LIDAR.md](../../GUIA_COMPLETA_LIDAR.md)
 

@@ -530,7 +530,7 @@ Aplicar filtros a los datos del LIDAR:
   
   <!-- Filtro de rango -->
   <node pkg="laser_filters" type="scan_to_scan_filter_chain" name="laser_filter">
-    <rosparam command="load" file="$(find your_package)/config/laser_filter.yaml"/>
+    <rosparam command="load" file="$(find atriz_rvr_driver)/config/laser_filter.yaml"/>
   </node>
 </launch>
 ```

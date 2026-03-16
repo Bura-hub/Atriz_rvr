@@ -5,7 +5,7 @@
   <!-- Parte del proyecto Sphero RVR -->
   <!-- ========================================== -->
   
-  <!-- Puerto: /dev/ydlidar si configuraste udev (ver scripts/lydar/GUIA_COMPLETA_LIDAR.md); si no, usa port:=/dev/ttyUSB0 -->
+  <!-- Puerto: /dev/ydlidar si configuraste udev (ver GUIA_COMPLETA_LIDAR.md en la raíz del proyecto); si no, usa port:=/dev/ttyUSB0 -->
   <arg name="port" default="/dev/ydlidar" />
   <arg name="frame_id" default="laser" />
   

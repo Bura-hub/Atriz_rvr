@@ -1,6 +1,0 @@
-LIDAR: guia udev/SDK, launch X2, RVR+LIDAR+autonomo, obstacle_avoidance
-
-- GUIA_COMPLETA_LIDAR: Pasos 1-2 (udev, SDK), 4-6 (params X2, TF)
-- lidar_only y rvr_with_lidar: /dev/ydlidar, params X2, TF rvr_base_link->laser
-- rvr_with_lidar_autonomous.launch y obstacle_avoidance.py
-- install_lidar_driver.sh: regla udev ydlidar

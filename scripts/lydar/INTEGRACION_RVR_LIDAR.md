@@ -366,7 +366,7 @@ Guarda configuración en: `~/atriz_git/src/Atriz_rvr/config/rvr_lidar.rviz`
 
 ## 📖 Referencias
 
-- [GUIA_COMPLETA_LIDAR.md](GUIA_COMPLETA_LIDAR.md) - Guía del LIDAR
+- [GUIA_COMPLETA_LIDAR.md](../../GUIA_COMPLETA_LIDAR.md) - Guía del LIDAR (raíz del proyecto)
 - [YDLIDAR_X2_RESUMEN.md](YDLIDAR_X2_RESUMEN.md) - Resumen del X2
 - [ROS LaserScan](http://docs.ros.org/en/api/sensor_msgs/html/msg/LaserScan.html) - Documentación del mensaje
 - [ROS Navigation](http://wiki.ros.org/navigation) - Stack de navegación

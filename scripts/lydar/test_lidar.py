@@ -310,16 +310,18 @@ def print_ros_instructions(port, baudrate, lidar_type):
         print("2. Configurar el launch file con:")
         print(f"   - Puerto: {port}")
         print(f"   - Baudrate: {baudrate}")
-        print("3. Ejecutar: roslaunch <tu_paquete> <tu_launch_file>.launch")
+        print("3. Ejecutar: roslaunch atriz_rvr_driver lidar_only.launch")
     
     print()
     print(f"{Colors.BOLD}📚 Documentación:{Colors.ENDC}")
     
-    # Construir ruta relativa a la documentación
+    # Rutas a documentación (GUIA en raíz del proyecto, INTEGRACION en este dir)
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.normpath(os.path.join(script_dir, '..', '..'))
+    guia_path = os.path.join(project_root, 'GUIA_COMPLETA_LIDAR.md')
     
     print(f"   {Colors.OKCYAN}Guía completa:{Colors.ENDC}")
-    print(f"   cat {script_dir}/GUIA_COMPLETA_LIDAR.md")
+    print(f"   cat {guia_path}")
     print()
     print(f"   {Colors.OKCYAN}Guía de integración:{Colors.ENDC}")
     print(f"   cat {script_dir}/INTEGRACION_RVR_LIDAR.md")
@@ -405,7 +407,8 @@ Ejemplos de uso:
         print()
         print(f"{Colors.BOLD}📚 Ver troubleshooting completo:{Colors.ENDC}")
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        print(f"   cat {script_dir}/GUIA_COMPLETA_LIDAR.md")
+        project_root = os.path.normpath(os.path.join(script_dir, '..', '..'))
+        print(f"   cat {os.path.join(project_root, 'GUIA_COMPLETA_LIDAR.md')}")
 
 if __name__ == "__main__":
     try:

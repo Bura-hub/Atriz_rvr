@@ -1,7 +1,11 @@
 import os
+import asyncio
 import logging
 from sphero_sdk import SpheroRvrTargets
 from sphero_sdk.common.firmware.cms_fw_check_base import CmsFwCheckBase
+
+# Timeout para no bloquear si el RVR no responde (ej. desconectado, dormido, UART mal configurado)
+RVR_FW_CHECK_TIMEOUT_S = 5.0
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +18,7 @@ class RvrFwCheckAsync(CmsFwCheckBase):
 
     async def _check_rvr_fw(self):
         """Checks the RVR's firmware on the Nordic and ST chips against the CMS, if an internet connection is available.
+        Uses a timeout so startup does not hang forever if RVR is disconnected or not responding.
         """
         root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../'))
 
@@ -27,19 +32,34 @@ class RvrFwCheckAsync(CmsFwCheckBase):
 
         print('Checking RVR firmware versions...')
 
-        rvr_nordic_version = await self.__rvr.get_main_application_version(target=SpheroRvrTargets.primary.value)
-        rvr_st_version = await self.__rvr.get_main_application_version(target=SpheroRvrTargets.secondary.value)
+        try:
+            rvr_nordic_version = await asyncio.wait_for(
+                self.__rvr.get_main_application_version(target=SpheroRvrTargets.primary.value),
+                timeout=RVR_FW_CHECK_TIMEOUT_S
+            )
+        except (asyncio.TimeoutError, Exception):
+            rvr_nordic_version = None
+            logger.warning('Could not get Nordic firmware version (RVR may be disconnected or not yet ready).')
+
+        try:
+            rvr_st_version = await asyncio.wait_for(
+                self.__rvr.get_main_application_version(target=SpheroRvrTargets.secondary.value),
+                timeout=RVR_FW_CHECK_TIMEOUT_S
+            )
+        except (asyncio.TimeoutError, Exception):
+            rvr_st_version = None
+            logger.warning('Could not get ST firmware version (RVR may be disconnected or not yet ready).')
 
         if rvr_nordic_version is None or rvr_st_version is None:
-            logger.error('Unable to retrieve Nordic and/or ST versions from RVR.')
+            logger.warning('Skipping firmware check: RVR not responding (ensure UART is connected and RVR is on).')
             return
 
         print('Checking CMS firmware versions...')
         cms_nordic_version = await self._get_cms_fw_version(self._nordic_cms_url)
-        logger.info('CMS Nordic Version:', cms_nordic_version)
+        logger.info('CMS Nordic Version: %s', cms_nordic_version)
 
         cms_st_version = await self._get_cms_fw_version(self._st_cms_url)
-        logger.info('CMS ST Version:', cms_st_version)
+        logger.info('CMS ST Version: %s', cms_st_version)
 
         # Proceed only if both versions are acquired from the CMS.
         if cms_nordic_version is not None or cms_st_version is not None:
@@ -54,8 +74,3 @@ class RvrFwCheckAsync(CmsFwCheckBase):
                 self._check_update_available(rvr_st_version, cms_st_version)
 
         print('Firmware check complete.')
-
-
-
-
-

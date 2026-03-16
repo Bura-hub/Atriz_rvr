@@ -12,6 +12,7 @@ import logging
 import asyncio
 import traceback
 import signal
+import threading
 
 import std_msgs.msg
 import sys
@@ -111,6 +112,9 @@ is_driving_with_cmd_vel = False
 last_cmd_vel_time = 0
 cmd_vel_timeout = 0.3
 is_in_emergency_stop = False
+
+# Cache de bateria (se rellena al inicio en rvr_robot; el servicio /battery_state devuelve estos valores)
+battery_cache = {'percentage': -1, 'voltage_state': 'unknown', 'last_update': 0.0}
 
 # =======================================================
 # Publishers
@@ -277,37 +281,16 @@ def cmd_degrees_callback(degrees_twist):
     # velocidad.
     last_cmd_vel_time = time.time()
 
-def battery_state_callback(res):
+def battery_state_callback(req):
     """
-    Callback para obtener el estado de la batería.
-
-    Devuelve un mensaje de tipo BatteryStateResponse con dos campos:
-    - battery_percentage: la carga actual de la batería en porcentaje.
-    - voltage_state: el estado de la tensión de la batería en texto.
-
-    Para obtener la carga actual de la batería, se llama a la función
-    get_battery_percentage de la clase RVR. La función devuelve un
-    diccionario con dos campos: 'percentage' y 'state'. El campo
-    'percentage' contiene la carga actual de la batería en porcentaje,
-    y el campo 'state' contiene el estado de la tensión de la batería.
-
-    Para obtener el estado de la tensión de la batería en texto, se
-    llama a la función get_battery_voltage_state de la clase RVR. La
-    función devuelve un diccionario con un campo 'state' que contiene el
-    estado de la tensión de la batería. Se utiliza la enumeración
-    VoltageStates para convertir el estado numérico a texto.
-
-    Finalmente, se devuelve el mensaje BatteryStateResponse con los
-    campos battery_percentage y voltage_state.
+    Devuelve el estado de bateria desde la cache (solo se actualiza al inicio en rvr_robot).
     """
     res = BatteryStateResponse()
-    battery_percentage = asyncio.run(rvr.get_battery_percentage(timeout=.1))
-    asyncio.run(asyncio.sleep(.1))
-    res.battery_percentage = battery_percentage['percentage']
-    battery_voltage_state = asyncio.run(rvr.get_battery_voltage_state(timeout=.1))
-    voltage_string = VoltageStates(battery_voltage_state['state']).name
-    res.voltage_state = voltage_string
-    rospy.loginfo('({}) Estado de batería: {}% - Estado de voltaje: {}'.format(rospy.get_name(), res.battery_percentage, voltage_string))
+    res.battery_percentage = battery_cache['percentage']
+    res.voltage_state = battery_cache['voltage_state']
+    age = time.time() - battery_cache['last_update'] if battery_cache['last_update'] else 999
+    rospy.loginfo('({}) Estado de bateria: {}% - {} (cache hace {:.0f}s)'.format(
+        rospy.get_name(), res.battery_percentage, res.voltage_state, age))
     return res
 
 def enable_color_callback(req):
@@ -1114,6 +1097,15 @@ async def handle_ros():
     # Duerme durante 0.1 segundos antes de volver a ejecutar esta función.
     await asyncio.sleep(0.1)
 
+
+async def run_loop_tasks():
+    """Tarea principal del event loop: inicia rvr_robot y handle_ros en bucle (sin actualizacion periodica de bateria)."""
+    asyncio.ensure_future(rvr_robot(), loop=loop)
+    while not rospy.is_shutdown():
+        await handle_ros()
+        await asyncio.sleep(1.0 / 15.0)
+    loop.stop()
+
 async def will_sleep_handler():
     """Maneja el evento de que el RVR est a punto de entrar en modo de suspension.
 
@@ -1180,13 +1172,19 @@ async def rvr_robot():
     # 5. Muestra el patrón de color para el modo de arranque
     await rvr_color_picker.trigger_event(TriggerLedEventRequest.STARTUP)
     
-    # Muestra informacion de estado
-    # 1. Obtiene el porcentaje de batería
-    battery_percentage = await rvr.get_battery_percentage()
-    # 2. Obtiene el estado de voltaje de la batería
-    battery_voltage_state = await rvr.get_battery_voltage_state()
-    # 3. Muestra el estado de batería y el estado de voltaje
-    rospy.loginfo('({}) Estado de batería: {}% - Estado de voltaje: {}'.format(rospy.get_name(), battery_percentage["percentage"], VoltageStates(battery_voltage_state["state"]).name))
+    # Muestra informacion de estado y actualiza cache para el servicio /battery_state
+    global battery_cache
+    try:
+        battery_percentage = await rvr.get_battery_percentage(timeout=3.0)
+        battery_voltage_state = await rvr.get_battery_voltage_state(timeout=3.0)
+        battery_cache['percentage'] = battery_percentage['percentage']
+        battery_cache['voltage_state'] = VoltageStates(battery_voltage_state['state']).name
+        battery_cache['last_update'] = time.time()
+        rospy.loginfo('({}) Estado de batería: {}% - Estado de voltaje: {}'.format(
+            rospy.get_name(), battery_cache['percentage'], battery_cache['voltage_state']))
+    except Exception as e:
+        rospy.logwarn('({}) No se pudo leer bateria al inicio: {} (tipo: {})'.format(
+            rospy.get_name(), e, type(e).__name__))
     rospy.loginfo('({}) Nodo Python de Sphero RVR HW listo'.format(rospy.get_name()))
 
 async def reset_sensors():
@@ -1283,13 +1281,12 @@ def sig_handler(_signo, _stack_frame):
     """
     Manejador de señales para finalización limpia.
 
-    Se encarga de limpiar los recursos utilizados por el RVR y
-    cerrar la conexión con el robot.
+    Pide a ROS que termine para que el bucle principal salga y el bloque
+    finally ejecute la limpieza del RVR (sensor_control.clear(), close())
+    en lugar de hacer sys.exit() y dejar tareas asyncio pendientes.
     """
-    asyncio.create_task(rvr.sensor_control.clear())
-    asyncio.create_task(rvr.close())
     print("Programa del RVR terminado limpiamente.")
-    sys.exit(0)
+    rospy.signal_shutdown("senal de terminacion")
 
 def check_if_need_to_send_msg(component):
     """
@@ -1627,24 +1624,41 @@ if __name__ == '__main__':
     # Crea un Rate para que el bucle principal se ejecute a 15 Hz
     r = rospy.Rate(15)
 
-    try:
-        # Inicializa el bucle principal
-        asyncio.ensure_future(rvr_robot())
+    def run_asyncio_loop():
+        asyncio.ensure_future(run_loop_tasks(), loop=loop)
+        loop.run_forever()
 
+    loop_thread = threading.Thread(target=run_asyncio_loop, daemon=True)
+    loop_thread.start()
+    time.sleep(0.5)
+
+    try:
         while not rospy.is_shutdown():
-            # Ejecuta el bucle principal
-            loop.run_until_complete(asyncio.gather(handle_ros()))
-            # Espera a que el bucle principal termine
             r.sleep()
 
     finally:
-        # Cierra el bucle principal
-        loop.run_until_complete(
-            asyncio.gather(
-                rvr.sensor_control.clear(),
-                rvr.close()
-            )
-        )
-        # Cierra el loop
+        # Detener el loop (run_loop_tasks sale con rospy.is_shutdown() y llama loop.stop())
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+        loop_thread.join(timeout=2.0)
+        # Cancela tareas asyncio pendientes
+        try:
+            pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            for t in pending:
+                t.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass
+        # Limpieza del RVR con timeout
+        try:
+            loop.run_until_complete(asyncio.wait_for(
+                asyncio.gather(rvr.sensor_control.clear(), rvr.close()),
+                timeout=3.0
+            ))
+        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            pass
         if loop.is_running():
             loop.close()

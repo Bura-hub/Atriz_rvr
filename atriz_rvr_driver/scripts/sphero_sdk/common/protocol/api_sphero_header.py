@@ -327,11 +327,16 @@ class Header(SpheroHeaderBase):
         bit_index += 1
         logger.debug('SEQ {:x}'.format(header.seq))
 
-        err = None
+        err_byte = None
         if header.is_response:
-            header.err = ErrorCode(Unpack.uint8(buf[bit_index:]))
+            err_byte = Unpack.uint8(buf[bit_index:])
             bit_index += 1
-            logger.debug('ERROR: {}'.format(err))
+            try:
+                header.err = ErrorCode(err_byte)
+            except ValueError:
+                logger.warning('Unknown error code 0x{:02x}, treating as failed'.format(err_byte))
+                header.err = ErrorCode.failed
+            logger.debug('ERROR: {}'.format(header.err))
 
         header.byte_length = bit_index
         return header

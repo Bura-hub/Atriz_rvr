@@ -64,12 +64,12 @@ import rvr_tools
 from atriz_rvr_msgs.srv import (
     SetIRMode, SetIRModeResponse, MoveToPose, MoveToPoseResponse, MoveToPosAndYaw,
     MoveToPosAndYawResponse, BatteryState, BatteryStateResponse, TriggerLedEventRequest,
-    GetEncoders, GetEncodersResponse, RawMotors, RawMotorsResponse, SendInfraredMessage, 
+    GetEncoders, GetEncodersResponse, RawMotors, RawMotorsResponse, SendInfraredMessage,
     SendInfraredMessageResponse, SetIREvading, SetIREvadingResponse, SetLEDRGB, SetLEDRGBResponse,
     SetMultipleLEDs, SetMultipleLEDsResponse, GetSystemInfo, GetSystemInfoResponse,
     GetControlState, GetControlStateResponse, SetDriveParameters, SetDriveParametersResponse,
     ConfigureStreaming, ConfigureStreamingResponse, StartStreaming, StartStreamingResponse,
-    GetRGBCSensorValues, GetRGBCSensorValuesResponse)
+    GetRGBCSensorValues, GetRGBCSensorValuesResponse, MoveTimed, MoveTimedResponse)
 
 # =======================================================
 # Variables globales
@@ -280,6 +280,41 @@ def cmd_degrees_callback(degrees_twist):
     # Se almacena el momento en el que se envió el último comando de
     # velocidad.
     last_cmd_vel_time = time.time()
+
+def move_timed_callback(req):
+    """
+    Mueve el robot a velocidad constante durante un tiempo y luego para (bloqueante).
+    Útil para maniobras discretas de evasión o navegación (ej. girar 1 s, avanzar 0.5 s).
+    linear: m/s, angular: rad/s (positivo = izquierda), duration: segundos.
+    """
+    global is_in_emergency_stop
+    res = MoveTimedResponse()
+    res.success = False
+    if is_in_emergency_stop:
+        rospy.logwarn('({}) move_timed ignorado: parada de emergencia activa'.format(rospy.get_name()))
+        return res
+    linear = req.linear
+    angular_rad_s = req.angular
+    duration = max(0.0, req.duration)
+    angular_deg_s = angular_rad_s * (180.0 / pi)
+    cmd_interval = 0.1  # reenviar comando cada 0.1 s para no disparar cmd_vel_timeout (0.3 s)
+    start = time.time()
+    try:
+        while (time.time() - start) < duration and not rospy.is_shutdown():
+            asyncio.run(write_rc_si(linear, angular_deg_s))
+            remaining = duration - (time.time() - start)
+            if remaining > 0:
+                time.sleep(min(cmd_interval, remaining))
+        asyncio.run(rvr.drive_stop())
+        res.success = True
+    except Exception as e:
+        rospy.logerr('({}) move_timed error: {}'.format(rospy.get_name(), e))
+        try:
+            asyncio.run(rvr.drive_stop())
+        except Exception:
+            pass
+    return res
+
 
 def battery_state_callback(req):
     """
@@ -1617,7 +1652,8 @@ if __name__ == '__main__':
     rospy.Service('configure_streaming', ConfigureStreaming, configure_streaming_callback)
     rospy.Service('start_streaming', StartStreaming, start_streaming_callback)
     rospy.Service('get_rgbc_sensor_values', GetRGBCSensorValues, get_rgbc_sensor_values_callback)
-        
+    rospy.Service('move_timed', MoveTimed, move_timed_callback)
+
     # Inicializa el Flag de stop de emergencia en False
     set_emergency_stop(False)
 

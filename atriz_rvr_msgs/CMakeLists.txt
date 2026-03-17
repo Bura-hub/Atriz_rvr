@@ -79,6 +79,7 @@ add_service_files(
   SetDriveParameters.srv
   ConfigureStreaming.srv
   StartStreaming.srv
+  MoveTimed.srv
 )
 
 ## Generate services in the 'srv' folder

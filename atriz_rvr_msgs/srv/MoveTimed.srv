@@ -1,0 +1,10 @@
+# Mueve el robot a velocidad constante durante un tiempo y luego para (bloqueante).
+# linear: velocidad lineal en m/s (rango sugerido 0.0 a 0.5)
+# angular: velocidad angular en rad/s (positivo = izquierda/antihorario)
+# duration: duración del movimiento en segundos
+
+float32 linear
+float32 angular
+float32 duration
+---
+bool success

@@ -1309,8 +1309,13 @@ async def reset_sensors():
         rospy.logwarn('({}) Notificaciones IR no disponibles: {}'.format(rospy.get_name(), str(e)))
     
 
-    # Se inicia el flujo de los sensores con un intervalo de 250ms
-    await rvr.sensor_control.start(interval=250)
+    # Intervalo de streaming de sensores, en ms.
+    # Medido en banco (Pi 4, 115200 baud, con los 8 sensores registrados arriba):
+    #   250 -> 3.85 Hz | 200 -> 5.00 Hz | 150 -> 6.25 Hz
+    #   100 -> 9.94 Hz |  60 -> 16.5 Hz |  50 -> el streaming no arranca
+    # El firmware cuantiza a multiplos de 20 ms (250 da 260 reales, 150 da 160).
+    # 60 ms es el minimo estable: odometria a ~16.5 Hz con jitter de 2.8 ms.
+    await rvr.sensor_control.start(interval=60)
     
 def sig_handler(_signo, _stack_frame):
     """

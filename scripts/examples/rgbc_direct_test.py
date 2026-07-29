@@ -45,7 +45,7 @@ class RGBCDirectTest:
             
             # Crear loop y DAL
             loop = asyncio.get_event_loop()
-            self.dal = SerialAsyncDal(loop, port_id='/dev/ttyS0', baud=115200)
+            self.dal = SerialAsyncDal(loop, port_id='/dev/rvr', baud=115200)
             self.rvr = SpheroRvrAsync(self.dal)
             
             # Conectar y despertar

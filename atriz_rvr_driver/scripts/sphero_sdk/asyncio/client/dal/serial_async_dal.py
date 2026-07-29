@@ -12,7 +12,10 @@ class SerialAsyncDal(SpheroDalBase, SerialSpheroPort):
     """
     """
 
-    def __init__(self, loop=None, port_id='/dev/ttyS0', baud=115200):#/dev/ttyS0', baud=115200):
+    # /dev/rvr lo crea la regla udev 99-rvr.rules y apunta al UART de GPIO14/15
+    # (el PL011, tras dtoverlay=disable-bt). Antes era /dev/ttyS0, el mini-UART,
+    # cuyo baudrate deriva con el reloj del VPU y corrompe tramas.
+    def __init__(self, loop=None, port_id='/dev/rvr', baud=115200):
         SpheroDalBase.__init__(self)
         SerialSpheroPort.__init__(
             self,

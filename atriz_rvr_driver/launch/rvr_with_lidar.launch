@@ -11,7 +11,7 @@
   <arg name="laser_x" default="0.0" />
   <arg name="laser_y" default="0.0" />
   <arg name="laser_z" default="0.10" />
-  <arg name="rvr_serial_port" default="/dev/ttyS0" />
+  <arg name="rvr_serial_port" default="/dev/rvr" />
   
   <!-- ========================================== -->
   <!-- 1. YDLIDAR X2 Driver -->

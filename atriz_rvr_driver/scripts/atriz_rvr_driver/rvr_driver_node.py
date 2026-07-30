@@ -117,6 +117,11 @@ COMPONENTES_ODOM = frozenset(
 #: · 50 ms -> no arranca. No lo bajes de 60 esperando más frecuencia.
 INTERVALO_STREAMING_MS = 60
 
+#: Gravedad estándar. El RVR reporta la aceleración en **g** y
+#: `sensor_msgs/Imu` la exige en **m/s²**. Medido en reposo el 2026-07-31: el
+#: módulo del vector era 0.973, no 9.81.
+G_MS2 = 9.80665
+
 #: Cada cuánto se le habla al RVR para que no se duerma, en segundos.
 #:
 #: 🔴 EL RVR SE DUERME SOLO SI NADIE LE HABLA, y cuando lo hace este nodo no se
@@ -690,19 +695,72 @@ class RvrDriverNode(Node):
     # ─────────────────────────────────────────────────────────────────────────
     # Handlers del SDK. Corren en el hilo del event loop, así que todo lo que
     # toque estado compartido va bajo el lock.
+    #
+    # 🔴🔴 EL RVR NO USA UNA SOLA CONVENCIÓN DE EJES. HAY QUE MIRAR CADA SENSOR.
+    #
+    #   RVR en FRD:  x adelante · y a la DERECHA · z ABAJO
+    #   ROS en FLU:  x adelante · y a la IZQUIERDA · z ARRIBA    <- REP-103
+    #
+    # Pasar de uno a otro es un giro de 180° alrededor del eje x: sobre un
+    # vector (x, y, z) -> (x, -y, -z), y sobre un cuaternión de orientación
+    # (x, y, z, w) -> (x, -y, -z, w).
+    #
+    # ⚠️ PERO SOLO DOS DE LOS CUATRO SENSORES LO NECESITAN. Medido uno a uno el
+    #    2026-07-31, después de que aplicarlo "por analogía" a los cuatro
+    #    rompiera los otros dos:
+    #
+    #      cuaternión     FRD -> hay que invertir (x, -y, -z, w)
+    #      locator        FRD -> hay que invertir la Y
+    #      giroscopio     YA EN FLU -> solo deg/s a rad/s
+    #      acelerómetro   YA EN FLU -> solo g a m/s²
+    #
+    #    Comprobarlo cuesta un giro y una lectura en reposo. Suponerlo costó
+    #    publicar la gravedad apuntando al techo y un giroscopio que contradecía
+    #    a la orientación de su propio mensaje /imu.
+    #
+    # Hasta el 2026-07-31 el driver los copiaba CRUDOS, y eso ponía el yaw de
+    # `/odom` con el signo al revés. Consecuencia: `/scan` y `/odom` decían que
+    # el robot giraba en sentidos CONTRARIOS, y SLAM tiraba de los dos a la vez.
+    # El mapa salía espejado o emborronado — y coherente consigo mismo, así que
+    # MIRARLO no lo detectaba.
+    #
+    # CÓMO SE MIDIÓ, porque adivinarlo no vale (2026-07-31):
+    #
+    #   1. `verificar_inverted_lidar.py` giró el robot y correlacionó el barrido
+    #      de antes con el de después: el patrón se desplazó -47° mientras la
+    #      odometría decía -47°. La física exige signos OPUESTOS, así que uno de
+    #      los dos estaba mal — pero eso solo no dice CUÁL.
+    #   2. El SDK documenta `yaw_angular_velocity` con la regla de la mano
+    #      derecha (positivo = antihorario) y el driver pasa `angular.z` sin
+    #      tocarlo.
+    #   3. Se mandó un giro positivo y SE MIRÓ EL ROBOT: giró a la IZQUIERDA.
+    #      -> el SDK cumple, el giro real fue +47°, y el barrido (-47°) era el
+    #         correcto. El equivocado era el yaw de `/odom`.
+    #   4. Confirmado por segunda vía: al curvar a la izquierda, la `y` del
+    #      locator salía NEGATIVA. Los dos signos invertidos, una sola causa.
+    #
+    # ⚠️ EL COMANDO `cmd_vel` NO SE TOCA. `drive_rc_si_units` ya es de mano
+    #    derecha (comprobado mirando el robot), así que `angular.z` va tal cual.
+    #    La conversión FRD->FLU es solo de SENSORES a ROS.
+    #
+    # ⚠️ Y `inverted: true` del YDLIDAR ES CORRECTO. No lo toques: el LIDAR
+    #    nunca fue el problema, aunque lo pareciera.
     # ─────────────────────────────────────────────────────────────────────────
     async def _h_locator(self, datos) -> None:
         with self._lock:
             self._odom.pose.pose.position.x = float(datos['Locator']['X'])
-            self._odom.pose.pose.position.y = float(datos['Locator']['Y'])
+            # 🔴 -Y: FRD -> FLU. Ver el bloque de arriba.
+            self._odom.pose.pose.position.y = -float(datos['Locator']['Y'])
             self._odom.pose.pose.position.z = 0.0
         self._quiza_publicar('locator')
 
     async def _h_quaternion(self, datos) -> None:
         q = datos['Quaternion']
         with self._lock:
+            # 🔴 (x, -y, -z, w): FRD -> FLU. Sin esto el yaw sale al revés y
+            # SLAM pelea contra su propio emparejado de barridos.
             orient = Quaternion(
-                x=float(q['X']), y=float(q['Y']), z=float(q['Z']), w=float(q['W'])
+                x=float(q['X']), y=-float(q['Y']), z=-float(q['Z']), w=float(q['W'])
             )
             self._odom.pose.pose.orientation = orient
             self._imu.orientation = orient
@@ -718,6 +776,13 @@ class RvrDriverNode(Node):
         g = datos['Gyroscope']
         rad = math.pi / 180.0
         with self._lock:
+            # deg/s -> rad/s (REP-103). Y **NADA MÁS**: el giroscopio SÍ viene
+            # ya en FLU, al contrario que el cuaternión y el locator.
+            #
+            # Medido el 2026-07-31 girando en sentido antihorario:
+            #     gyro.z crudo = +0.433 rad/s   -> antihorario positivo = FLU ✅
+            # Aplicarle el (x,-y,-z) del cuaternión lo dejaba en -0.433, o sea
+            # contradiciendo a la orientación del propio mensaje /imu.
             angular = Vector3(
                 x=float(g['X']) * rad,
                 y=float(g['Y']) * rad,
@@ -731,14 +796,36 @@ class RvrDriverNode(Node):
         v = datos['Velocity']
         with self._lock:
             self._odom.twist.twist.linear.x = float(v['X'])
-            self._odom.twist.twist.linear.y = float(v['Y'])
+            # -Y por coherencia con el locator, que sí se midió en FRD.
+            # ⚠️ NO VERIFICADO para este stream: `Velocity` es basura (0.001 m/s
+            # con el robot a 0.147 real), así que no hay señal con la que
+            # comprobar su signo. Cuando se decida de dónde sacar la velocidad
+            # de verdad, esto se cae entero.
+            self._odom.twist.twist.linear.y = -float(v['Y'])
         self._quiza_publicar('velocity')
 
     async def _h_accel(self, datos) -> None:
         a = datos['Accelerometer']
         with self._lock:
+            # 🔴 EL RVR DA LA ACELERACIÓN EN **g**, Y `sensor_msgs/Imu` LA QUIERE
+            # EN m/s². Medido en reposo el 2026-07-31: el módulo del vector era
+            # **0.973**, no 9.81. El driver de ROS 1 tampoco convertía, así que
+            # `/imu` llevaba desde siempre valores 9.8 veces pequeños.
+            #
+            # Y **no** lleva la conversión FRD->FLU: el acelerómetro ya viene con
+            # z ARRIBA. En reposo el valor crudo de z era **+0.967 g**; forzarle
+            # el (x,-y,-z) del cuaternión lo dejaba en -0.967, es decir, con la
+            # gravedad apuntando al techo.
+            #
+            # ⚠️ La lección: el RVR NO usa una sola convención para todo. El
+            #    cuaternión y el locator vienen en FRD; el giroscopio y el
+            #    acelerómetro, en FLU. Hay que comprobar CADA sensor por
+            #    separado — aplicar la corrección "por analogía" rompió estos
+            #    dos el 2026-07-31.
             self._imu.linear_acceleration = Vector3(
-                x=float(a['X']), y=float(a['Y']), z=float(a['Z'])
+                x=float(a['X']) * G_MS2,
+                y=float(a['Y']) * G_MS2,
+                z=float(a['Z']) * G_MS2,
             )
         self._quiza_publicar('accelerometer')
 

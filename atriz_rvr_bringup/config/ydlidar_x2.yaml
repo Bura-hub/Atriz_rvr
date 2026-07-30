@@ -91,16 +91,39 @@ ydlidar_ros2_driver_node:
     inverted: true
     reversion: false
 
-    # ── Resolución variable ───────────────────────────────────────────────────
-    # false para que acepte un número variable de puntos por vuelta. Con `true`
-    # el driver avisa «Real point count > fixed» constantemente, porque el X2
-    # entrega ~3000 muestras/s repartidas según la velocidad de giro, y ese
-    # reparto no es constante.
+    # ── 🔴 RESOLUCIÓN FIJA — NO LO PONGAS EN false ────────────────────────────
+    #
+    # `true` obliga al driver a entregar SIEMPRE el mismo número de puntos por
+    # barrido. Es obligatorio para slam_toolbox.
+    #
+    # ⚠️ ESTE PARÁMETRO ESTUVO EN `false` Y ROMPIÓ SLAM EN SILENCIO.
+    #
+    #   Se puso a `false` en la Fase 3.2 para callar un aviso cosmético del
+    #   driver («Real point count > fixed»), porque el X2 reparte sus ~3000
+    #   muestras/s según la velocidad de giro y ese reparto no es constante.
+    #
+    #   El precio fue que /scan salía con 254 puntos unas veces y 255 otras.
+    #   `slam_toolbox` registra el sensor con el tamaño del PRIMER barrido y
+    #   **descarta todos los que no coincidan**, con una sola línea suelta en su
+    #   log y ningún error:
+    #
+    #       LaserRangeScan contains 254 range readings, expected 255
+    #
+    #   Resultado (medido el 2026-07-31): el robot recorría 82.8 cm y el mapa se
+    #   quedaba IDÉNTICO celda a celda. Todo lo demás parecía correcto —
+    #   `active [3]`, /scan a 11.8 Hz, árbol TF entero, QoS emparejado— y el
+    #   mapa no crecía.
+    #
+    # La lección: cambiar un parámetro para silenciar un aviso es cambiar un
+    # síntoma visible por uno invisible. El aviso era cosmético; esto no.
+    #
+    # 📝 También mordió a `verificar_inverted_lidar.py`, que asumía barridos del
+    #    mismo tamaño y reventaba con IndexError. Mismo origen, dos víctimas.
     #
     # OJO con el nombre: en ROS 1 este parámetro se llamaba `resolution_fixed`;
     # en el driver de ROS 2 es `fixed_resolution`. Poner el viejo NO da error:
-    # simplemente se ignora y se queda el valor por defecto (true).
-    fixed_resolution: false
+    # simplemente se ignora y se queda el valor por defecto.
+    fixed_resolution: true
 
     # ── Robustez ──────────────────────────────────────────────────────────────
     auto_reconnect: true

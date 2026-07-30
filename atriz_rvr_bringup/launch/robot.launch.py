@@ -9,12 +9,13 @@ Es el punto de entrada único del robot. Los tres nodos que arranca se reparten 
 árbol TF, y hay que entender el reparto porque es donde estaba el bloqueante raíz
 del proyecto:
 
-    odom ──(rvr_driver)──► base_link ──(robot_state_publisher)──► laser
-                                                                    │
-                                                    /scan ◄──(ydlidar)
+    odom ──(rvr_driver)──► base_footprint ──(robot_state_publisher)──► base_link ──► laser
+                                                                                       │
+                                                                       /scan ◄──(ydlidar)
 
-  · `rvr_driver`             publica `odom → base_link`, /odom, /imu, /color
+  · `rvr_driver`             publica `odom → base_footprint`, /odom, /imu, /color
   · `robot_state_publisher`  publica los transforms FIJOS desde el URDF
+                             (`base_footprint → base_link → laser / imu_link / ruedas`)
   · `ydlidar_ros2_driver`    publica /scan con frame_id = `laser`
 
 🔴 **Los nombres tienen que coincidir en TRES sitios.** El `base_frame` del
@@ -26,7 +27,8 @@ sistema de ROS 1, donde el driver decía `rvr_base_link` y el LIDAR colgaba de
 
 VERIFICAR SIEMPRE tras arrancar:
 
-    ros2 run tf2_ros tf2_echo odom laser   # debe resolver
+    ros2 run tf2_ros tf2_echo odom base_footprint   # ← LA prueba: es lo que pide SLAM
+    ros2 run tf2_ros tf2_echo odom laser            # la cadena completa
     ros2 topic hz /scan                    # ~10 Hz (medido libre: 11.48 Hz)
     ros2 topic hz /odom                    # ~16.7 Hz
 """
@@ -59,7 +61,7 @@ def generate_launch_description() -> LaunchDescription:
 
     ns = LaunchConfiguration('namespace')
 
-    # ── El driver del RVR: publica odom -> base_link ──────────────────────────
+    # ── El driver del RVR: publica odom -> base_footprint ─────────────────────
     rvr = Node(
         package='atriz_rvr_driver',
         executable='rvr_driver_node',
@@ -68,9 +70,12 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
         parameters=[{
             'serial_port': LaunchConfiguration('rvr_port'),
-            # base_frame TIENE que coincidir con el link del URDF y con el
-            # frame_id del LIDAR. Ver el aviso de la cabecera.
-            'base_frame': 'base_link',
+            # 🔴 base_footprint, NO base_link. Un frame solo puede tener UN
+            # padre en TF, y el URDF ya publica base_footprint->base_link. Si el
+            # driver publicara odom->base_link, base_link tendría dos padres y el
+            # árbol se partiría en dos otra vez.
+            # Es también lo que slam_toolbox pide en su `base_frame`.
+            'base_frame': 'base_footprint',
             'odom_frame': 'odom',
             # 60 ms es el mínimo del firmware del RVR: a 50 ms no arranca, y
             # cuantiza a múltiplos de 20. Medido el 2026-07-29.
@@ -78,7 +83,7 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
-    # ── La descripción: publica base_link -> laser, imu_link, ruedas ──────────
+    # ── La descripción: base_footprint -> base_link -> laser, imu_link, ruedas ─
     desc = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([descripcion, 'launch', 'description.launch.py'])

@@ -144,7 +144,10 @@ class RvrDriverNode(Node):
         self.declare_parameter('serial_port', '/dev/rvr')
         self.declare_parameter('baud', 115200)
         self.declare_parameter('odom_frame', 'odom')
-        self.declare_parameter('base_frame', 'base_link')
+        # 🔴 base_footprint, NO base_link. Ver el comentario largo de _quiza_publicar.
+        self.declare_parameter('base_frame', 'base_footprint')
+        # La IMU vive en su propio frame: los datos NO están en base_frame.
+        self.declare_parameter('imu_frame', 'imu_link')
         self.declare_parameter('streaming_interval_ms', INTERVALO_STREAMING_MS)
         self.declare_parameter('cmd_vel_timeout', 0.3)
         self.declare_parameter('publish_tf', True)
@@ -154,6 +157,7 @@ class RvrDriverNode(Node):
         self._baud = int(p('baud').value)
         self._odom_frame = p('odom_frame').value
         self._base_frame = p('base_frame').value
+        self._imu_frame = p('imu_frame').value
         self._intervalo_ms = int(p('streaming_interval_ms').value)
         self._cmd_vel_timeout = float(p('cmd_vel_timeout').value)
         self._publicar_tf = bool(p('publish_tf').value)
@@ -175,7 +179,11 @@ class RvrDriverNode(Node):
         self._odom.header.frame_id = self._odom_frame
         self._odom.child_frame_id = self._base_frame
         self._imu = Imu()
-        self._imu.header.frame_id = self._base_frame
+        # imu_link, no base_frame: las aceleraciones y velocidades angulares están
+        # medidas en el frame del sensor. Ponerle base_frame haría que cualquier
+        # consumidor (robot_localization, por ejemplo) las interpretara mal si
+        # algún día el sensor deja de estar alineado con el chasis.
+        self._imu.header.frame_id = self._imu_frame
 
         # ── Event loop de asyncio ────────────────────────────────────────────
         # Heredado del nodo de ROS 1, donde ya estaba bien resuelto. El SDK del
@@ -356,6 +364,35 @@ class RvrDriverNode(Node):
             self.get_logger().error('sin objeto RVR: no se puede iniciar el streaming')
             return
         try:
+            # 🔴 ESTE `wake()` SE LLAMA UNA SOLA VEZ, Y ES UN FALLO CONOCIDO.
+            #
+            # El RVR se duerme solo por inactividad, y cuando lo hace este nodo
+            # NO SE ENTERA: /odom, /imu y /color dejan de publicar a la vez, el
+            # proceso sigue vivo al 12.3 % de CPU con sus topics registrados
+            # (`Publisher count: 1`), y no aparece ni un error en el log.
+            #
+            # Medido el 2026-07-30 durante la Fase 4. Y la pista fácil engaña:
+            # `ros2 topic hz /tf` seguía dando 50 Hz, pero esos 50 Hz eran de
+            # slam_toolbox a solas — con este driver aportando serían ~67 Hz.
+            #
+            # ⚠️ El tiempo exacto de inactividad está SIN MEDIR: acotado entre
+            #    ~2 y ~7.5 min. Encaja con los 5 min documentados del RVR. El SDK
+            #    vendorizado NO tiene `set_inactivity_timeout`.
+            #
+            # Por qué importa: un robot que espere 5 minutos a que el estudiante
+            # empiece su práctica ESTARÁ MUDO al empezar, y la web no verá ningún
+            # error. Un systemd con Restart=always no lo arregla: no muere nadie.
+            #
+            # PENDIENTE, dos partes:
+            #   1. Keepalive: un timer cada 60 s con `get_battery_percentage()`
+            #      —es una lectura, y de paso da la batería, que hoy no se
+            #      publica— o `wake()` a secas.
+            #   2. Detector de silencio: si no llega ninguna muestra del RVR en
+            #      N segundos, WARN e intentar reanudar el streaming, en vez de
+            #      seguir publicando nada con cara de estar sano.
+            #
+            # Mientras tanto: si un robot no publica /odom, REINICIA EL DRIVER
+            # antes de buscar cualquier otra causa. Manual, cap. 9.8.
             await self._rvr.wake()
             await self._rvr.reset_yaw()
             await self._rvr.reset_locator_x_and_y()
@@ -464,8 +501,30 @@ class RvrDriverNode(Node):
                 t = TransformStamped()
                 t.header.stamp = ahora
                 t.header.frame_id = self._odom_frame
-                # base_link, NO rvr_base_link: el árbol TF estaba partido en dos
-                # y era el bloqueante raíz de SLAM.
+                # 🔴 base_footprint, y el POR QUÉ importa (2026-07-30).
+                #
+                # Un frame solo puede tener UN PADRE en TF. El URDF publica
+                # `base_footprint -> base_link` (estático), así que si el driver
+                # publicara `odom -> base_link`, base_link tendría DOS padres y
+                # tf2 respondería:
+                #     Could not find a connection between 'odom' and
+                #     'base_footprint' ... Tf has two or more unconnected trees
+                #
+                # Pasó exactamente eso: la primera versión de este nodo publicaba
+                # odom->base_link y slam_toolbox repetía «Failed to compute odom
+                # pose» indefinidamente.
+                #
+                # Y lo peor: `tf2_echo odom laser` SÍ resolvía, por el camino
+                # odom->base_link->laser, ignorando base_footprint. La verificación
+                # de la Fase 3 pasaba y ocultaba el problema. La prueba correcta es
+                # `tf2_echo odom base_footprint`, que es lo que SLAM necesita.
+                #
+                # La cadena correcta, con un solo padre por frame:
+                #     odom -> base_footprint -> base_link -> laser
+                #
+                # Semánticamente también es lo bueno: el locator del RVR da la
+                # posición del robot sobre el plano del suelo, que es justo lo que
+                # base_footprint representa.
                 t.child_frame_id = self._base_frame
                 t.transform.translation.x = pos.x
                 t.transform.translation.y = pos.y
@@ -650,3 +709,32 @@ if __name__ == '__main__':
 #    ⚠️ Si algún día se cambia esta decisión, hay que cambiarla en TRES sitios a la
 #       vez: el `base_frame` del driver, el link del URDF y el `frame_id` del
 #       LIDAR. Desalinear uno parte el árbol TF EN SILENCIO.
+#
+# 3. El driver publica `odom → base_footprint`, NO `odom → base_link`.
+#    (Añadida el 2026-07-30, arreglando el bloqueante de la Fase 4.)
+#
+#    EN TF UN FRAME SOLO PUEDE TENER UN PADRE. El driver publicaba
+#    `odom → base_link` mientras el URDF publicaba `base_footprint → base_link`,
+#    así que `base_link` tenía DOS padres y el árbol se partía en dos:
+#
+#        Could not find a connection between 'odom' and 'base_footprint' ...
+#        Tf has two or more unconnected trees.
+#
+#    slam_toolbox repetía `Failed to compute odom pose` y no mapeaba nada.
+#
+#    `base_footprint` es además lo correcto por REP-105 —el frame proyectado al
+#    suelo es el que se localiza— y es lo que slam_toolbox pide en su
+#    `base_frame`. La IMU pasó a tener su propio `imu_frame` (`imu_link`): sus
+#    datos NO están en `base_frame`, y decir lo contrario era otra imprecisión.
+#
+#    ⚠️ Y LA LECCIÓN DE MÉTODO, que vale más que el arreglo: la verificación de la
+#       Fase 3 era `tf2_echo odom laser` y PASABA, resolviendo por el camino
+#       equivocado (`odom → base_link → laser`) mientras `base_footprint` colgaba
+#       de otro árbol que nadie miraba.
+#
+#       COMPRUEBA EL TRANSFORM QUE PIDE EL CONSUMIDOR, con sus frames exactos:
+#
+#           ros2 run tf2_ros tf2_echo odom base_footprint     # ← ESTA
+#
+#       Un `tf2_echo` que resuelve prueba que hay UN camino, no que el árbol
+#       esté bien.

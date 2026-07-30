@@ -1,0 +1,139 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# slam_toolbox para el Sphero RVR de Atriz — modo async (mapping)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Creado el 2026-07-30 (Fase 4). Base: mapper_params_online_async.yaml del propio
+# slam_toolbox 2.8.5, con los valores ajustados a lo que se ha MEDIDO de este
+# robot, no a los genéricos.
+#
+# Lo medido que justifica cada cambio:
+#
+#     LIDAR X2      alcance real ~8 m (spec) · 10.1 Hz · resolución 1.42°
+#                   255 puntos por barrido, 89 % válidos
+#     Odometría     16.7 Hz, posición buena;  🔴 LA VELOCIDAD ES BASURA
+#     Plataforma    Raspberry Pi 4, y el driver del RVR ya usa ~29.5 % de un núcleo
+#
+# ⚠️ ANTES DE CONFIAR EN EL MAPA, DOS COSAS SIN VERIFICAR
+#
+#   1. `inverted` del LIDAR. El X2.yaml oficial trae `false`, el launch de ROS 1 de
+#      Atriz tenía `true`, y ese launch NUNCA SE EJECUTÓ. Si está al revés, **el
+#      mapa sale ESPEJADO** — parece correcto y tiene las paredes al otro lado.
+#      Comprobación en config/ydlidar_x2.yaml.
+#
+#   2. El robot está inclinado ~7° (medido por dos vías independientes: el árbol
+#      TF y el `Roll` de la IMU). El LIDAR lo está viendo, así que barre un plano
+#      inclinado. Sin determinar si es del suelo o del montaje.
+# ═══════════════════════════════════════════════════════════════════════════════
+slam_toolbox:
+  ros__parameters:
+
+    # ── Solver ────────────────────────────────────────────────────────────────
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ── 🔴 FRAMES: tienen que coincidir con el URDF, o no arranca ─────────────
+    # base_frame es `base_footprint`, la raíz del URDF (REP-105), NO `base_link`.
+    # slam_toolbox necesita el frame proyectado al suelo, porque el mapa es 2D.
+    #
+    # La cadena completa que exige, y que la Fase 3 dejó entera:
+    #     map ──(slam_toolbox)──► odom ──(driver)──► base_footprint ──► laser
+    #
+    # Si algo no cuadra, slam_toolbox NO ARRANCA y el error sí es claro.
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+
+    mode: mapping          # 'localization' para usar un mapa ya guardado (Fase 4b)
+    use_map_saver: true
+    debug_logging: false
+
+    # ── Ritmo ─────────────────────────────────────────────────────────────────
+    # throttle_scans: 1 procesa TODOS los barridos. Es el primer parámetro que
+    # subir si el Pi 4 se queda corto de CPU: a 2 procesa la mitad.
+    throttle_scans: 1
+    # 50 Hz de map->odom. Barato y da suavidad a la navegación.
+    transform_publish_period: 0.02
+    # Publica /map cada 5 s. Subirlo alivia CPU; bajarlo da mapa más fresco en
+    # la web, que es quien lo va a mirar.
+    map_update_interval: 5.0
+    # 5 cm por celda. Coincide con la resolución de costmap que el plan prevé para
+    # Nav2, así que no habrá que reescalar. Con un LIDAR de 1.42° de resolución,
+    # bajar de 5 cm no aporta información real: a 3 m, 1.42° son ya 7.4 cm entre
+    # puntos consecutivos.
+    resolution: 0.05
+
+    # ── 🔴 ALCANCE: 8 m, no los 20 del fichero oficial ───────────────────────
+    # La especificación real del X2 son ~8 m útiles, y config/ydlidar_x2.yaml lo
+    # limita a 8.0. Decirle 20 a slam_toolbox le haría rasterizar como "libre"
+    # espacio que el sensor NUNCA MIDIÓ: el mapa saldría con zonas despejadas
+    # inventadas, que para navegar es peor que no tener nada.
+    min_laser_range: 0.1
+    max_laser_range: 8.0
+    # Nunca por encima de max_laser_range, por la misma razón.
+    scan_buffer_maximum_scan_distance: 8.0
+
+    minimum_time_interval: 0.5    # con /scan a 10 Hz, limita el grafo a 2 Hz
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000   # serializar mapas grandes necesita pila
+    enable_interactive_mode: true
+
+    # ── Emparejado de barridos ────────────────────────────────────────────────
+    use_scan_matching: true
+    use_scan_barycenter: true
+
+    # 30 cm entre barridos añadidos al grafo, no los 50 cm del fichero oficial.
+    #
+    # Por qué se baja: el RVR mide 21 cm de largo y se mueve en interiores, con el
+    # X2 dando solo 8 m de alcance y 1.42° de resolución. Con 50 cm de separación,
+    # dos barridos consecutivos comparten poca geometría reconocible y el
+    # emparejado tiene menos con lo que trabajar.
+    #
+    # ⚠️ El coste es CPU, y el Pi 4 ya lleva el driver del RVR al ~29.5 % de un
+    #    núcleo. Si SLAM va justo, ESTE es el parámetro que subir primero (a 0.4
+    #    o 0.5), antes que tocar el solver.
+    minimum_travel_distance: 0.3
+    minimum_travel_heading: 0.5   # 28.6°. El RVR gira sobre su eje: es razonable
+    check_min_dist_and_heading_precisely: false
+    scan_buffer_size: 10
+
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+
+    # ── Cierre de bucle ───────────────────────────────────────────────────────
+    # 3 m de búsqueda, coherente con los 8 m de alcance del sensor.
+    do_loop_closing: true
+    loop_search_maximum_distance: 3.0
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # ── Penalizaciones ────────────────────────────────────────────────────────
+    # Se dejan en los valores por defecto A PROPÓSITO. Son los que más tientan a
+    # "ajustar a ojo", y este proyecto no cambia lo que no ha medido. Si el mapa
+    # sale mal, primero se comprueba `inverted` y la inclinación de 7°, que son
+    # causas conocidas y sin resolver.
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1

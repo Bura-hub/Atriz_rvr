@@ -1,37 +1,55 @@
 <?xml version="1.0"?>
-<package format="2">
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
   <name>atriz_rvr_driver</name>
-  <version>0.0.2</version>
-  <description>The Sphero RVR ROS hardware package. This package is based on the free sphero C++ library from Rud Merriam (https://bitbucket.org/rmerriam/rvr-cpp).</description>
+  <version>1.0.0</version>
+  <description>
+    Driver ROS 2 (rclpy) del Sphero RVR para el laboratorio remoto Atriz.
+    Portado de catkin/rospy a ament_python/rclpy el 2026-07-30.
+    Incluye el SDK de Sphero vendorizado en scripts/sphero_sdk.
+  </description>
 
   <maintainer email="atriz@udenar.edu.co">Atriz Team - Universidad de Nariño</maintainer>
-
   <license>MIT</license>
 
+  <url type="repository">https://github.com/Bura-hub/Atriz_rvr</url>
+  <url type="bugtracker">https://github.com/Bura-hub/Atriz_rvr/issues</url>
   <author email="atriz@udenar.edu.co">Atriz Team</author>
-  <author email="simon.haller-seeber@uibk.ac.at">Simon M. Haller-Seeber</author>
-  <author email="paddy-hofmann@web.de">Paddy</author>
 
-  <url type="website">https://github.com/atriz-udenar/ros_sphero_rvr</url>
-  <url type="repository">https://github.com/atriz-udenar/ros_sphero_rvr</url>
-  <url type="bugtracker">https://github.com/atriz-udenar/ros_sphero_rvr/issues</url>
+  <buildtool_depend>ament_python</buildtool_depend>
 
-  <depend>roscpp</depend>
-  <depend>rospy</depend>
-  <depend>std_msgs</depend>
-  <depend>std_srvs</depend>
-  <depend>atriz_rvr_serial</depend>
-  <depend>tf</depend>
-  <build_depend>message_generation</build_depend>
-  <build_export_depend>message_generation</build_export_depend>
-  <buildtool_depend>catkin</buildtool_depend>
-  <exec_depend>message_runtime</exec_depend>
-  <depend>geometry_msgs</depend>
-  <depend>cv_bridge</depend>
-  <depend>joint_limit_interface</depend>
-  <depend>transmission_interface</depend>
+  <!-- ── Dependencias de ejecución ────────────────────────────────────────────
+       rospy -> rclpy, y tf -> tf2_ros. Las de ROS 1 que DESAPARECEN, y por qué:
+
+         roscpp                 no queda una sola línea de C++ (Fase 2.1)
+         atriz_rvr_serial       el fork de wjwwood/serial solo lo usaba el C++
+         message_generation     ahora vive en atriz_rvr_msgs (rosidl)
+         message_runtime        idem
+         transmission_interface parte de ros_control, que nunca se ejecutó
+         cv_bridge              decisión tomada: SIN cámara en los robots
+         joint_limit_interface  además estaba MAL ESCRITO — el paquete real es
+                                joint_limits_interface, y por eso rosdep fallaba.
+                                Se va igualmente con ros_control.
+  -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>atriz_rvr_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+
+  <!-- El SDK de Sphero habla con el RVR por serie. pyserial-asyncio NO existe
+       como paquete apt: se instala con pip (ver manual, cap. 5.1). -->
+  <exec_depend>python3-serial</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
 
   <export>
-    <!-- Other tools can request additional information be placed here -->
+    <build_type>ament_python</build_type>
   </export>
 </package>

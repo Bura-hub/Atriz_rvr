@@ -269,7 +269,7 @@ class RvrDriverNode(Node):
             f'rvr_driver arrancando · puerto={self._puerto} baud={self._baud} '
             f'interval={self._intervalo_ms}ms frames={self._odom_frame}->{self._base_frame}'
         )
-        self._enviar(self._conectar_rvr())
+        self._enviar(self._conectar_rvr(), 'conexión/streaming')
 
     # ─────────────────────────────────────────────────────────────────────────
     # Puente entre rclpy (sincrónico) y el SDK (asyncio)
@@ -278,18 +278,38 @@ class RvrDriverNode(Node):
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _enviar(self, coro):
+    def _enviar(self, coro, etiqueta: str = 'comando'):
         """Envía una corrutina al event loop que YA existe.
 
         Es el sustituto de las 48 llamadas a `asyncio.run()` del nodo de ROS 1.
-        No espera el resultado a propósito: un callback de ROS que se bloquea
-        esperando al robot deja de atender mensajes.
+        No espera el resultado —un callback de ROS que se bloquea esperando al
+        robot deja de atender mensajes— **pero tampoco lo tira a la basura.**
+
+        🔴 La primera versión de este método hacía exactamente eso: encolaba y
+        se olvidaba. Resultado el 2026-07-30: `cmd_vel` llegaba, el watchdog
+        disparaba, y el robot NO SE MOVÍA — sin un solo mensaje de error, porque
+        la excepción de `drive_rc_si_units` moría dentro del Future.
+
+        Es el mismo fallo silencioso que este proyecto persigue en todas partes,
+        cometido aquí. El `add_done_callback` es la diferencia entre «no funciona
+        y no sé por qué» y un error en el log.
         """
         try:
-            return asyncio.run_coroutine_threadsafe(coro, self._loop)
+            fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
         except RuntimeError as e:
-            self.get_logger().error(f'no se pudo encolar la corrutina: {e}')
+            self.get_logger().error(f'{etiqueta}: no se pudo encolar: {e}')
             return None
+
+        def _revisar(f) -> None:
+            try:
+                f.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.get_logger().error(f'{etiqueta} FALLÓ: {type(e).__name__}: {e}')
+
+        fut.add_done_callback(_revisar)
+        return fut
 
     # ─────────────────────────────────────────────────────────────────────────
     # Conexión y streaming de sensores
@@ -474,7 +494,8 @@ class RvrDriverNode(Node):
                 linear_velocity=v_lineal,
                 yaw_angular_velocity=v_angular_deg,
                 flags=0,
-            )
+            ),
+            f'cmd_vel(v={v_lineal:.2f} w={v_angular_deg:.1f}deg/s)',
         )
         self._conduciendo = True
         self._t_ultimo_cmd_vel = self._ahora_s()
@@ -493,7 +514,7 @@ class RvrDriverNode(Node):
         self.get_logger().warn(
             f'watchdog: {self._cmd_vel_timeout} s sin cmd_vel, parando motores'
         )
-        self._enviar(self._rvr.drive_stop())
+        self._enviar(self._rvr.drive_stop(), 'watchdog drive_stop')
         self._conduciendo = False
 
     def _cb_parada_emergencia(self, _msg: Empty) -> None:
@@ -501,7 +522,7 @@ class RvrDriverNode(Node):
         self._parada_emergencia = True
         self._conduciendo = False
         if self._rvr is not None:
-            self._enviar(self._rvr.drive_stop())
+            self._enviar(self._rvr.drive_stop(), 'parada de emergencia')
 
     def _srv_liberar_parada(self, _req, resp):
         self.get_logger().warn('parada de emergencia liberada')
@@ -517,7 +538,7 @@ class RvrDriverNode(Node):
         self.get_logger().info('cerrando: parando motores y liberando el puerto')
         if self._rvr is not None:
             try:
-                fut = self._enviar(self._apagar_rvr())
+                fut = self._enviar(self._apagar_rvr(), 'apagado')
                 if fut is not None:
                     fut.result(timeout=3.0)
             except Exception:

@@ -30,13 +30,11 @@ posición angular de sus ruedas —solo conteos de encoder acumulados—, de mod
 declararlas móviles dejaría a `robot_state_publisher` esperando datos que nunca
 llegarían. Ver el comentario de las ruedas en el xacro.
 """
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -71,9 +69,20 @@ def generate_launch_description() -> LaunchDescription:
         namespace=LaunchConfiguration('namespace'),
         output='screen',
         parameters=[{
-            # ParameterValue con value_type=str evita que rclpy intente adivinar
-            # el tipo del XML y lo interprete como algo que no es.
-            'robot_description': descripcion,
+            # 🔴 ParameterValue(..., value_type=str) NO ES OPCIONAL.
+            #
+            # Sin él, launch intenta interpretar el XML del URDF como YAML y el
+            # arranque muere con:
+            #
+            #     Unable to parse the value of parameter robot_description as
+            #     yaml. If the parameter is meant to be a string, try wrapping
+            #     it in launch_ros.parameter_descriptions.ParameterValue(
+            #     value, value_type=str)
+            #
+            # Pasó el 2026-07-30: este fichero llevaba un comentario explicando
+            # justamente esto, y el código no lo aplicaba. El mensaje de error de
+            # launch es de los buenos — dice exactamente qué hacer.
+            'robot_description': ParameterValue(descripcion, value_type=str),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
     )

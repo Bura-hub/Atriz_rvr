@@ -1,0 +1,217 @@
+<?xml version="1.0"?>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  Sphero RVR — descripción URDF para el laboratorio remoto Atriz
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Creado el 2026-07-30 (Fase 3 del plan). Antes de esto NO EXISTÍA ningún .urdf
+  ni .xacro en el proyecto, y el árbol TF estaba PARTIDO EN DOS:
+
+      odom -> rvr_base_link        (lo publicaba el driver)
+      base_link -> laser           (lo publicaba un static_transform_publisher)
+
+  Sin puente entre `rvr_base_link` y `base_link`. Dos árboles inconexos, y por
+  eso SLAM y Nav2 eran imposibles: el plan lo llama «el bloqueante raíz».
+
+  Ahora la cadena es una sola, canónica según REP-105:
+
+      map -> odom -> base_footprint -> base_link -> { laser, imu_link, wheels }
+                     └─ el driver publica odom->base_link
+                        robot_state_publisher publica el resto desde aquí
+
+  ═══════════════════════════════════════════════════════════════════════════
+  🔴 LEE ESTO ANTES DE FIARTE DE LAS MEDIDAS
+  ═══════════════════════════════════════════════════════════════════════════
+
+  Las dimensiones del chasis vienen de la ESPECIFICACIÓN publicada del Sphero
+  RVR. **No están medidas sobre esta unidad.**
+
+  La posición del LIDAR está **parcialmente medida** (2026-07-30):
+      ✅ centrado (x=0, y=0) — confirmado por el usuario
+      ✅ 4 cm de hueco entre la tapa del RVR y la base del LIDAR — medido
+      🟡 la altura sobre el suelo se DERIVA sumando el alto del RVR, que viene de
+         la especificación y no está medido en esta unidad
+
+  El valor que arrastraba el proyecto (`0 0 0.10`) era una SUPOSICIÓN declarada:
+  la propia GUIA_COMPLETA_LIDAR.md dice «se asume que el LIDAR está en el centro
+  del RVR y 0,1 m por encima. Ajusta estos valores a tu montaje real». Se queda
+  **7.5 cm corto** del valor real.
+
+  **Por qué importa y no es un detalle cosmético:** un error en `laser_z` inclina
+  todo el mapa; un error en `laser_x` desplaza cada barrido respecto a la
+  odometría, y SLAM lo interpreta como movimiento que no ocurrió. El mapa sale
+  torcido y no hay ningún mensaje de error. Es exactamente el tipo de fallo
+  silencioso que este proyecto persigue.
+
+  👤 **SI EL MAPA SALE INCLINADO O DESPLAZADO**, mide con una regla, con el robot
+  en el suelo, del SUELO al centro del disco giratorio del LIDAR, y pon ese
+  número directo en `laser_z` ignorando la suma. Es una sola medida y elimina la
+  dependencia del alto de la especificación.
+-->
+<robot name="atriz_rvr" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       DIMENSIONES. Todo lo geométrico se cambia SOLO aquí.
+       ════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Chasis. Fuente: especificación publicada del Sphero RVR (218 x 185 x 114 mm).
+       📝 NO MEDIDO sobre esta unidad. Afecta a la visualización y a los costmaps
+       de Nav2 (el footprint del robot), no a la odometría. -->
+  <xacro:property name="base_length" value="0.218"/>   <!-- X, hacia delante -->
+  <xacro:property name="base_width"  value="0.185"/>   <!-- Y, hacia la izquierda -->
+  <xacro:property name="base_height" value="0.114"/>   <!-- Z -->
+
+  <!-- Ruedas/orugas. 📝 NO MEDIDO. El RVR lleva orugas de goma sobre ruedas, así
+       que "radio" es una aproximación útil para visualizar y para que
+       base_footprint quede a la altura correcta.
+       IMPORTANTE: estos valores NO se usan para calcular odometría — el RVR la
+       entrega ya hecha por su locator interno. Son geométricos. -->
+  <xacro:property name="wheel_radius"    value="0.032"/>
+  <xacro:property name="wheel_width"     value="0.025"/>
+  <xacro:property name="wheel_separation" value="0.150"/>  <!-- entre centros, eje Y -->
+
+  <!-- ══ POSICIÓN DEL LIDAR ══════════════════════════════════════════════════
+       ✅ CENTRADO confirmado por el usuario el 2026-07-30: el X2 está en el
+          centro del RVR, así que x=0 e y=0.
+       🟡 ALTURA DERIVADA, no medida directamente. El usuario midió **4 cm de
+          hueco entre la tapa del RVR y la base del LIDAR**. De ahí:
+
+              base_height        0.114   alto del RVR (ESPECIFICACIÓN, sin medir)
+            + laser_gap          0.040   hueco medido por el usuario  ✅
+            + x2_height/2        0.0205  del apoyo al centro del disco
+            ─────────────────────────
+              laser_z            0.1745  altura del plano de barrido sobre el suelo
+
+       El término dudoso es `base_height`: viene de la ficha del RVR y NADIE lo
+       ha medido en esta unidad. Si el mapa sale inclinado, es el primer
+       sospechoso — mide del SUELO al centro del disco y pon el resultado
+       directamente en `laser_z`, ignorando la suma.
+
+       Para comparar: el valor que arrastraba el proyecto era 0.10, una
+       suposición declarada en GUIA_COMPLETA_LIDAR.md. Se queda **7.5 cm corto**.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <xacro:property name="laser_x"   value="0.0"/>
+  <xacro:property name="laser_y"   value="0.0"/>
+  <xacro:property name="laser_gap" value="0.040"/>   <!-- ✅ medido 2026-07-30 -->
+  <xacro:property name="x2_height" value="0.041"/>   <!-- alto del X2, de su ficha -->
+  <xacro:property name="laser_z"   value="${base_height + laser_gap + x2_height/2}"/>
+
+  <!-- IMU. Va dentro del RVR, en su placa. 📝 NO MEDIDO; se coloca en el centro
+       geométrico, que es una aproximación razonable y no afecta a la odometría
+       porque el RVR ya integra la IMU internamente. -->
+  <xacro:property name="imu_x" value="0.0"/>
+  <xacro:property name="imu_y" value="0.0"/>
+  <xacro:property name="imu_z" value="0.05"/>
+
+  <xacro:property name="PI" value="3.14159265359"/>
+
+  <!-- Colores, solo para RViz2 -->
+  <material name="azul_atriz"><color rgba="0.13 0.35 0.62 1.0"/></material>
+  <material name="negro">     <color rgba="0.10 0.10 0.10 1.0"/></material>
+  <material name="rojo">      <color rgba="0.80 0.15 0.15 1.0"/></material>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       base_footprint — la proyección del robot en el suelo.
+       Es la raíz que esperan Nav2 y slam_toolbox (REP-105). Va a z=0, y
+       base_link queda por encima a la altura del eje de las ruedas.
+       ════════════════════════════════════════════════════════════════════════ -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       base_link — el frame de referencia del robot.
+       🔴 EL NOMBRE IMPORTA: el driver de ROS 1 publicaba `rvr_base_link` y el
+       LIDAR colgaba de `base_link`. Ese desajuste de nombre era el árbol roto.
+       El driver de ROS 2 publica `odom -> base_link` (parámetro `base_frame`).
+       Si cambias uno, cambia el otro.
+       ════════════════════════════════════════════════════════════════════════ -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 ${base_height/2 - wheel_radius}" rpy="0 0 0"/>
+      <geometry><box size="${base_length} ${base_width} ${base_height}"/></geometry>
+      <material name="azul_atriz"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${base_height/2 - wheel_radius}" rpy="0 0 0"/>
+      <geometry><box size="${base_length} ${base_width} ${base_height}"/></geometry>
+    </collision>
+    <inertial>
+      <!-- 1.2 kg es la masa publicada del RVR. La inercia es la de una caja
+           homogénea: aproximada, y solo la usaría un simulador. No hay
+           simulación en este proyecto. -->
+      <mass value="1.2"/>
+      <origin xyz="0 0 ${base_height/2 - wheel_radius}"/>
+      <inertia
+        ixx="${1.2/12 * (base_width*base_width + base_height*base_height)}" ixy="0" ixz="0"
+        iyy="${1.2/12 * (base_length*base_length + base_height*base_height)}" iyz="0"
+        izz="${1.2/12 * (base_length*base_length + base_width*base_width)}"/>
+    </inertial>
+  </link>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       laser — el YDLIDAR X2.
+       El frame se llama `laser` porque es lo que emite el driver del X2
+       (`frame_id` por defecto). Si lo cambias ahí, cámbialo aquí.
+       ════════════════════════════════════════════════════════════════════════ -->
+  <joint name="base_link_to_laser" type="fixed">
+    <parent link="base_link"/>
+    <child  link="laser"/>
+    <!-- z relativo a base_link, que ya está a wheel_radius del suelo -->
+    <origin xyz="${laser_x} ${laser_y} ${laser_z - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="laser">
+    <visual>
+      <geometry><cylinder radius="0.038" length="0.041"/></geometry>
+      <material name="rojo"/>
+    </visual>
+    <collision>
+      <geometry><cylinder radius="0.038" length="0.041"/></geometry>
+    </collision>
+  </link>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       imu_link — la IMU interna del RVR.
+       ════════════════════════════════════════════════════════════════════════ -->
+  <joint name="base_link_to_imu" type="fixed">
+    <parent link="base_link"/>
+    <child  link="imu_link"/>
+    <origin xyz="${imu_x} ${imu_y} ${imu_z - wheel_radius}" rpy="0 0 0"/>
+  </joint>
+  <link name="imu_link"/>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       Ruedas. FIJAS a propósito, no `continuous`.
+       ════════════════════════════════════════════════════════════════════════
+       Un joint `continuous` obligaría a publicar `/joint_states` con el ángulo
+       de cada rueda, y el RVR **no expone la posición angular de las ruedas** —
+       solo conteos de encoder acumulados. Declararlas móviles sin poder
+       alimentarlas dejaría a `robot_state_publisher` esperando datos que nunca
+       llegan, y el árbol TF se rompería con un aviso poco claro.
+
+       Como el RVR entrega la odometría ya integrada por su locator, las ruedas
+       son puramente decorativas. Fijas es lo honesto.
+       ════════════════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="rueda" params="nombre y">
+    <joint name="base_link_to_${nombre}" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${nombre}"/>
+      <origin xyz="0 ${y} 0" rpy="${-PI/2} 0 0"/>
+    </joint>
+    <link name="${nombre}">
+      <visual>
+        <geometry><cylinder radius="${wheel_radius}" length="${wheel_width}"/></geometry>
+        <material name="negro"/>
+      </visual>
+    </link>
+  </xacro:macro>
+
+  <xacro:rueda nombre="wheel_left"  y="${ wheel_separation/2}"/>
+  <xacro:rueda nombre="wheel_right" y="${-wheel_separation/2}"/>
+
+</robot>

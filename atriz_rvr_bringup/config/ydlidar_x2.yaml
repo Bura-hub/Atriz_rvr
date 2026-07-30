@@ -1,0 +1,110 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# YDLIDAR X2 — configuración para el laboratorio remoto Atriz
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Creado el 2026-07-30 (Fase 3.2). Punto de partida: params/X2.yaml del propio
+# ydlidar_ros2_driver (rama humble), con los cambios que Atriz necesita.
+#
+# 🔴 AVISO SOBRE LA PROCEDENCIA DE ESTOS VALORES
+#
+#   El proyecto tenía un lidar_only.launch de ROS 1 con parámetros que PARECEN
+#   validados. NO LO ESTÁN: el driver ROS del LIDAR **nunca se instaló** en el
+#   sistema anterior (hallazgo nº3 de la auditoría, `find` sobre todo el sistema
+#   devolvía 0 resultados). Así que esos valores son suposiciones heredadas, no
+#   mediciones.
+#
+#   Lo que SÍ está medido del X2, decodificando su protocolo a mano con
+#   `x2_parse.py` y sin driver de por medio (2026-07-29 y 2026-07-30):
+#
+#       checksums válidos    100 %  (1144/1144)
+#       muestras             ~2990/s   (especificación: 3000/s)
+#       giro                 11.48 Hz
+#       puntos por vuelta    259  ->  resolución angular 1.39°
+#       distancias           0.298 – 3.54 m  (limitado por la sala, no el sensor)
+# ═══════════════════════════════════════════════════════════════════════════════
+ydlidar_ros2_driver_node:
+  ros__parameters:
+
+    # ── Puerto ────────────────────────────────────────────────────────────────
+    # /dev/ydlidar, NO /dev/ttyUSB0. Con dos dispositivos USB-serie el orden de
+    # enumeración depende del arranque, así que el nombre del kernel no es
+    # determinista. La regla udev está en 99-ydlidar.rules.
+    port: /dev/ydlidar
+    baudrate: 115200
+
+    # ── 🔴 frame_id: TIENE que ser 'laser' ────────────────────────────────────
+    # El X2.yaml oficial trae 'laser_frame'. Aquí es **laser**, porque es el
+    # nombre del link en atriz_rvr_description/urdf/rvr.urdf.xacro.
+    #
+    # Si no coinciden, el árbol TF se vuelve a partir en dos —exactamente el
+    # bloqueante raíz que la Fase 3 acaba de resolver— y falla EN SILENCIO:
+    # slam_toolbox se queda esperando un transform que nunca llega, sin error.
+    frame_id: laser
+
+    # ── Tipo de dispositivo. No tocar: define el X2 ───────────────────────────
+    lidar_type: 1          # TYPE_TRIANGLE
+    device_type: 0         # YDLIDAR_TYPE_SERIAL
+    sample_rate: 3         # 3 kHz. Coincide con los ~2990 muestras/s medidos
+    isSingleChannel: true  # el X2 es de canal único
+    intensity: false       # el X2 no da intensidad
+    intensity_bit: 0
+
+    # ── Motor ─────────────────────────────────────────────────────────────────
+    # El X2 alimenta su motor por la línea DTR del adaptador USB. Si el lidar no
+    # gira, el primer sospechoso es el adaptador, no el lidar.
+    support_motor_dtr: true
+
+    # ── Alcance ───────────────────────────────────────────────────────────────
+    # range_max 8.0, NO los 12.0 del X2.yaml oficial: la especificación real del
+    # X2 son ~8 m útiles, y pedir 12 solo añade ruido más allá de donde el sensor
+    # ve. Lo medido en la sala llegó a 3.54 m, limitado por las paredes.
+    range_min: 0.1
+    range_max: 8.0
+    angle_min: -180.0
+    angle_max: 180.0
+
+    # ── 📝 frequency: probablemente NO haga nada ──────────────────────────────
+    # Medido sin driver: el X2 gira a 11.48 Hz libremente. El plan marca como NO
+    # VERIFICADO si un X2 de canal único acepta que se le fije la velocidad del
+    # motor. Se pide 10.0 y **hay que comprobar qué sale de verdad**:
+    #     ros2 topic hz /scan
+    # Si sale ~11.5 en vez de ~10, este parámetro se ignora y hay que quitarlo o
+    # documentarlo como decorativo. Importa porque la resolución angular depende
+    # de la velocidad de giro: más lento = más puntos por vuelta.
+    frequency: 10.0
+
+    # ── 📝 inverted: SIN VERIFICAR, y si está mal el mapa sale ESPEJADO ───────
+    # El X2.yaml oficial trae `false`; el launch de ROS 1 de Atriz tenía `true`.
+    # Ese `true` NUNCA SE EJECUTÓ, porque el driver no estaba instalado. Se
+    # conserva por respeto a la intención de quien lo escribió —quizá el lidar
+    # está montado boca abajo— pero es una suposición.
+    #
+    # 👤 CÓMO COMPROBARLO, y hay que hacerlo antes de mapear:
+    #   1. Pon un objeto plano (una caja, un libro) a ~1 m JUSTO DELANTE del robot.
+    #   2. ros2 topic echo /scan --once
+    #   3. El mínimo de `ranges` debe caer en el índice del ángulo 0.
+    #      Con angle_min=-180 y 259 puntos, el ángulo 0 está a mitad del array.
+    #   4. Si el mínimo aparece en el extremo opuesto, `inverted` está al revés.
+    #
+    # Un mapa espejado es de los fallos más desconcertantes de SLAM: parece que
+    # funciona, y las paredes están en el lado contrario.
+    inverted: true
+    reversion: false
+
+    # ── Resolución variable ───────────────────────────────────────────────────
+    # false para que acepte un número variable de puntos por vuelta. Con `true`
+    # el driver avisa «Real point count > fixed» constantemente, porque el X2
+    # entrega ~3000 muestras/s repartidas según la velocidad de giro, y ese
+    # reparto no es constante.
+    #
+    # OJO con el nombre: en ROS 1 este parámetro se llamaba `resolution_fixed`;
+    # en el driver de ROS 2 es `fixed_resolution`. Poner el viejo NO da error:
+    # simplemente se ignora y se queda el valor por defecto (true).
+    fixed_resolution: false
+
+    # ── Robustez ──────────────────────────────────────────────────────────────
+    auto_reconnect: true
+    abnormal_check_count: 4
+    invalid_range_is_inf: false   # los inválidos van a 0.0, no a inf
+    ignore_array: ""
+    debug: false

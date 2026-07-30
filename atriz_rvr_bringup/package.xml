@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://relaxng.org/ns/structure/1.0"?>
+<package format="3">
+  <name>atriz_rvr_bringup</name>
+  <version>1.0.0</version>
+  <description>
+    Punto de entrada del robot Atriz: launch files, parámetros y reglas udev.
+    Arranca el driver del RVR, la descripción (árbol TF) y el LIDAR juntos.
+    Creado el 2026-07-30 (Fase 3.2).
+  </description>
+
+  <maintainer email="atriz@udenar.edu.co">Atriz Team - Universidad de Nariño</maintainer>
+  <license>MIT</license>
+  <url type="repository">https://github.com/Bura-hub/Atriz_rvr</url>
+  <author email="atriz@udenar.edu.co">Atriz Team</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>atriz_rvr_driver</exec_depend>
+  <exec_depend>atriz_rvr_description</exec_depend>
+  <!-- ydlidar_ros2_driver NO viene en apt: se compila desde fuentes junto con
+       YDLidar-SDK. Ver el manual, cap. 8.5. -->
+  <exec_depend>ydlidar_ros2_driver</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

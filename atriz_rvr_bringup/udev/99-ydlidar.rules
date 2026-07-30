@@ -1,0 +1,28 @@
+# /dev/ydlidar -> el adaptador USB-serie del YDLIDAR X2
+#
+# POR QUE NO SE PUEDE USAR EL NUMERO DE SERIE
+#
+#   El CP2102 del X2 reporta ID_SERIAL_SHORT="0001", un valor generico de
+#   fabrica. Confirmado en esta unidad el 2026-07-29 y el 2026-07-30. Con 16
+#   adaptadores iguales, una regla por serie casaria con todos.
+#
+#   Y sin regla, /dev/ttyUSB0 NO es determinista: con dos dispositivos USB-serie
+#   el orden de enumeracion depende del arranque.
+#
+# SE USA ID_PATH: el puerto USB FISICO donde esta enchufado.
+#
+#   Consecuencia practica: el lidar debe ir SIEMPRE EN EL MISMO PUERTO USB de
+#   cada Pi. Documentalo con una foto en FLOTA.md.
+#
+# 📝 SIN VERIFICAR ENTRE ROBOTS. El ID_PATH de abajo es el de rvr-01. Si en otro
+#    robot el lidar va en otro puerto fisico, sera distinto y esta regla NO
+#    casara — el sintoma sera que /dev/ydlidar no aparece.
+#
+#    Para saber el de un robot:
+#        udevadm info -q property -n /dev/ttyUSB0 | grep ID_PATH=
+#
+#    Si los 16 no coinciden, esta regla no es clonable en la imagen dorada y hay
+#    que generarla en first-boot.sh. Ver FLOTA.md, restriccion 1.
+SUBSYSTEM=="tty", ENV{ID_VENDOR_ID}=="10c4", ENV{ID_MODEL_ID}=="ea60", \
+  ENV{ID_PATH}=="platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.2:1.0", \
+  SYMLINK+="ydlidar", MODE="0660", GROUP="dialout"

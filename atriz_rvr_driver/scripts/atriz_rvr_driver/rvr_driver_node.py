@@ -793,14 +793,46 @@ class RvrDriverNode(Node):
         self._quiza_publicar('gyroscope')
 
     async def _h_velocity(self, datos) -> None:
+        """🔴 ESTO ESTÁ MAL Y SE SABE POR QUÉ. Medido el 2026-07-31.
+
+        `odom.twist` va expresado en `child_frame_id`, o sea en el marco del
+        ROBOT: avanzar da `linear.x` positivo SIEMPRE, mire donde mire el robot.
+
+        Pero `Velocity` del RVR viene en el marco del MUNDO. Medido con el robot
+        avanzando recto a 0.199 m/s:
+
+            dirección del desplazamiento del locator:  +90.2°
+            dirección del vector Velocity:             +90.1°   <- 0.1° de diferencia
+            módulo de Velocity: 0.200 m/s              <- 0 % de error
+
+        Es decir: **el sensor es EXACTO**. Copiar su X aquí solo acierta cuando
+        el robot mira al eje X del odom. Publicado hoy con el robot recto:
+
+            odom.twist.linear = (-0.000, -0.200)   <- lo que sale
+                                (+0.199, +0.000)   <- lo que debería salir
+
+        ⚠️ Y esto retracta un hallazgo que este proyecto dio por firme un día:
+           «el stream `Velocity` es basura, reporta 0.001 m/s con el robot a
+           0.147 real». La observación era cierta, la conclusión falsa — se leyó
+           solo la X con el robot encarado a ~90° de ese eje.
+
+        ARREGLO: proyectar sobre el rumbo.
+
+            vx_robot =  vx*cos(yaw) + vy*sin(yaw)
+            vy_robot = -vx*sin(yaw) + vy*cos(yaw)
+
+        🔴 NO SE APLICA TODAVÍA porque depende del yaw, y el yaw tiene su propio
+           bug: `reset_yaw()` NO pone a cero el yaw publicado (−74.6° en reposo
+           justo tras arrancar), y la orientación de `/odom` queda ~15° desfasada
+           de su propia posición. Los dos se arreglan JUNTOS.
+
+           Antes hace falta apagar y encender el RVR y volver a medir el desfase:
+           decide si se corrige con una constante o hay que cambiar de fuente de
+           orientación. Evidencia: 00_auditoria/evidencia_24_04/15_velocidad_odom.txt
+        """
         v = datos['Velocity']
         with self._lock:
             self._odom.twist.twist.linear.x = float(v['X'])
-            # -Y por coherencia con el locator, que sí se midió en FRD.
-            # ⚠️ NO VERIFICADO para este stream: `Velocity` es basura (0.001 m/s
-            # con el robot a 0.147 real), así que no hay señal con la que
-            # comprobar su signo. Cuando se decida de dónde sacar la velocidad
-            # de verdad, esto se cae entero.
             self._odom.twist.twist.linear.y = -float(v['Y'])
         self._quiza_publicar('velocity')
 

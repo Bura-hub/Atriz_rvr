@@ -577,13 +577,27 @@ if __name__ == '__main__':
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 📝 SERVICIOS DEL NODO DE ROS 1 QUE FALTAN POR PORTAR
+# 📝 LO QUE FALTA POR EXPONER EN ROS 2 — Y LAS DECISIONES YA TOMADAS
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# Se portan cuando se necesiten Y se prueben en banco, no antes. Portar 16
-# servicios a ciegas produce 16 cosas sin verificar, que es exactamente lo que
-# este proyecto no hace.
+# DECISIÓN (2026-07-30): esto se porta CUANDO EL RESTO ESTÉ TERMINADO, no antes.
+# Decisión del usuario, y tiene sentido: SLAM y la navegación definen qué hace
+# falta de verdad de esta interfaz, así que portar 20 piezas ahora sería adivinar
+# cuáles importan.
 #
+# ⚠️ CONSECUENCIA QUE HAY QUE TENER PRESENTE: hasta que esto se porte, **NO SE
+#    PUEDEN HACER MÁQUINAS DE ESTADO** que usen LEDs, batería, encoders o luz
+#    ambiente. Un programa que quisiera hacerlo tendría que hablar con el SDK por
+#    su cuenta, y entonces DOS PROCESOS SE PELEARÍAN POR /dev/rvr. El puerto serie
+#    no se comparte.
+#
+# LO BUENO: el hardware detrás de todo esto YA ESTÁ VERIFICADO (2026-07-30, ver el
+# capítulo 8bis del manual y evidencia_24_04/10_leds_sensores). Los 11 grupos de
+# LED confirmados a la vista, 10 de 11 sensores con datos reales. Así que portar
+# esto es trabajo de rclpy, NO de averiguar si el sensor responde: si un servicio
+# portado no funciona, el fallo está en el port y en ningún otro sitio.
+#
+# ── SERVICIOS (16) ────────────────────────────────────────────────────────────
 #   LEDs        set_led_rgb (SetLEDRGB) · set_multiple_leds (SetMultipleLEDs)
 #   Infrarrojos ir_mode (SetIRMode) · send_infrared_message (SendInfraredMessage)
 #               set_ir_evading (SetIREvading)
@@ -596,9 +610,43 @@ if __name__ == '__main__':
 #               configure_streaming (ConfigureStreaming) · start_streaming (StartStreaming)
 #   Odometría   reset_odom (std_srvs/Empty)
 #
-# Y los topics que faltan: encoders (Encoder), ambient_light (Float32),
-# infrared_messages (InfraredMessage), cmd_degrees (DegreesTwist).
+# ── TOPICS (4) ────────────────────────────────────────────────────────────────
+#   encoders (Encoder) · ambient_light (Float32)
+#   infrared_messages (InfraredMessage) · cmd_degrees (DegreesTwist)  ← entrada
 #
-# ⚠️ Antes de portar los dos publishers de IR, DECIDIR: el nodo de ROS 1 tenía
-#    `ir_messages` (String) e `infrared_messages` (InfraredMessage), dos topics
-#    para lo mismo. Se queda uno.
+# ══════════════════════════════════════════════════════════════════════════════
+# LAS DOS DECISIONES DE DISEÑO, TOMADAS EL 2026-07-30
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 1. `infrared_messages` (InfraredMessage) SÍ · `ir_messages` (String) NO.
+#
+#    El driver de ROS 1 publicaba LOS DOS, con los mismos datos: uno tipado y otro
+#    como cadena de texto. Se queda el tipado, y no es una preferencia estética:
+#
+#      · Un topic `String` con datos estructurados no se puede introspeccionar
+#        (`ros2 interface show` no dice nada útil), obliga a cada consumidor a
+#        parsear texto, y cualquier cambio de formato rompe en silencio.
+#      · Con rosbridge —que es como habla la web (ARQUITECTURA.md, D2)— un mensaje
+#        tipado llega al navegador como un objeto JSON con sus campos. Una cadena
+#        llega como una cadena que hay que volver a parsear en JavaScript.
+#      · Mantener dos topics con lo mismo garantiza que se desincronicen.
+#
+#    `ir_messages` NO se porta.
+#
+# 2. SIN namespace por defecto, pero el launch lo soporta.
+#
+#    ARQUITECTURA.md, Decisión 1: el aislamiento entre los 16 robots lo da UN
+#    ROS_DOMAIN_ID POR ROBOT, que los separa por completo a nivel de DDS. Con eso,
+#    un namespace `/rvr_01` NO añade aislamiento: solo alarga cada nombre de topic
+#    y cada comando de diagnóstico.
+#
+#    Y la web tampoco lo necesita para distinguirlos: habla por rosbridge, un
+#    WebSocket POR ROBOT, así que la desambiguación ya la da la conexión.
+#
+#    Se conserva el argumento `namespace` en los launch para el caso de meter dos
+#    robots en el mismo dominio a propósito (por ejemplo, para depurar una
+#    interacción entre dos), pero el valor por defecto es vacío.
+#
+#    ⚠️ Si algún día se cambia esta decisión, hay que cambiarla en TRES sitios a la
+#       vez: el `base_frame` del driver, el link del URDF y el `frame_id` del
+#       LIDAR. Desalinear uno parte el árbol TF EN SILENCIO.

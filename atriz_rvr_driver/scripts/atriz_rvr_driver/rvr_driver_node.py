@@ -61,6 +61,12 @@ QUÉ SE ARREGLA, Y POR QUÉ
 4. Todo parametrizado con `declare_parameter`. El original tenía el puerto, los
    frames y el intervalo de streaming a fuego.
 
+5. 🔴 **Keepalive y detector de silencio.** El RVR se duerme solo si nadie le
+   habla, y el nodo no se enteraba: seguía vivo publicando cero, sin un error.
+   Ahora se le habla cada 30 s (y de paso se publica `battery_state`, que no
+   existía) y, si aun así deja de llegar telemetría, el nodo **lo dice** e
+   intenta reanudarla. Bloque «SALUD DEL ENLACE».
+
 ════════════════════════════════════════════════════════════════════════════════
 LO QUE ESTE FICHERO TODAVÍA NO HACE
 ════════════════════════════════════════════════════════════════════════════════
@@ -86,7 +92,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import BatteryState, Imu
 from std_msgs.msg import Empty
 from std_srvs.srv import Empty as EmptySrv
 from tf2_ros import TransformBroadcaster
@@ -110,6 +116,32 @@ COMPONENTES_ODOM = frozenset(
 #: Medido el 2026-07-29: 250 ms -> 3.85 Hz · 100 ms -> 9.94 Hz · 60 ms -> 16.59 Hz
 #: · 50 ms -> no arranca. No lo bajes de 60 esperando más frecuencia.
 INTERVALO_STREAMING_MS = 60
+
+#: Cada cuánto se le habla al RVR para que no se duerma, en segundos.
+#:
+#: 🔴 EL RVR SE DUERME SOLO SI NADIE LE HABLA, y cuando lo hace este nodo no se
+#: entera: deja de recibir muestras y sigue vivo publicando cero, sin un error.
+#:
+#: ✅ **El timeout de inactividad del RVR son 300.6 s = 5.01 min.** Medido el
+#: 2026-07-31 arrancando el driver con `keepalive_period:=0.0` y vigilando el
+#: ritmo de /odom durante 12 min. Se durmió DOS veces, y las dos aguantó
+#: **300.6 s exactos** desde el último comando: no es una heurística difusa, es
+#: un temporizador del firmware. Coincide con los 5 min documentados del RVR.
+#:
+#: 30 s dejan un margen de 10x sobre ese timeout. Se podría subir a 120 s sin
+#: riesgo, pero no hay motivo: un comando cada 30 s son ~2 bytes/s sobre un
+#: enlace de 115200 baudios que ya lleva 16.7 Hz de telemetría. El coste de
+#: pasarse por abajo es despreciable; el de quedarse corto es un robot mudo en
+#: mitad de una práctica.
+PERIODO_KEEPALIVE_S = 30.0
+
+#: Cuánto silencio del RVR se tolera antes de dar la alarma e intentar reanudar.
+#:
+#: A 60 ms de intervalo llegan ~16.7 muestras/s, así que 3 s son ~50 muestras
+#: perdidas: no es un hueco puntual, es que el enlace ha dejado de entregar.
+#: No se baja más porque un hueco corto bajo carga es normal y no queremos
+#: reiniciar el streaming por un pico de CPU.
+TIMEOUT_SILENCIO_S = 3.0
 
 
 def cuaternion_desde_euler(roll: float, pitch: float, yaw: float) -> Quaternion:
@@ -151,6 +183,11 @@ class RvrDriverNode(Node):
         self.declare_parameter('streaming_interval_ms', INTERVALO_STREAMING_MS)
         self.declare_parameter('cmd_vel_timeout', 0.3)
         self.declare_parameter('publish_tf', True)
+        # Keepalive y detector de silencio. Se pueden desactivar poniéndolos a 0,
+        # pero solo tiene sentido para reproducir el fallo del 2026-07-30 a
+        # propósito (por ejemplo, para MEDIR de una vez el timeout real del RVR).
+        self.declare_parameter('keepalive_period', PERIODO_KEEPALIVE_S)
+        self.declare_parameter('silence_timeout', TIMEOUT_SILENCIO_S)
 
         p = self.get_parameter
         self._puerto = p('serial_port').value
@@ -161,6 +198,8 @@ class RvrDriverNode(Node):
         self._intervalo_ms = int(p('streaming_interval_ms').value)
         self._cmd_vel_timeout = float(p('cmd_vel_timeout').value)
         self._publicar_tf = bool(p('publish_tf').value)
+        self._periodo_keepalive = float(p('keepalive_period').value)
+        self._timeout_silencio = float(p('silence_timeout').value)
 
         if self._intervalo_ms < 60:
             self.get_logger().warn(
@@ -174,6 +213,21 @@ class RvrDriverNode(Node):
         self._t_ultimo_cmd_vel = 0.0
         self._recibidos: set[str] = set()
         self._lock = threading.Lock()
+
+        # ── Estado de vigilancia del enlace con el RVR ───────────────────────
+        # `_t_ultima_muestra` lo tocan los handlers del SDK (hilo del asyncio) y
+        # lo lee el temporizador de vigilancia (hilo del ejecutor de rclpy), así
+        # que va bajo `_lock` como el resto del estado compartido.
+        self._t_ultima_muestra = 0.0
+        # Hasta que el streaming arranca de verdad no hay silencio que vigilar:
+        # si no, el detector saltaría durante el arranque del nodo.
+        self._streaming_activo = False
+        # Evita que dos recuperaciones se pisen. Una recuperación tarda cientos
+        # de ms y el vigilante corre a 1 Hz: sin este guardia se encolarían
+        # varias, cada una parando el streaming que la anterior acaba de armar.
+        self._recuperando = False
+        self._n_recuperaciones = 0
+        self._bateria_pct: float | None = None
 
         self._odom = Odometry()
         self._odom.header.frame_id = self._odom_frame
@@ -231,6 +285,26 @@ class RvrDriverNode(Node):
         self.pub_color = self.create_publisher(Color, 'color', qos_tel)
         self._tf = TransformBroadcaster(self) if self._publicar_tf else None
 
+        # La batería es un subproducto GRATIS del keepalive: para no dormirse hay
+        # que hablarle al RVR, y `get_battery_percentage()` es la cosa más
+        # inofensiva que se le puede pedir —una lectura— así que de paso se
+        # publica. El nodo de ROS 1 no publicaba batería en ningún sitio, y en un
+        # laboratorio de 16 robots que se quedan sin carga a mitad de práctica
+        # eso es información que hace falta.
+        #
+        # QoS distinto al de la telemetría: RELIABLE + TRANSIENT_LOCAL con
+        # depth=1. Llega cada 30 s, así que perder un mensaje significa 30 s a
+        # ciegas; y transient_local hace que la web, al conectarse, reciba el
+        # último valor conocido sin esperar medio minuto.
+        self.pub_bateria = self.create_publisher(
+            BatteryState, 'battery_state',
+            QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
         # ── Subscribers ──────────────────────────────────────────────────────
         # Grupos de callbacks separados: los comandos no deben esperar a que la
         # telemetría termine de publicar, ni al contrario.
@@ -273,9 +347,41 @@ class RvrDriverNode(Node):
         # caso en ~0.47 s de robot conduciendo solo.
         self.create_timer(0.05, self._watchdog_cmd_vel)
 
+        # ── Keepalive y vigilancia del enlace ────────────────────────────────
+        # 🔴 Los dos existen por el fallo del 2026-07-30: el RVR se durmió solo y
+        # el nodo siguió vivo al 12.3 % de CPU publicando cero, sin un error.
+        # Ver el comentario largo de `_conectar_rvr` y el manual, cap. 9.8.
+        #
+        # Van en su propio grupo de callbacks: ninguno de los dos debe esperar a
+        # que la telemetría o un `cmd_vel` terminen. El vigilante en particular
+        # tiene que poder correr aunque el resto esté ocupado, porque su trabajo
+        # es precisamente detectar que algo dejó de pasar.
+        g_salud = MutuallyExclusiveCallbackGroup()
+
+        if self._periodo_keepalive > 0:
+            self.create_timer(
+                self._periodo_keepalive, self._keepalive, callback_group=g_salud
+            )
+        else:
+            self.get_logger().warn(
+                'keepalive DESACTIVADO (keepalive_period=0): el RVR se dormirá '
+                'solo y dejará de publicar sin dar ningún error.'
+            )
+
+        if self._timeout_silencio > 0:
+            # A 1 Hz. No hace falta más: el timeout es de segundos, no de ms, y
+            # este temporizador solo compara dos números.
+            self.create_timer(1.0, self._vigilar_silencio, callback_group=g_salud)
+        else:
+            self.get_logger().warn(
+                'detector de silencio DESACTIVADO (silence_timeout=0): si el RVR '
+                'deja de enviar, el nodo no lo dirá.'
+            )
+
         self.get_logger().info(
             f'rvr_driver arrancando · puerto={self._puerto} baud={self._baud} '
-            f'interval={self._intervalo_ms}ms frames={self._odom_frame}->{self._base_frame}'
+            f'interval={self._intervalo_ms}ms frames={self._odom_frame}->{self._base_frame} '
+            f'keepalive={self._periodo_keepalive:g}s silencio={self._timeout_silencio:g}s'
         )
         self._enviar(self._conectar_rvr(), 'conexión/streaming')
 
@@ -364,40 +470,21 @@ class RvrDriverNode(Node):
             self.get_logger().error('sin objeto RVR: no se puede iniciar el streaming')
             return
         try:
-            # 🔴 ESTE `wake()` SE LLAMA UNA SOLA VEZ, Y ES UN FALLO CONOCIDO.
-            #
-            # El RVR se duerme solo por inactividad, y cuando lo hace este nodo
-            # NO SE ENTERA: /odom, /imu y /color dejan de publicar a la vez, el
-            # proceso sigue vivo al 12.3 % de CPU con sus topics registrados
-            # (`Publisher count: 1`), y no aparece ni un error en el log.
-            #
-            # Medido el 2026-07-30 durante la Fase 4. Y la pista fácil engaña:
-            # `ros2 topic hz /tf` seguía dando 50 Hz, pero esos 50 Hz eran de
-            # slam_toolbox a solas — con este driver aportando serían ~67 Hz.
-            #
-            # ⚠️ El tiempo exacto de inactividad está SIN MEDIR: acotado entre
-            #    ~2 y ~7.5 min. Encaja con los 5 min documentados del RVR. El SDK
-            #    vendorizado NO tiene `set_inactivity_timeout`.
-            #
-            # Por qué importa: un robot que espere 5 minutos a que el estudiante
-            # empiece su práctica ESTARÁ MUDO al empezar, y la web no verá ningún
-            # error. Un systemd con Restart=always no lo arregla: no muere nadie.
-            #
-            # PENDIENTE, dos partes:
-            #   1. Keepalive: un timer cada 60 s con `get_battery_percentage()`
-            #      —es una lectura, y de paso da la batería, que hoy no se
-            #      publica— o `wake()` a secas.
-            #   2. Detector de silencio: si no llega ninguna muestra del RVR en
-            #      N segundos, WARN e intentar reanudar el streaming, en vez de
-            #      seguir publicando nada con cara de estar sano.
-            #
-            # Mientras tanto: si un robot no publica /odom, REINICIA EL DRIVER
-            # antes de buscar cualquier otra causa. Manual, cap. 9.8.
+            # Este `wake()` es el del arranque. NO basta por sí solo: el RVR se
+            # duerme por inactividad, y de eso se encargan `_keepalive` y
+            # `_vigilar_silencio`. Ver el bloque «SALUD DEL ENLACE» más abajo.
             await self._rvr.wake()
             await self._rvr.reset_yaw()
             await self._rvr.reset_locator_x_and_y()
             await self._registrar_sensores()
             await self._rvr.sensor_control.start(interval=self._intervalo_ms)
+            # A partir de aquí SÍ hay silencio que vigilar. El reloj se pone en
+            # marcha ahora, no antes: si no, el vigilante dispararía durante el
+            # arranque, cuando todavía no ha llegado ninguna muestra porque no
+            # tenía que haber llegado.
+            with self._lock:
+                self._t_ultima_muestra = self._ahora_s()
+                self._streaming_activo = True
             self.get_logger().info(
                 f'streaming a {self._intervalo_ms} ms '
                 f'(~{1000 / self._intervalo_ms:.1f} Hz esperados)'
@@ -407,6 +494,189 @@ class RvrDriverNode(Node):
             # rvr_fw_check_async.py, y por eso el nodo parecía sano sin que
             # circulara un dato.
             self.get_logger().error(f'fallo conectando con el RVR:\n{traceback.format_exc()}')
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # SALUD DEL ENLACE — keepalive y detector de silencio
+    #
+    # 🔴 POR QUÉ EXISTE ESTE BLOQUE
+    #
+    # El 2026-07-30, durante la Fase 4, este nodo se quedó mudo a mitad de
+    # sesión sin que nada pareciera roto: `/odom`, `/imu` y `/color` dejaron de
+    # publicar A LA VEZ mientras el proceso seguía vivo al 12.3 % de CPU, con
+    # 17 hilos, sus topics registrados (`Publisher count: 1`) y **ni un solo
+    # mensaje de error en el log**.
+    #
+    # Y la pista fácil engañaba: `ros2 topic hz /tf` daba 50 Hz, así que «TF va
+    # bien». Pero 50 Hz es exactamente el `transform_publish_period` de
+    # slam_toolbox A SOLAS — con este driver aportando serían ~67 Hz.
+    #
+    # La causa era que el `wake()` del arranque se llamaba UNA sola vez y este
+    # nodo no volvía a hablarle al RVR salvo cuando llegaba un `cmd_vel`. El RVR
+    # se duerme por inactividad. El SDK vendorizado NO tiene
+    # `set_inactivity_timeout`: solo `wake()`, `sleep()` y las de batería.
+    #
+    # ✅ **El timeout son 300.6 s = 5.01 min**, medido el 2026-07-31 con
+    #    `keepalive_period:=0.0`: se durmió dos veces y las dos aguantó 300.6 s
+    #    EXACTOS. Es un temporizador del firmware, no una heurística.
+    #
+    # Por qué importa fuera del banco: un robot que espere cinco minutos a que
+    # el estudiante empiece su práctica LLEGARÁ MUDO a la práctica, y la web no
+    # verá ningún error porque el nodo está vivo y los topics existen. Y un
+    # `systemd` con `Restart=always` no lo arregla: el proceso no muere.
+    #
+    # Dos piezas, y hacen falta LAS DOS:
+    #
+    #   · `_keepalive`         PREVIENE: le habla al RVR cada 30 s para que no
+    #                          se duerma, y de paso publica la batería.
+    #   · `_vigilar_silencio`  DETECTA: si aun así deja de llegar telemetría, lo
+    #                          DICE y trata de reanudarla.
+    #
+    # El keepalive solo cubre la causa conocida. El vigilante cubre el resto —un
+    # cable flojo, un `sensor_control` que se cae, un firmware que se atasca— y
+    # sobre todo convierte un fallo silencioso en uno ruidoso. Que es de lo que
+    # va este proyecto entero.
+    # ─────────────────────────────────────────────────────────────────────────
+    def _keepalive(self) -> None:
+        """Le habla al RVR para que no se duerma. Corre en un timer de rclpy."""
+        if self._rvr is None or self._recuperando:
+            # Durante una recuperación no se mete otro comando por medio: la
+            # recuperación ya le está hablando al RVR, que es justo el objetivo.
+            return
+        self._enviar(self._leer_bateria(), 'keepalive')
+
+    async def _leer_bateria(self) -> None:
+        """Lee la batería. Es el keepalive, y de paso publica `battery_state`.
+
+        Se usa `get_battery_percentage()` y no `wake()` a secas por dos razones:
+
+        1. Es una LECTURA. `wake()` sobre un robot ya despierto no debería hacer
+           nada, pero una lectura es inequívocamente inocua: no cambia ningún
+           estado del robot, así que no puede interferir con una maniobra en
+           curso ni con la parada de emergencia.
+        2. Devuelve un dato que hacía falta y no se publicaba en ninguna parte,
+           ni siquiera en el nodo de ROS 1. En un laboratorio de 16 robots,
+           saber cuál se está quedando sin carga vale más que el comando.
+
+        Si esta llamada FALLA, no se enmascara: es la señal más temprana de que
+        el enlace con el RVR se ha caído, y llega antes que el detector de
+        silencio. `_enviar` la registra en el log a través de su callback.
+        """
+        resp = await self._rvr.get_battery_percentage()
+
+        # El SDK devuelve {'percentage': N}. Si algún día cambia, es preferible
+        # un aviso a un KeyError que mata el keepalive para siempre.
+        if not isinstance(resp, dict) or 'percentage' not in resp:
+            self.get_logger().warn(
+                f'keepalive: respuesta de batería inesperada ({resp!r}). El robot '
+                'sigue despierto —el comando viajó—, pero no se publica batería.'
+            )
+            return
+
+        pct = float(resp['percentage'])
+
+        msg = BatteryState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = self._base_frame
+        # El RVR da porcentaje, no voltios ni amperios. BatteryState usa NaN para
+        # «no medido», y poner ceros ahí mentiría: 0.0 V es un dato, no un hueco.
+        msg.voltage = float('nan')
+        msg.current = float('nan')
+        msg.charge = float('nan')
+        msg.capacity = float('nan')
+        msg.design_capacity = float('nan')
+        msg.percentage = pct / 100.0          # BatteryState lo quiere en 0.0–1.0
+        msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
+        msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN
+        msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LION
+        msg.present = True
+        self.pub_bateria.publish(msg)
+
+        # Se avisa al bajar de umbral, UNA vez por cruce y no en cada lectura:
+        # un WARN cada 30 s durante media hora es ruido que se acaba ignorando,
+        # y entonces no sirve para nada.
+        antes = self._bateria_pct
+        self._bateria_pct = pct
+        for umbral, nivel in ((10.0, 'error'), (25.0, 'warn')):
+            if pct <= umbral and (antes is None or antes > umbral):
+                getattr(self.get_logger(), nivel)(
+                    f'batería al {pct:.0f} % — el robot se apagará solo cuando se agote'
+                )
+                break
+
+    def _vigilar_silencio(self) -> None:
+        """¿Ha dejado de llegar telemetría del RVR? Timer de rclpy a 1 Hz.
+
+        Mide el SILENCIO, no el estado del proceso ni la existencia del topic.
+        Es la diferencia entre detectar este fallo y no detectarlo: el proceso
+        estaba perfectamente vivo y los topics registrados mientras no circulaba
+        un solo dato.
+        """
+        if self._recuperando:
+            return
+        with self._lock:
+            if not self._streaming_activo:
+                return
+            silencio = self._ahora_s() - self._t_ultima_muestra
+        if silencio < self._timeout_silencio:
+            return
+
+        self._n_recuperaciones += 1
+        self.get_logger().warn(
+            f'el RVR lleva {silencio:.1f} s sin enviar telemetría '
+            f'(se esperan ~{1000 / self._intervalo_ms:.1f} muestras/s). '
+            'Lo más probable es que se haya dormido. Intentando reanudar '
+            f'(intento nº {self._n_recuperaciones})…'
+        )
+        self._recuperando = True
+        self._enviar(self._recuperar_streaming(), 'recuperación del streaming')
+
+    async def _recuperar_streaming(self) -> None:
+        """Despierta el RVR y rearma el streaming.
+
+        Los handlers registrados con `add_sensor_data_handler` sobreviven a un
+        `stop()`/`start()`, así que NO se vuelven a registrar: hacerlo los
+        duplicaría y cada muestra llegaría dos veces.
+        """
+        try:
+            if self._rvr is None:
+                return
+            await self._rvr.wake()
+            # El `stop()` puede fallar si el RVR estaba dormido y nunca se enteró
+            # de que estaba emitiendo. No es un error: es el estado esperado en
+            # el caso que estamos arreglando. Se registra y se sigue, porque lo
+            # que importa es el `start()` de después.
+            try:
+                await self._rvr.sensor_control.stop()
+            except Exception as e:
+                self.get_logger().debug(f'recuperación: stop() falló ({e}), se continúa')
+            await self._rvr.sensor_control.start(interval=self._intervalo_ms)
+
+            # El reloj se reinicia AQUÍ, después del start(). Si se reiniciara
+            # antes, el vigilante volvería a disparar mientras la recuperación
+            # sigue en curso; y si no se reiniciara, dispararía otra vez de
+            # inmediato aunque la recuperación haya funcionado, porque la
+            # primera muestra nueva todavía no habrá llegado.
+            with self._lock:
+                self._t_ultima_muestra = self._ahora_s()
+            self.get_logger().info(
+                'streaming reanudado. Si esto se repite cada pocos minutos, el '
+                'keepalive no está llegando: revisa keepalive_period y el enlace.'
+            )
+        except Exception:
+            # Aquí NO se calla: que la recuperación falle es exactamente lo que
+            # el operador necesita saber, y es lo único que distingue «se
+            # arregló solo» de «este robot necesita atención».
+            self.get_logger().error(
+                f'la recuperación del streaming FALLÓ:\n{traceback.format_exc()}\n'
+                'Si se repite, apaga y enciende el robot: un RVR que no responde '
+                'da el mismo síntoma que un cable roto.'
+            )
+        finally:
+            # Pase lo que pase, se libera el guardia. Sin este `finally`, una
+            # excepción dejaría `_recuperando=True` para siempre y el vigilante
+            # no volvería a intentarlo nunca: el fallo silencioso, otra vez, y
+            # esta vez dentro del código escrito para evitarlo.
+            self._recuperando = False
 
     async def _registrar_sensores(self) -> None:
         sc = self._rvr.sensor_control
@@ -473,6 +743,11 @@ class RvrDriverNode(Node):
         self._quiza_publicar('accelerometer')
 
     async def _h_color(self, datos) -> None:
+        # El color no pasa por `_quiza_publicar` (no forma parte de /odom), así
+        # que marca el latido por su cuenta. Si no lo hiciera, un robot que solo
+        # enviara color parecería mudo.
+        with self._lock:
+            self._t_ultima_muestra = self._ahora_s()
         c = datos['ColorDetection']
         msg = Color()
         msg.rgb_color = [int(c['R']), int(c['G']), int(c['B'])]
@@ -482,6 +757,13 @@ class RvrDriverNode(Node):
     def _quiza_publicar(self, componente: str) -> None:
         """Publica /odom e /imu cuando han llegado los cinco componentes."""
         with self._lock:
+            # Latido del enlace. Va ANTES del return de abajo, a propósito: lo
+            # que se vigila es que el RVR siga ENVIANDO, no que se complete un
+            # /odom. Si llegaran cuatro de los cinco componentes, /odom dejaría
+            # de publicarse pero el enlace estaría vivo, y reiniciar el streaming
+            # no arreglaría nada. Son dos fallos distintos y no hay que
+            # confundirlos.
+            self._t_ultima_muestra = self._ahora_s()
             self._recibidos.add(componente)
             if not COMPONENTES_ODOM <= self._recibidos:
                 return
@@ -595,6 +877,13 @@ class RvrDriverNode(Node):
     def cerrar(self) -> None:
         """Deja el robot parado y suelta el puerto serie."""
         self.get_logger().info('cerrando: parando motores y liberando el puerto')
+        # Se apaga la vigilancia ANTES de cerrar nada. Si no, el apagado limpio
+        # —que para el streaming a propósito— dispararía el detector de silencio
+        # y el nodo intentaría «recuperarse» mientras se está muriendo, dejando
+        # un WARN alarmante en el log de cada parada normal.
+        with self._lock:
+            self._streaming_activo = False
+        self._recuperando = True
         if self._rvr is not None:
             try:
                 fut = self._enviar(self._apagar_rvr(), 'apagado')

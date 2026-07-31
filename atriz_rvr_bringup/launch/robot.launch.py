@@ -130,6 +130,20 @@ def generate_launch_description() -> LaunchDescription:
                     'inclinación real (manual, cap. 13). Con true se recupera.',
     )
 
+    # 🔴 Por defecto FALSE, y encenderlo tiene coste físico: deja un LED blanco
+    # encendido bajo el chasis mientras el driver viva.
+    #
+    # Sin él, `/color` publica [0, 0, 0] SIEMPRE — el sensor no da nada sin su
+    # luz: medido, canal claro 4 apagada contra 741 encendida, 185 veces
+    # (manual, cap. 16). El driver lo avisa por el log al arrancar en vez de
+    # publicar ceros en silencio, que es lo que hacía antes.
+    arg_color = DeclareLaunchArgument(
+        'color_detection', default_value='false',
+        description='Encender el sensor de color. Con false, /color publica '
+                    '[0,0,0]. Enciende un LED blanco bajo el chasis y gasta '
+                    'batería: por eso no está activo por defecto.',
+    )
+
     # 🔴 Por defecto TRUE: la seguridad no se activa, se desactiva a propósito.
     arg_seguridad = DeclareLaunchArgument(
         'collision_monitor', default_value='true',
@@ -166,6 +180,8 @@ def generate_launch_description() -> LaunchDescription:
                 LaunchConfiguration('silence_timeout'), value_type=float),
             'publicar_inclinacion': ParameterValue(
                 LaunchConfiguration('publicar_inclinacion'), value_type=bool),
+            'color_detection': ParameterValue(
+                LaunchConfiguration('color_detection'), value_type=bool),
         }],
     )
 
@@ -224,6 +240,6 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
-        arg_inclinacion,
+        arg_inclinacion, arg_color,
         rvr, desc, lidar, monitor, gestor_seguridad,
     ])

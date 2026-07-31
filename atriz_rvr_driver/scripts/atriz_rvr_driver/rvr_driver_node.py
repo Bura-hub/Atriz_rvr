@@ -80,6 +80,7 @@ final del fichero con su `.srv`. No se portan «por si acaso»: se portan cuando
 se necesiten y se prueben, que es lo que este proyecto hace con todo.
 """
 import asyncio
+import concurrent.futures
 import math
 import sys
 import threading
@@ -98,12 +99,18 @@ from std_srvs.srv import Empty as EmptySrv
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
-from atriz_rvr_msgs.msg import Color
+from atriz_rvr_msgs.msg import Color, ControlState, SystemInfo
+from atriz_rvr_msgs.srv import (
+    GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
+    SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
+    MoveTimed, MoveToPosAndYaw, MoveToPose, RawMotors,
+    SetLEDRGB, SetLeds, SetMultipleLEDs, SetPosAndYaw, TriggerLedEvent,
+)
 
 # El SDK de Sphero está vendorizado y se importa como paquete de nivel superior
 # (ver setup.py: package_dir={'': 'scripts'}). Es la pieza validada en Python
 # 3.12 el 2026-07-30 (Etapa D, GO) y no se ha tocado.
-from sphero_sdk import RvrStreamingServices, SerialAsyncDal, SpheroRvrAsync
+from sphero_sdk import RvrLedGroups, RvrStreamingServices, SerialAsyncDal, SpheroRvrAsync
 
 #: Componentes de telemetría que deben haber llegado antes de publicar /odom.
 #: Es el mecanismo del nodo de ROS 1 y se conserva: el SDK entrega cada sensor
@@ -218,6 +225,8 @@ class RvrDriverNode(Node):
         # reporta el RVR es un artefacto de su acelerómetro, no del robot.
         # Ver `_h_quaternion` y el manual, cap. 13.
         self.declare_parameter('publicar_inclinacion', False)
+        # 🔴 Enciende el LED blanco del sensor de color. Ver `_registrar_sensores`.
+        self.declare_parameter('color_detection', False)
 
         p = self.get_parameter
         self._puerto = p('serial_port').value
@@ -231,6 +240,7 @@ class RvrDriverNode(Node):
         self._periodo_keepalive = float(p('keepalive_period').value)
         self._timeout_silencio = float(p('silence_timeout').value)
         self._publicar_inclinacion = bool(p('publicar_inclinacion').value)
+        self._color_detection = bool(p('color_detection').value)
 
         if self._intervalo_ms < 60:
             self.get_logger().warn(
@@ -436,6 +446,35 @@ class RvrDriverNode(Node):
             callback_group=g_cmd,
         )
 
+        # ── Servicios que hablan con el RVR ──────────────────────────────────
+        # 🔴 GRUPO PROPIO, y no es un detalle: `_pedir()` BLOQUEA esperando la
+        # respuesta del robot. Con el MultiThreadedExecutor de este nodo,
+        # bloquear en `g_srv` no detiene a los demás grupos — la telemetría y
+        # `cmd_vel` siguen atendiéndose. Compartiendo grupo con la telemetría,
+        # una llamada lenta al RVR congelaría `/odom`.
+        g_srv = MutuallyExclusiveCallbackGroup()
+        for tipo, nombre, cb in (
+            (SetLEDRGB, 'set_led_rgb', self._srv_led_rgb),
+            (SetMultipleLEDs, 'set_multiple_leds', self._srv_leds_multiples),
+            (SetLeds, 'set_leds', self._srv_leds_todos),
+            (GetRGBCSensorValues, 'get_rgbc_sensor_values', self._srv_rgbc),
+            (GetEncoders, 'get_encoders', self._srv_encoders),
+            (GetSystemInfo, 'get_system_info', self._srv_system_info),
+            (GetControlState, 'get_control_state', self._srv_control_state),
+            (TriggerLedEvent, 'trigger_led_event', self._srv_led_event),
+            (SendInfraredMessage, 'send_infrared_message', self._srv_ir_mensaje),
+            (SetIRMode, 'set_ir_mode', self._srv_ir_modo),
+            (SetIREvading, 'set_ir_evading', self._srv_ir_evasion),
+            (SetDriveParameters, 'set_drive_parameters', self._srv_drive_params),
+            (SetPosAndYaw, 'set_pos_and_yaw', self._srv_set_pos_yaw),
+            # 🔴 Estos CUATRO MUEVEN EL ROBOT. Ver el bloque de abajo.
+            (MoveTimed, 'move_timed', self._srv_move_timed),
+            (RawMotors, 'raw_motors', self._srv_raw_motors),
+            (MoveToPose, 'move_to_pose', self._srv_move_to_pose),
+            (MoveToPosAndYaw, 'move_to_pos_and_yaw', self._srv_move_to_pos_yaw),
+        ):
+            self.create_service(tipo, nombre, cb, callback_group=g_srv)
+
         # ── Watchdog de cmd_vel ──────────────────────────────────────────────
         # Se comprueba a 20 Hz, cinco veces más rápido que el timeout de 0.3 s.
         # En el nodo de ROS 1 se comprobaba cada ~0.17 s, lo que dejaba el peor
@@ -519,6 +558,58 @@ class RvrDriverNode(Node):
 
         fut.add_done_callback(_revisar)
         return fut
+
+    #: Los LEDs del RVR, por índice. El orden es el de `RvrLedGroups`, y el que
+    #: usan los servicios `SetLEDRGB` y `SetMultipleLEDs` en su `led_id`.
+    #:
+    #: 📝 `all_lights` va el ÚLTIMO a propósito: así el índice 0 es una luz
+    #:    concreta y no «todas», que sería una sorpresa desagradable para quien
+    #:    pruebe con led_id=0.
+    LEDS = [
+        'headlight_left', 'headlight_right',
+        'brakelight_left', 'brakelight_right',
+        'status_indication_left', 'status_indication_right',
+        'battery_door_front', 'battery_door_rear',
+        'power_button_front', 'power_button_rear',
+        'undercarriage_white', 'all_lights',
+    ]
+
+    def _pedir(self, coro, etiqueta: str, timeout: float = 5.0):
+        """Envía una corrutina al loop **y ESPERA su resultado**.
+
+        Es el hermano de `_enviar()`, y existe porque los servicios `Get*` tienen
+        que devolver un dato: encolar y olvidarse no vale.
+
+        🔴 ESTO BLOQUEA EL CALLBACK, y por eso los servicios van en su PROPIO
+           grupo de callbacks (`g_srv`). Con el `MultiThreadedExecutor` que usa
+           este nodo, bloquear en un grupo no detiene a los demás: la telemetría
+           y `cmd_vel` siguen atendiéndose. Si los servicios compartieran grupo
+           con la telemetría, una llamada lenta al RVR congelaría `/odom`.
+
+        Devuelve `(ok, resultado, mensaje)`. Nunca lanza: un servicio que
+        revienta deja al cliente esperando, y eso es peor que un `success=False`.
+        """
+        if self._rvr is None:
+            return False, None, 'el RVR no está conectado'
+        try:
+            fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except RuntimeError as e:
+            self.get_logger().error(f'{etiqueta}: no se pudo encolar: {e}')
+            return False, None, f'no se pudo encolar: {e}'
+        try:
+            return True, fut.result(timeout), ''
+        except concurrent.futures.TimeoutError:
+            fut.cancel()
+            self.get_logger().error(f'{etiqueta}: el RVR no contestó en {timeout:.0f} s')
+            return False, None, f'el RVR no contestó en {timeout:.0f} s'
+        except Exception as e:
+            self.get_logger().error(f'{etiqueta} FALLÓ: {type(e).__name__}: {e}')
+            return False, None, f'{type(e).__name__}: {e}'
+
+    @staticmethod
+    def _rgb_valido(*valores) -> bool:
+        """Los canales van de 0 a 255. El SDK no lo comprueba y el RVR tampoco."""
+        return all(isinstance(v, int) and 0 <= v <= 255 for v in valores)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Conexión y streaming de sensores
@@ -774,6 +865,35 @@ class RvrDriverNode(Node):
             self._recuperando = False
 
     async def _registrar_sensores(self) -> None:
+        # ── 🔴 EL SENSOR DE COLOR VA ANTES DEL STREAMING ─────────────────────
+        # Medido el 2026-07-31: **con el streaming de `color_detection` ya
+        # configurado, `enable_color_detection` NO HACE NADA**. Se comprobó
+        # llamándolo desde un servicio y mirando `/color` a la vez: 481 mensajes,
+        # todos [0, 0, 0], durante toda la llamada.
+        #
+        # Consecuencia que estuvo escondida desde el principio: **`/color` llevaba
+        # publicando [0,0,0] siempre**. El topic existía, los mensajes llegaban a
+        # 16 Hz, y el sensor estaba a oscuras. Un fallo silencioso más.
+        #
+        # Y el sensor SIN su luz no da nada: medido en banco, canal claro **4 con
+        # la luz apagada contra 741 con ella encendida** — 185 veces
+        # (`mediciones_banco/medir_sensor_color.py`).
+        #
+        # ⚠️ Por eso va como PARÁMETRO y por defecto APAGADO: encenderlo deja un
+        #    LED blanco encendido bajo el chasis mientras el driver viva, y eso
+        #    gasta batería en un laboratorio de 16 robots. Quien quiera el color
+        #    lo pide.
+        if self._color_detection:
+            await self._rvr.enable_color_detection(is_enabled=True)
+            self.get_logger().info(
+                'sensor de color ENCENDIDO: /color dará valores reales. '
+                'Deja un LED blanco encendido bajo el chasis mientras el driver viva.')
+        else:
+            self.get_logger().warn(
+                '/color publicará [0, 0, 0]: el sensor de color está APAGADO. '
+                'Actívalo con color_detection:=true — enciende un LED blanco bajo '
+                'el chasis y gasta batería.')
+
         sc = self._rvr.sensor_control
         await sc.add_sensor_data_handler(RvrStreamingServices.locator, self._h_locator)
         await sc.add_sensor_data_handler(RvrStreamingServices.quaternion, self._h_quaternion)
@@ -1147,6 +1267,502 @@ class RvrDriverNode(Node):
         if self._rvr is not None:
             self._enviar(self._rvr.drive_stop(), 'parada de emergencia')
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Servicios: LEDs
+    # ─────────────────────────────────────────────────────────────────────────
+    # ⚠️ NINGUNO DE ESTOS MUEVE EL ROBOT. Se portaron primero justamente por eso:
+    #    se pueden probar en banco sin espacio y sin riesgo.
+    #
+    # 📝 El LED del sensor de color NO se controla desde aquí: no es un grupo de
+    #    `RvrLedGroups`, sino `enable_color_detection`. Si no se desactiva, se
+    #    queda encendido gastando batería (CLAUDE.md).
+
+    def _srv_led_rgb(self, req, resp):
+        """Un LED, un color."""
+        if not 0 <= req.led_id < len(self.LEDS):
+            resp.success, resp.message = False, (
+                f'led_id {req.led_id} fuera de rango (0..{len(self.LEDS)-1}); '
+                f'ver la tabla LEDS')
+            return resp
+        if not self._rgb_valido(req.red, req.green, req.blue):
+            resp.success, resp.message = False, 'los canales RGB van de 0 a 255'
+            return resp
+        grupo = getattr(RvrLedGroups, self.LEDS[req.led_id]).value
+        ok, _, msg = self._pedir(
+            self._rvr.set_all_leds(
+                led_group=grupo,
+                led_brightness_values=[req.red, req.green, req.blue]),
+            f'set_led_rgb({self.LEDS[req.led_id]})')
+        resp.success = ok
+        resp.message = msg or f'{self.LEDS[req.led_id]} = ({req.red}, {req.green}, {req.blue})'
+        return resp
+
+    def _srv_leds_multiples(self, req, resp):
+        """Varios LEDs de una vez. Las cuatro listas tienen que medir lo mismo."""
+        n = len(req.led_ids)
+        if not n or any(len(x) != n for x in (req.red_values, req.green_values, req.blue_values)):
+            resp.success, resp.message = False, (
+                f'las cuatro listas deben tener la misma longitud y no estar vacías '
+                f'(ids {n}, r {len(req.red_values)}, g {len(req.green_values)}, '
+                f'b {len(req.blue_values)})')
+            return resp
+        # Se valida TODO antes de mandar nada: dejar la mitad de los LEDs
+        # cambiados y la otra mitad no es peor que no hacer nada.
+        for i, r, g, b in zip(req.led_ids, req.red_values, req.green_values, req.blue_values):
+            if not 0 <= i < len(self.LEDS):
+                resp.success, resp.message = False, f'led_id {i} fuera de rango'
+                return resp
+            if not self._rgb_valido(r, g, b):
+                resp.success, resp.message = False, f'RGB fuera de 0..255 en el led_id {i}'
+                return resp
+        hechos = []
+        for i, r, g, b in zip(req.led_ids, req.red_values, req.green_values, req.blue_values):
+            ok, _, msg = self._pedir(
+                self._rvr.set_all_leds(
+                    led_group=getattr(RvrLedGroups, self.LEDS[i]).value,
+                    led_brightness_values=[r, g, b]),
+                f'set_multiple_leds({self.LEDS[i]})')
+            if not ok:
+                resp.success, resp.message = False, f'falló en {self.LEDS[i]}: {msg}'
+                return resp
+            hechos.append(self.LEDS[i])
+        resp.success, resp.message = True, f'{len(hechos)} LEDs: {", ".join(hechos)}'
+        return resp
+
+    def _srv_leds_todos(self, req, resp):
+        """Todos los LEDs a un color. `SetLeds.srv` no tiene campos de respuesta."""
+        c = list(req.rgb_color)
+        if len(c) != 3 or not self._rgb_valido(*c):
+            self.get_logger().warn(
+                f'set_leds: rgb_color debe ser [r, g, b] con valores 0..255, llegó {c}')
+            return resp
+        self._pedir(
+            self._rvr.set_all_leds(
+                led_group=RvrLedGroups.all_lights.value,
+                led_brightness_values=c * 10),
+            'set_leds')
+        return resp
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Servicios: lecturas
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _srv_rgbc(self, _req, resp):
+        """Sensor de color, en crudo.
+
+        🔴 NO enciende ni apaga la luz, y no es un olvido: **con el streaming de
+           `color_detection` activo, `enable_color_detection` no hace efecto**.
+           Medido el 2026-07-31 llamando a este servicio y mirando `/color` a la
+           vez: 481 mensajes, todos [0,0,0], durante toda la llamada.
+
+           La primera versión sí lo hacía y devolvía oscuridad con `success=True`,
+           que es lo peor de los dos mundos.
+
+        ⚠️ Si el sensor está apagado —lo está por defecto— esto devuelve valores
+           de oscuridad (~1, 0, 1, 0 medidos) y lo dice en `message`. Para que dé
+           algo hay que arrancar con `color_detection:=true`.
+        """
+        ok, datos, msg = self._pedir(self._rvr.get_rgbc_sensor_values(), 'get_rgbc')
+        if not ok or not isinstance(datos, dict):
+            resp.success, resp.message = False, msg or f'respuesta inesperada: {datos!r}'
+            return resp
+        resp.red_channel_value = int(datos.get('red_channel_value', 0))
+        resp.green_channel_value = int(datos.get('green_channel_value', 0))
+        resp.blue_channel_value = int(datos.get('blue_channel_value', 0))
+        resp.clear_channel_value = int(datos.get('clear_channel_value', 0))
+        resp.success = True
+        resp.message = ('' if self._color_detection else
+                        'el sensor de color está APAGADO: estos valores son '
+                        'oscuridad. Arranca con color_detection:=true')
+        return resp
+
+    def _srv_encoders(self, _req, resp):
+        """Cuentas de los encoders.
+
+        📝 Son la única fuente del robot que NO depende del marco de referencia
+        (CLAUDE.md), y están calibradas: 7792 ticks/m contra cinta métrica.
+        """
+        ok, datos, msg = self._pedir(self._rvr.get_encoder_counts(), 'get_encoders')
+        if not ok or not isinstance(datos, dict):
+            resp.success, resp.message = False, msg or f'respuesta inesperada: {datos!r}'
+            return resp
+        resp.left_wheel_count = int(datos.get('left_wheel_count', 0))
+        resp.right_wheel_count = int(datos.get('right_wheel_count', 0))
+        resp.success, resp.message = True, ''
+        return resp
+
+    def _srv_system_info(self, _req, resp):
+        """Versiones e identificadores. Útil para la flota: saber qué hay en cada robot.
+
+        ⚠️ `get_main_application_version` y `get_processor_name` EXIGEN `target`:
+           1 es Nordic y 2 es ST. Sin el argumento dan `TypeError` (CLAUDE.md).
+        """
+        info = SystemInfo()
+        fallos = []
+        ok, v, msg = self._pedir(self._rvr.get_main_application_version(target=1),
+                                 'system_info: versión')
+        if ok and isinstance(v, dict):
+            info.app_major = int(v.get('major', 0))
+            info.app_minor = int(v.get('minor', 0))
+            info.app_revision = int(v.get('revision', 0))
+        else:
+            fallos.append(f'versión ({msg})')
+        ok, v, msg = self._pedir(self._rvr.get_bootloader_version(target=1),
+                                 'system_info: bootloader')
+        if ok and isinstance(v, dict):
+            info.bootloader_major = int(v.get('major', 0))
+            info.bootloader_minor = int(v.get('minor', 0))
+            info.bootloader_revision = int(v.get('revision', 0))
+        else:
+            fallos.append(f'bootloader ({msg})')
+        for campo, coro, clave, conv in (
+            ('board_revision', self._rvr.get_board_revision(), 'revision', int),
+            ('mac_address', self._rvr.get_mac_address(), 'mac_address', str),
+            ('sku', self._rvr.get_sku(), 'sku', str),
+        ):
+            ok, d, msg = self._pedir(coro, f'system_info: {campo}')
+            if ok and isinstance(d, dict) and clave in d:
+                setattr(info, campo, conv(d[clave]))
+            else:
+                fallos.append(f'{campo} ({msg or d!r})')
+        for campo, target in (('processor_1_name', 1), ('processor_2_name', 2)):
+            ok, d, msg = self._pedir(self._rvr.get_processor_name(target=target),
+                                     f'system_info: {campo}')
+            if ok and isinstance(d, dict):
+                setattr(info, campo, str(d.get('name', '')).strip('\x00'))
+            else:
+                fallos.append(f'{campo} ({msg})')
+        # 📝 `uptime_ms` se queda a 0 SIEMPRE: el SDK vendorizado no tiene ningún
+        #    método de uptime. El campo viene del .msg heredado de ROS 1, donde
+        #    tampoco se rellenaba. Se dice en el mensaje en vez de dejar un cero
+        #    mudo que parezca un dato.
+        fallos.append('uptime_ms (el SDK no lo expone)')
+        resp.system_info = info
+        # Parcial cuenta como éxito, y se dice cuáles faltaron: es información de
+        # diagnóstico, y devolver `False` por un campo tiraría los demás.
+        resp.success = True
+        resp.message = '' if not fallos else 'sin obtener: ' + '; '.join(fallos)
+        return resp
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Servicios: estado, LEDs por evento, infrarrojos y configuración
+    # ─────────────────────────────────────────────────────────────────────────
+    # ⚠️ NINGUNO DE ESTOS MUEVE EL ROBOT tampoco. Los cuatro que sí lo mueven
+    #    —MoveTimed, RawMotors, MoveToPose, MoveToPosAndYaw— van aparte, porque
+    #    necesitan espacio despejado y aviso al usuario.
+
+    #: Los eventos de `TriggerLedEvent.srv`, como patrones de color.
+    #: 📝 En ROS 1 esto eran animaciones de la aplicación, no del SDK: el RVR no
+    #:    tiene «eventos de LED». Aquí se traducen a colores fijos, que es lo que
+    #:    de verdad hace falta en el laboratorio — que un estudiante vea de un
+    #:    vistazo si su robot arrancó, se paró o falló.
+    EVENTOS_LED = {
+        1: ('STARTUP', (0, 0, 255)),          # azul
+        2: ('EMERGENCY_STOP', (255, 0, 0)),   # rojo
+        3: ('START_DRIVING', (0, 255, 0)),    # verde
+        4: ('ERROR', (255, 0, 255)),          # magenta
+        5: ('VISION_STARTUP', (0, 255, 255)), # cian
+        10: ('DOWNLOAD_MODEL', (255, 180, 0)),# ámbar
+    }
+
+    def _srv_control_state(self, _req, resp):
+        """Qué controlador manda y si hay fallo de motor."""
+        estado = ControlState()
+        fallos = []
+        ok, d, msg = self._pedir(self._rvr.get_active_control_system_id(),
+                                 'control_state: controlador')
+        if ok and isinstance(d, dict):
+            estado.active_controller_id = int(
+                d.get('controller_id', d.get('active_control_system_id', 0)))
+        else:
+            fallos.append(f'controlador ({msg or d!r})')
+        ok, d, msg = self._pedir(self._rvr.get_motor_fault_state(),
+                                 'control_state: fallo de motor')
+        if ok and isinstance(d, dict):
+            estado.motor_fault = bool(d.get('is_fault', False))
+        else:
+            fallos.append(f'fallo de motor ({msg or d!r})')
+        # Estos dos NO vienen del RVR: los sabe el driver, que es quien manda.
+        # `is_stopped` incluye la parada de emergencia a propósito: un robot con
+        # la parada puesta está parado aunque le lleguen `cmd_vel`.
+        conduciendo = (not self._parada_emergencia
+                       and (self._ahora_s() - self._t_ultimo_cmd_vel) < self._cmd_vel_timeout)
+        estado.is_driving = conduciendo
+        estado.is_stopped = not conduciendo
+        resp.control_state = estado
+        resp.success = True
+        resp.message = '' if not fallos else 'sin obtener: ' + '; '.join(fallos)
+        return resp
+
+    def _srv_led_event(self, req, resp):
+        """Patrón de color por evento. Ver `EVENTOS_LED`."""
+        if req.stop_current_event:
+            ok, _, _ = self._pedir(
+                self._rvr.set_all_leds(led_group=RvrLedGroups.all_lights.value,
+                                       led_brightness_values=[0, 0, 0] * 10),
+                'trigger_led_event: apagar')
+            resp.success = ok
+            return resp
+        ev = self.EVENTOS_LED.get(req.event_id)
+        if ev is None:
+            self.get_logger().warn(
+                f'trigger_led_event: event_id {req.event_id} desconocido; '
+                f'los válidos son {sorted(self.EVENTOS_LED)}')
+            resp.success = False
+            return resp
+        nombre, color = ev
+        ok, _, _ = self._pedir(
+            self._rvr.set_all_leds(led_group=RvrLedGroups.all_lights.value,
+                                   led_brightness_values=list(color) * 10),
+            f'trigger_led_event({nombre})')
+        resp.success = ok
+        return resp
+
+    def _srv_ir_mensaje(self, req, resp):
+        """Emite un mensaje IR. No mueve el robot, pero SÍ emite."""
+        if not 0 <= req.code <= 7:
+            resp.success, resp.message = False, 'code va de 0 a 7'
+            return resp
+        for nombre, v in (('front', req.front_strength), ('left', req.left_strength),
+                          ('right', req.right_strength), ('rear', req.rear_strength)):
+            if not 0 <= v <= 64:
+                resp.success, resp.message = False, f'{nombre}_strength va de 0 a 64'
+                return resp
+        ok, _, msg = self._pedir(
+            self._rvr.send_infrared_message(
+                infrared_code=req.code, front_strength=req.front_strength,
+                left_strength=req.left_strength, right_strength=req.right_strength,
+                rear_strength=req.rear_strength),
+            'send_infrared_message')
+        resp.success, resp.message = ok, msg or f'código {req.code} emitido'
+        return resp
+
+    def _srv_ir_modo(self, req, resp):
+        """Modo IR robot-a-robot: broadcasting, following o off.
+
+        📝 `evading` tiene su propio servicio (`set_ir_evading`), como en ROS 1.
+        """
+        modo = (req.mode or '').strip().lower()
+        acciones = {
+            'broadcasting': lambda: self._rvr.start_robot_to_robot_infrared_broadcasting(
+                far_code=req.far_code, near_code=req.near_code),
+            'following': lambda: self._rvr.start_robot_to_robot_infrared_following(
+                far_code=req.far_code, near_code=req.near_code),
+            'off': lambda: self._rvr.stop_robot_to_robot_infrared_broadcasting(),
+        }
+        if modo not in acciones:
+            resp.success, resp.message = False, (
+                f"modo '{req.mode}' desconocido; usa {sorted(acciones)}")
+            return resp
+        ok, _, msg = self._pedir(acciones[modo](), f'set_ir_mode({modo})')
+        resp.success, resp.message = ok, msg or f'modo IR: {modo}'
+        return resp
+
+    def _srv_ir_evasion(self, req, resp):
+        """🔴 ESTE SÍ PUEDE MOVER EL ROBOT: la evasión IR conduce sola.
+
+        No se le manda `cmd_vel`, así que el watchdog del driver NO lo para, y el
+        `collision_monitor` tampoco lo ve — el RVR conduce por su cuenta. Se avisa
+        en el log a nivel WARN por eso.
+        """
+        self.get_logger().warn(
+            'set_ir_evading: el RVR conducirá SOLO al detectar IR. Ni el watchdog '
+            'de cmd_vel ni el collision_monitor intervienen. Espacio despejado.')
+        ok, _, msg = self._pedir(
+            self._rvr.start_robot_to_robot_infrared_evading(
+                far_code=req.far_code, near_code=req.near_code),
+            'set_ir_evading')
+        resp.success, resp.message = ok, msg or 'evasión IR activada'
+        return resp
+
+    def _srv_drive_params(self, req, resp):
+        """Parámetros del limitador de velocidad del RVR.
+
+        ⚠️ Cambia CÓMO acelera el robot. No lo mueve por sí mismo, pero afecta a
+           todo lo que se mueva después — incluido Nav2, cuyo `max_linear_accel`
+           está ajustado a la rampa MEDIDA de ~0.5 s (manual, cap. 11).
+        """
+        ok, _, msg = self._pedir(
+            self._rvr.set_drive_target_slew_parameters(
+                a=req.a, b=req.b, c=req.c,
+                linear_acceleration=req.linear_acceleration,
+                linear_velocity_slew_method=req.linear_velocity_slew_method),
+            'set_drive_parameters')
+        if ok:
+            self.get_logger().warn(
+                f'set_drive_parameters: rampa cambiada (a={req.a} b={req.b} c={req.c} '
+                f'accel={req.linear_acceleration}). Nav2 está ajustado a la rampa '
+                'de fábrica: revísalo si vas a navegar.')
+        resp.success = ok
+        return resp
+
+    def _srv_set_pos_yaw(self, req, resp):
+        """Poner la odometría a cero. **Solo (0, 0, 0).**
+
+        🔴 EL SDK NO PUEDE FIJAR UNA POSE ARBITRARIA. Solo tiene
+           `reset_locator_x_and_y()`, que la pone a (0,0), y `reset_yaw()`, que
+           **no hace nada** — el yaw del RVR se pone a cero al ENCENDER el robot
+           (medido, manual cap. 10).
+
+        Así que este servicio acepta (0,0,0) y **rechaza el resto en vez de
+        fingir**. Para una pose arbitraria haría falta que el driver llevara sus
+        propios desplazamientos de x, y y yaw sobre lo que publica en `/odom`; no
+        está hecho, y tocar la ruta de la odometría —la parte más verificada del
+        driver— pide su propia sesión de pruebas.
+        """
+        p = req.position
+        if abs(p.x) > 1e-6 or abs(p.y) > 1e-6 or abs(req.yaw) > 1e-6:
+            self.get_logger().warn(
+                f'set_pos_and_yaw: solo se admite (0,0,0); llegó '
+                f'({p.x:.3f}, {p.y:.3f}, yaw {req.yaw:.3f}). Ver el docstring.')
+            resp.success = False
+            return resp
+        ok, _, _ = self._pedir(self._rvr.reset_locator_x_and_y(), 'set_pos_and_yaw')
+        if ok:
+            # El yaw publicado se pone a cero restando el actual, que es lo que
+            # `reset_yaw()` NO hace.
+            with self._lock:
+                self._yaw_offset = None
+            self.get_logger().info('odometría puesta a cero (posición y origen del yaw)')
+        resp.success = ok
+        return resp
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Servicios QUE MUEVEN EL ROBOT
+    # ─────────────────────────────────────────────────────────────────────────
+    # 🔴🔴 ESTOS CUATRO SE SALTAN EL `collision_monitor`, Y NO HAY FORMA DE
+    #      EVITARLO DESDE AQUÍ.
+    #
+    #   La capa de seguridad filtra `/cmd_vel_raw -> /cmd_vel` (manual, cap. 12).
+    #   Estos servicios NO publican en ningún topic: le hablan al RVR por el
+    #   puerto serie. El monitor no puede verlos ni frenarlos.
+    #
+    #   Tampoco los para el watchdog de `cmd_vel`: ese vigila que sigan LLEGANDO
+    #   mensajes, y aquí no hay mensajes que dejen de llegar.
+    #
+    #   Lo único que los detiene es la PARADA DE EMERGENCIA, que se comprueba
+    #   abajo, y `drive_stop`.
+    #
+    # ⚠️ Con Nav2 corriendo, además, dos cosas mandarían al robot a la vez. No se
+    #    prohíbe —un estudiante puede querer justo eso— pero se avisa.
+
+    def _mover_permitido(self) -> tuple[bool, str]:
+        """Comprobaciones comunes a todo servicio que mueva el robot."""
+        if self._rvr is None:
+            return False, 'el RVR no está conectado'
+        if self._parada_emergencia:
+            return False, ('parada de emergencia ACTIVA: llama primero a '
+                           '/release_emergency_stop')
+        return True, ''
+
+    def _srv_move_timed(self, req, resp):
+        """Velocidad constante durante N segundos, y para. BLOQUEANTE."""
+        ok, msg = self._mover_permitido()
+        if not ok:
+            self.get_logger().warn(f'move_timed rechazado: {msg}')
+            resp.success = False
+            return resp
+        if not 0.0 < req.duration <= 30.0:
+            self.get_logger().warn(
+                f'move_timed: duration {req.duration} fuera de (0, 30] s')
+            resp.success = False
+            return resp
+        # El mismo límite que el resto del stack: 0.40 m/s y 2.0 rad/s son los
+        # máximos MEDIDOS de este robot (manual, cap. 11.3).
+        if abs(req.linear) > 0.40 or abs(req.angular) > 2.0:
+            self.get_logger().warn(
+                f'move_timed: ({req.linear}, {req.angular}) supera los máximos '
+                'medidos del robot (0.40 m/s, 2.0 rad/s)')
+            resp.success = False
+            return resp
+        self.get_logger().warn(
+            f'move_timed: {req.duration:.1f} s a ({req.linear:.2f} m/s, '
+            f'{req.angular:.2f} rad/s). NO pasa por el collision_monitor.')
+
+        async def _mover():
+            # `drive_rc_si_units` y no `drive_with_heading`: frena diez veces
+            # mejor — 1.1 cm de deriva contra 11.3 (CLAUDE.md).
+            fin = self._loop.time() + req.duration
+            while self._loop.time() < fin:
+                if self._parada_emergencia:
+                    break
+                await self._rvr.drive_rc_si_units(
+                    linear_velocity=float(req.linear),
+                    yaw_angular_velocity=math.degrees(float(req.angular)),
+                    flags=0)
+                # Se repite el comando: el RVR tiene su propio timeout de mando y
+                # un solo `drive` no dura 30 s.
+                await asyncio.sleep(0.1)
+            await self._rvr.drive_stop()
+
+        ok, _, msg = self._pedir(_mover(), 'move_timed',
+                                 timeout=req.duration + 10.0)
+        resp.success = ok
+        return resp
+
+    def _srv_raw_motors(self, req, resp):
+        """Control directo de los dos motores. Sin cinemática de por medio."""
+        ok, msg = self._mover_permitido()
+        if not ok:
+            resp.success, resp.message = False, msg
+            return resp
+        for nombre, modo in (('left_mode', req.left_mode), ('right_mode', req.right_mode)):
+            if modo not in (0, 1, 2):
+                resp.success, resp.message = False, f'{nombre} debe ser 0 (off), 1 o 2'
+                return resp
+        for nombre, v in (('left_speed', req.left_speed), ('right_speed', req.right_speed)):
+            if not 0 <= v <= 255:
+                resp.success, resp.message = False, f'{nombre} va de 0 a 255'
+                return resp
+        self.get_logger().warn(
+            f'raw_motors: L({req.left_mode},{req.left_speed}) '
+            f'R({req.right_mode},{req.right_speed}). NO pasa por el collision_monitor, '
+            'y NO tiene watchdog: sigue hasta que le mandes modo 0.')
+        ok, _, msg = self._pedir(
+            self._rvr.raw_motors(
+                left_mode=req.left_mode, left_duty_cycle=req.left_speed,
+                right_mode=req.right_mode, right_duty_cycle=req.right_speed),
+            'raw_motors')
+        resp.success, resp.message = ok, msg
+        return resp
+
+    def _ir_a(self, x, y, yaw, speed, si, etiqueta):
+        """Lo común a `move_to_pose` y `move_to_pos_and_yaw`."""
+        ok, msg = self._mover_permitido()
+        if not ok:
+            self.get_logger().warn(f'{etiqueta} rechazado: {msg}')
+            return False
+        self.get_logger().warn(
+            f'{etiqueta}: a ({x:.2f}, {y:.2f}) yaw {math.degrees(yaw):.0f}° '
+            f'a {speed}{" m/s" if si else " (0..128)"}. NO pasa por el '
+            'collision_monitor.')
+        # 🔴 El yaw va en GRADOS y el marco es el del LOCATOR, que NO es el del
+        #    robot: su eje X está 90° girado y se realinea en cada
+        #    `reset_locator_x_and_y` (manual, cap. 10). Quien use esto tiene que
+        #    saberlo — no es «x metros hacia delante».
+        coro = (self._rvr.drive_to_position_si if si
+                else self._rvr.drive_to_position_normalized)
+        ok, _, _ = self._pedir(
+            coro(yaw_angle=math.degrees(yaw), x=float(x), y=float(y),
+                 linear_speed=float(speed), flags=0),
+            etiqueta, timeout=30.0)
+        return ok
+
+    def _srv_move_to_pose(self, req, resp):
+        """Ir a una pose del marco del LOCATOR. Ver el aviso en `_ir_a`."""
+        o = req.pose.orientation
+        yaw = math.atan2(2.0 * (o.w * o.z + o.x * o.y),
+                         1.0 - 2.0 * (o.y * o.y + o.z * o.z))
+        resp.success = self._ir_a(req.pose.position.x, req.pose.position.y, yaw,
+                                  req.speed, req.speed_in_si, 'move_to_pose')
+        return resp
+
+    def _srv_move_to_pos_yaw(self, req, resp):
+        """Igual, pero con el yaw suelto en vez de un cuaternión."""
+        resp.success = self._ir_a(req.position.x, req.position.y, float(req.yaw),
+                                  req.speed, req.speed_in_si, 'move_to_pos_and_yaw')
+        return resp
+
     def _srv_liberar_parada(self, _req, resp):
         self.get_logger().warn('parada de emergencia liberada')
         self._parada_emergencia = False
@@ -1178,8 +1794,35 @@ class RvrDriverNode(Node):
 
     async def _apagar_rvr(self) -> None:
         await self._rvr.drive_stop()
+
+        # 🔴 APAGAR LO QUE ESTE NODO HAYA ENCENDIDO. Cada `(True)` necesita su
+        # `(False)`, también aquí — y este `finally` faltaba:
+        #
+        #   El 2026-07-31 se añadió `color_detection` y el driver encendía el
+        #   sensor al arrancar sin apagarlo nunca. Al matar el nodo, **el LED
+        #   blanco se quedaba encendido bajo el chasis**, gastando batería hasta
+        #   que alguien apagara el robot. Lo vio el usuario, no el código.
+        #
+        # Se apaga siempre, no solo si `self._color_detection`: un servicio o una
+        # ejecución anterior pueden haberlo dejado encendido, y apagar algo ya
+        # apagado es inocuo.
+        for coro, etq in ((self._rvr.enable_color_detection(is_enabled=False),
+                           'sensor de color'),
+                          (self._rvr.set_all_leds(
+                              led_group=RvrLedGroups.all_lights.value,
+                              led_brightness_values=[0, 0, 0] * 10), 'LEDs')):
+            try:
+                await coro
+            except Exception as e:
+                # Que falle apagar una luz no debe impedir soltar el puerto.
+                self.get_logger().warn(f'no se pudo apagar {etq}: {e}')
+
         await self._rvr.sensor_control.clear()
         await self._rvr.close()
+
+    # ⚠️ Esto solo corre con un cierre LIMPIO (SIGINT, que es lo que manda
+    #    `ros2 launch`). Con `kill -9` no corre nada y las luces se quedan como
+    #    estén: es la razón de parar el nodo con SIGINT y no a lo bruto.
 
 
 def main(args=None) -> int:

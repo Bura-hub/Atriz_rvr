@@ -149,6 +149,21 @@ PERIODO_KEEPALIVE_S = 30.0
 TIMEOUT_SILENCIO_S = 3.0
 
 
+def euler_desde_cuaternion(q: Quaternion) -> tuple[float, float, float]:
+    """(roll, pitch, yaw) en radianes desde un cuaternión.
+
+    Hace falta para poder RESTAR el yaw del arranque sin perder el roll y el
+    pitch — que en este robot no son cero: está inclinado ~8°, confirmado por
+    tres vías independientes.
+    """
+    x, y, z, w = q.x, q.y, q.z, q.w
+    roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+    sp = 2.0 * (w * y - z * x)
+    pitch = math.asin(max(-1.0, min(1.0, sp)))
+    yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+    return roll, pitch, yaw
+
+
 def cuaternion_desde_euler(roll: float, pitch: float, yaw: float) -> Quaternion:
     """Convierte ángulos de Euler (rad, orden sxyz) a cuaternión.
 
@@ -233,6 +248,25 @@ class RvrDriverNode(Node):
         self._recuperando = False
         self._n_recuperaciones = 0
         self._bateria_pct: float | None = None
+
+        # ── Origen del yaw ───────────────────────────────────────────────────
+        # 🔴 `reset_yaw()` NO PONE A CERO EL YAW. Medido el 2026-07-31: el driver
+        # lo llama al arrancar y el cuaternión seguía dando -74.6° en reposo.
+        # El yaw solo se pone a cero al ENCENDER el RVR, así que arrastra su
+        # origen desde entonces: con un encendido limpio da +0.5°, pero si el
+        # robot se ha movido o se ha manipulado, cualquier cosa (+64.9° medido).
+        #
+        # Consecuencia: la orientación de /odom no concordaba con su propia
+        # posición. El desfase NO era constante — paso de ~-15° a -154.9° solo
+        # con apagar y encender el robot.
+        #
+        # Se corrige aquí: se guarda el yaw de la primera muestra tras conectar
+        # y se resta de todas. Así `/odom` arranca mirando a 0, que es lo que
+        # ROS espera del frame `odom`.
+        self._yaw_offset: float | None = None
+        #: Último yaw corregido. Lo necesita `_h_velocity` para proyectar la
+        #: velocidad del marco del mundo al del robot.
+        self._yaw_actual: float = 0.0
 
         self._odom = Odometry()
         self._odom.header.frame_id = self._odom_frame
@@ -747,10 +781,40 @@ class RvrDriverNode(Node):
     #    nunca fue el problema, aunque lo pareciera.
     # ─────────────────────────────────────────────────────────────────────────
     async def _h_locator(self, datos) -> None:
+        """Posición. 🔴 El marco del locator está 90° GIRADO respecto al robot.
+
+        Medido el 2026-07-31 con cinco pruebas (`15_velocidad_odom.txt`):
+
+          · El marco del locator es FIJO —no gira con el robot— y se REALINEA
+            en cada `reset_locator_x_and_y()`, o sea al arrancar el driver.
+          · Su eje X queda **90° girado** respecto al «adelante» del robot: por
+            eso avanzar en línea recta daba SIEMPRE -90°, con giros y apagados
+            de por medio.
+
+        Y el marco crudo del locator **ya es dextrógiro y con ángulos positivos
+        en sentido antihorario**, coherente con el yaw. Se comprobó girando el
+        robot con `cmd_vel`: la dirección de avance cambió +88.8° en el marco
+        crudo mientras el robot giraba +90° en antihorario.
+
+        ⚠️ El `-Y` que había aquí SOBRABA, y hacía que la posición y la
+           orientación de `/odom` tuvieran MANOS CONTRARIAS: girando el robot,
+           el yaw publicado cambiaba +89.4° y el desplazamiento -88.8°.
+
+           Vino de una inferencia inválida: se dedujo midiendo que «al curvar a
+           la izquierda, `dy` salía negativo», dando por hecho que el eje X del
+           locator apuntaba hacia ADELANTE. Está 90° girado, así que ese
+           razonamiento no valía. Ahora hay medida directa.
+
+        LA TRANSFORMACIÓN: rotar -90° para alinear X con el «adelante» inicial,
+        que es lo que ROS espera del frame `odom`.
+
+            R(-90°)·(x, y) = (y, -x)
+        """
+        loc = datos['Locator']
+        x_crudo, y_crudo = float(loc['X']), float(loc['Y'])
         with self._lock:
-            self._odom.pose.pose.position.x = float(datos['Locator']['X'])
-            # 🔴 -Y: FRD -> FLU. Ver el bloque de arriba.
-            self._odom.pose.pose.position.y = -float(datos['Locator']['Y'])
+            self._odom.pose.pose.position.x = y_crudo
+            self._odom.pose.pose.position.y = -x_crudo
             self._odom.pose.pose.position.z = 0.0
         self._quiza_publicar('locator')
 
@@ -759,9 +823,30 @@ class RvrDriverNode(Node):
         with self._lock:
             # 🔴 (x, -y, -z, w): FRD -> FLU. Sin esto el yaw sale al revés y
             # SLAM pelea contra su propio emparejado de barridos.
-            orient = Quaternion(
+            crudo = Quaternion(
                 x=float(q['X']), y=-float(q['Y']), z=-float(q['Z']), w=float(q['W'])
             )
+            roll, pitch, yaw = euler_desde_cuaternion(crudo)
+
+            # 🔴 Restar el yaw del arranque. Ver `self._yaw_offset`.
+            #
+            # Se toma de la PRIMERA muestra que llega tras conectar, no de una
+            # constante: el origen del yaw depende de cuánto se haya movido el
+            # robot desde que se encendió, y eso no se puede saber de antemano.
+            #
+            # Se conservan roll y pitch: el robot está inclinado ~8° y esa
+            # inclinación es real, no un error de referencia.
+            if self._yaw_offset is None:
+                self._yaw_offset = yaw
+                self.get_logger().info(
+                    f'origen del yaw fijado en {math.degrees(yaw):+.1f}° '
+                    '(reset_yaw() del RVR no lo pone a cero; se resta aquí)'
+                )
+            yaw -= self._yaw_offset
+            yaw = math.atan2(math.sin(yaw), math.cos(yaw))   # normaliza a ±pi
+
+            self._yaw_actual = yaw
+            orient = cuaternion_desde_euler(roll, pitch, yaw)
             self._odom.pose.pose.orientation = orient
             self._imu.orientation = orient
         self._quiza_publicar('quaternion')
@@ -793,47 +878,39 @@ class RvrDriverNode(Node):
         self._quiza_publicar('gyroscope')
 
     async def _h_velocity(self, datos) -> None:
-        """🔴 ESTO ESTÁ MAL Y SE SABE POR QUÉ. Medido el 2026-07-31.
+        """Velocidad, pasada del marco del MUNDO al del ROBOT.
 
-        `odom.twist` va expresado en `child_frame_id`, o sea en el marco del
-        ROBOT: avanzar da `linear.x` positivo SIEMPRE, mire donde mire el robot.
+        🔴 `odom.twist` va expresado en `child_frame_id`, o sea en el marco del
+        ROBOT: avanzar da `linear.x` positivo SIEMPRE, mire donde mire.
 
-        Pero `Velocity` del RVR viene en el marco del MUNDO. Medido con el robot
-        avanzando recto a 0.199 m/s:
+        El RVR la reporta en el marco del LOCATOR, que es el del mundo. Y el
+        stream es **EXACTO** — medido el 2026-07-31 con el robot avanzando recto:
 
             dirección del desplazamiento del locator:  +90.2°
-            dirección del vector Velocity:             +90.1°   <- 0.1° de diferencia
-            módulo de Velocity: 0.200 m/s              <- 0 % de error
+            dirección del vector Velocity:             +90.1°   <- 0.1°
+            módulo real 0.199 m/s · Velocity 0.200              <- 0 % de error
 
-        Es decir: **el sensor es EXACTO**. Copiar su X aquí solo acierta cuando
-        el robot mira al eje X del odom. Publicado hoy con el robot recto:
+        ⚠️ Durante un día este proyecto creyó que el stream era «basura» porque
+           reportaba 0.001 m/s con el robot a 0.147 real. La observación era
+           cierta; la conclusión, falsa: se leía solo la componente X con el
+           robot encarado a ~90° del eje X del locator, donde X vale ~0 aunque
+           el robot cruce la habitación. El sensor nunca fue el problema.
 
-            odom.twist.linear = (-0.000, -0.200)   <- lo que sale
-                                (+0.199, +0.000)   <- lo que debería salir
+        DOS PASOS, y hacen falta los dos:
 
-        ⚠️ Y esto retracta un hallazgo que este proyecto dio por firme un día:
-           «el stream `Velocity` es basura, reporta 0.001 m/s con el robot a
-           0.147 real». La observación era cierta, la conclusión falsa — se leyó
-           solo la X con el robot encarado a ~90° de ese eje.
-
-        ARREGLO: proyectar sobre el rumbo.
-
-            vx_robot =  vx*cos(yaw) + vy*sin(yaw)
-            vy_robot = -vx*sin(yaw) + vy*cos(yaw)
-
-        🔴 NO SE APLICA TODAVÍA porque depende del yaw, y el yaw tiene su propio
-           bug: `reset_yaw()` NO pone a cero el yaw publicado (−74.6° en reposo
-           justo tras arrancar), y la orientación de `/odom` queda ~15° desfasada
-           de su propia posición. Los dos se arreglan JUNTOS.
-
-           Antes hace falta apagar y encender el RVR y volver a medir el desfase:
-           decide si se corrige con una constante o hay que cambiar de fuente de
-           orientación. Evidencia: 00_auditoria/evidencia_24_04/15_velocidad_odom.txt
+          1. La misma rotación de -90° que `_h_locator`, para llevar el vector
+             al marco `odom` (X = «adelante» del robot al arrancar el driver).
+          2. Proyectar sobre el rumbo actual, para pasarlo al marco del robot.
         """
         v = datos['Velocity']
+        vx_crudo, vy_crudo = float(v['X']), float(v['Y'])
         with self._lock:
-            self._odom.twist.twist.linear.x = float(v['X'])
-            self._odom.twist.twist.linear.y = -float(v['Y'])
+            # 1) marco del locator -> marco `odom`:  R(-90°)·(x, y) = (y, -x)
+            vx_odom, vy_odom = vy_crudo, -vx_crudo
+            # 2) marco `odom` -> marco del robot: proyección sobre el rumbo.
+            c, s = math.cos(self._yaw_actual), math.sin(self._yaw_actual)
+            self._odom.twist.twist.linear.x = vx_odom * c + vy_odom * s
+            self._odom.twist.twist.linear.y = -vx_odom * s + vy_odom * c
         self._quiza_publicar('velocity')
 
     async def _h_accel(self, datos) -> None:

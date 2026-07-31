@@ -24,6 +24,11 @@ wheels/
 devel/
 build/
 install/
+# 🔴 `log/` tambien: si se lanza `colcon build` desde este directorio en vez de
+# la raiz del workspace, colcon crea aqui un workspace PARASITO (build/,
+# install/, log/), dice "Finished" y el cambio nunca llega al sistema. Paso dos
+# veces el 2026-07-31.
+log/
 logs/
 *.log
 

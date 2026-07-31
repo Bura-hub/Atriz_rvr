@@ -364,25 +364,70 @@ class RvrDriverNode(Node):
             Twist, 'cmd_vel', self._cb_cmd_vel, 1, callback_group=g_cmd
         )
 
-        # La parada de emergencia va RELIABLE + TRANSIENT_LOCAL a propósito: es
-        # el único topic del robot donde perder un mensaje es un problema de
-        # seguridad, y transient_local hace que un suscriptor que llegue tarde
-        # reciba el último estado.
+        # ── QoS de la parada de emergencia ───────────────────────────────────
+        # RELIABLE: es el único topic del robot donde perder un mensaje es un
+        # problema de seguridad.
+        #
+        # 🔴 Y VOLATILE, NO TRANSIENT_LOCAL. Aquí ponía TRANSIENT_LOCAL «para que
+        #    un suscriptor que llegue tarde reciba el último estado» — y ese
+        #    razonamiento es del PUBLICADOR, no del suscriptor.
+        #
+        #    En el suscriptor, TRANSIENT_LOCAL solo RESTRINGE: exige que el
+        #    publicador también lo sea. Y ninguno lo es por defecto — ni
+        #    `ros2 topic pub`, ni rosbridge, que es por donde hablará la web.
+        #
+        #    Medido en banco el 2026-07-31, publicando en el topic correcto:
+        #      New publisher discovered on topic '/rvr/emergency_stop', offering
+        #      incompatible QoS. No messages will be received from it.
+        #      Last incompatible policy: DURABILITY
+        #
+        #    VOLATILE en el suscriptor empareja con TODO: publicadores VOLATILE y
+        #    también TRANSIENT_LOCAL. Es estrictamente más compatible.
+        #
+        # ⚠️ ES LA TERCERA VEZ QUE ESTE BOTÓN FALLA EN SILENCIO, y por tres causas
+        #    distintas:
+        #      1. ROS 1  — nombre de topic distinto (auditoría, 2026-07-29)
+        #      2. ROS 2  — faltaba el namespace `/rvr/` (2026-07-31)
+        #      3. ROS 2  — QoS incompatible (2026-07-31, esta)
+        #    Las tres daban 200 OK en la web y cero efecto en el robot.
         qos_estop = QoSProfile(
             depth=1,
             reliability=QoSReliabilityPolicy.RELIABLE,
-            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            durability=QoSDurabilityPolicy.VOLATILE,
         )
         self.create_subscription(
             Empty, 'emergency_stop', self._cb_parada_emergencia,
             qos_estop, callback_group=g_cmd,
         )
-        # Nombre antiguo, para no romper lo que ya existe. La web publicaba en
-        # /rvr/emergency_stop y el driver escuchaba is_emergency_stop: nombres
-        # distintos, y por eso el botón de emergencia NO HACÍA NADA (confirmado
-        # en banco el 2026-07-29). Se escuchan los dos y se unifica en la Fase 5.
+        # Nombre antiguo, para no romper lo que ya existe.
         self.create_subscription(
             Empty, 'is_emergency_stop', self._cb_parada_emergencia,
+            qos_estop, callback_group=g_cmd,
+        )
+
+        # 🔴 Y EL QUE LA WEB USA DE VERDAD, con su `/rvr/` y en ABSOLUTO.
+        #
+        # Los dos de arriba son nombres RELATIVOS: con el namespace vacío (que es
+        # el valor por defecto, ver ARQUITECTURA.md D1) resuelven a
+        # `/emergency_stop` y `/is_emergency_stop`. La web publica en
+        # **`/rvr/emergency_stop`**, así que NINGUNO DE LOS DOS LA OÍA.
+        #
+        # Comprobado en banco el 2026-07-31, con el driver corriendo:
+        #     ros2 topic info /rvr/emergency_stop
+        #     Unknown topic '/rvr/emergency_stop'
+        #
+        # Es la SEGUNDA vez que este botón falla por un nombre. La primera fue en
+        # ROS 1: la web publicaba en `/rvr/emergency_stop` y el driver escuchaba
+        # `is_emergency_stop` (auditoría, 2026-07-29). Se arregló el nombre y se
+        # coló el NAMESPACE.
+        #
+        # ⚠️ Tres suscripciones para una función es feo, y a propósito: en un
+        #    botón de emergencia el modo de fallo es «no llega el mensaje», y ha
+        #    fallado dos veces por eso. La Fase 5 reescribe la web sobre
+        #    rosbridge y ahí se unifica a UNO — pero no antes de que el nuevo
+        #    esté probado de extremo a extremo.
+        self.create_subscription(
+            Empty, '/rvr/emergency_stop', self._cb_parada_emergencia,
             qos_estop, callback_group=g_cmd,
         )
 

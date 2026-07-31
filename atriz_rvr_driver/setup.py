@@ -54,6 +54,10 @@ setup(
         'console_scripts': [
             # ros2 run atriz_rvr_driver rvr_driver_node
             'rvr_driver_node = atriz_rvr_driver.rvr_driver_node:main',
+            # Lo arranca nav2.launch.py: cancela los objetivos de Nav2 cuando se
+            # pulsa la parada de emergencia. Va aquí y no en el bringup porque
+            # este paquete es Python; el bringup es ament_cmake.
+            'cancelar_nav2 = atriz_rvr_driver.cancelar_nav2:main',
         ],
     },
 )

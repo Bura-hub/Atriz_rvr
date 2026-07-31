@@ -173,6 +173,21 @@ def generate_launch_description() -> LaunchDescription:
              parameters=[{'use_sim_time': sim,
                           'autostart': LaunchConfiguration('autostart'),
                           'node_names': NODOS_CICLO_VIDA}]),
+
+        # 🔴 Cancela los objetivos de Nav2 cuando se pulsa la parada de
+        # emergencia. NO es redundante con la parada del driver:
+        #
+        #   el driver PARA el robot (bandera + drive_stop), y eso funciona.
+        #   Pero `/release_emergency_stop` solo baja la bandera, y si el objetivo
+        #   de Nav2 sigue vivo —lo estará: el progress checker está relajado a
+        #   0.25 m en 15 s— el controlador nunca dejó de publicar. Al liberar,
+        #   EL ROBOT ARRANCA SOLO.
+        #
+        # Va aquí y no en robot.launch.py a propósito: sin Nav2 no hay nada que
+        # cancelar, y el driver tiene que funcionar sin Nav2.
+        Node(package='atriz_rvr_driver', executable='cancelar_nav2',
+             name='cancelar_nav2', namespace=ns, output='screen',
+             parameters=[{'use_sim_time': sim}]),
     ]
 
     return LaunchDescription([arg_params, arg_ns, arg_sim, arg_autostart] + nodos)

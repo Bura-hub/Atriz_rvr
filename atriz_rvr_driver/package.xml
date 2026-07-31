@@ -34,6 +34,9 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>atriz_rvr_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <!-- action_msgs/CancelGoal: lo usa cancelar_nav2 para cortar
+       los objetivos de Nav2 en una parada de emergencia. -->
+  <exec_depend>action_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>

@@ -1,0 +1,141 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOCALIZACIÓN con mapa conocido: map_server + AMCL  (Fase 4c)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Manual, cap. 14. Se arranca con `localizacion.launch.py`, que es **excluyente**
+# con `slam.launch.py`.
+#
+# 🔴🔴 AMCL Y slam_toolbox PUBLICAN LOS DOS `map -> odom`. NUNCA A LA VEZ.
+#
+#   Dos nodos publicando el mismo transform parten el árbol TF **sin dar ningún
+#   error**: TF se queda con el último que llegue y la pose salta entre las dos
+#   estimaciones. Es el mismo fallo que costó la Fase 4 entera (manual, cap. 9.4),
+#   y por eso `localizacion.launch.py` comprueba que slam_toolbox no esté vivo y
+#   se niega a arrancar si lo está.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# POR QUÉ ESTA FASE EXISTE — es lo que hace viable la flota
+# ═══════════════════════════════════════════════════════════════════════════════
+# Con SLAM, cada uno de los 16 robots construye su propio mapa: 16 mapas distintos
+# del mismo laboratorio, 16 veces el coste de CPU, y ningún marco común para que
+# la web diga «ve a la mesa 3».
+#
+# Con AMCL se mapea **una vez**, el `.pgm` se reparte con la imagen dorada, y los
+# 16 robots se localizan sobre él. Mismo marco `map` para todos.
+#
+# 🔴 Y NO ES POR CPU — eso resultó ser al revés. Medido el 2026-07-31 con el mismo
+#    método (muestreo de /proc, robot quieto), que es lo que hace la comparación
+#    honesta:
+#
+#      slam_toolbox            4.8 %  ·  49.1 MB
+#      amcl + map_server       8.8 %  ·  85.9 MB    <- CASI EL DOBLE
+#
+#    Aquí ponía «se espera menos, pero se mide, no se supone». Menos mal: la
+#    suposición era falsa.
+#
+#    **El argumento para AMCL es el MARCO COMPARTIDO, no el coste.** 16 robots
+#    sobre un mismo `map` es lo que permite que la web diga «ve a la mesa 3» y
+#    que todos entiendan lo mismo. Con 16 SLAM hay 16 mapas del mismo sitio, cada
+#    uno con su origen, y ninguna coordenada es común.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# LO QUE NO SE COPIA DEL EJEMPLO DE NAV2
+# ═══════════════════════════════════════════════════════════════════════════════
+# Igual que en `nav2_atriz.yaml`: el ejemplo está hecho para un TurtleBot en
+# simulador. Aquí los valores salen de lo MEDIDO en este robot.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+map_server:
+  ros__parameters:
+    # `yaml_filename` lo pone el launch, para no clavar una ruta en el YAML.
+    topic_name: "map"
+    frame_id: "map"
+
+amcl:
+  ros__parameters:
+    # ── Marcos ────────────────────────────────────────────────────────────────
+    # 🔴 base_footprint, NO base_link. Es lo que publica el driver y lo que pide
+    # REP-105. Poner base_link aquí repetiría el fallo de la Fase 4.
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    global_frame_id: "map"
+    scan_topic: "scan"
+
+    # ── El LIDAR, con los valores MEDIDOS del X2 ──────────────────────────────
+    laser_max_range: 8.0        # el alcance útil real, no los 12 de la ficha
+    laser_min_range: 0.1        # `range_min` del driver
+    # 60 de los ~260 puntos que da el X2. Más beams no mejoran la localización en
+    # una sala pequeña y sí cuestan CPU en el Pi 4, que ya lleva Nav2 al 58 %.
+    max_beams: 60
+    # `likelihood_field` en vez de `beam`: mucho más barato y es lo estándar para
+    # un LIDAR 2D en interiores.
+    laser_model_type: "likelihood_field"
+    sigma_hit: 0.2
+    z_hit: 0.5
+    z_max: 0.05
+    z_rand: 0.5
+    z_short: 0.05
+    lambda_short: 0.1
+    laser_likelihood_max_dist: 2.0
+
+    # ── El modelo de movimiento ───────────────────────────────────────────────
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    # ⚠️ alphas: cuánto RUIDO se supone en la odometría. El ejemplo trae 0.2, que
+    # es razonable para un robot con encoders de rueda y patinaje.
+    #
+    # Esta odometría es mejor que eso: la da el locator interno del RVR y acierta
+    # con **1 mm en 1 m** (manual, cap. 10). 0.1 refleja esa confianza sin
+    # llegar a fiarse del todo — bajarlos más haría que AMCL tardara en corregir
+    # cuando la odometría sí se equivoque.
+    #
+    # 📝 SON UN PUNTO DE PARTIDA RAZONADO, NO MEDIDOS. Si la pose salta o se
+    #    queda pegada, es el primer sitio donde mirar.
+    alpha1: 0.1     # ruido de rotación por rotación
+    alpha2: 0.1     # ruido de rotación por traslación
+    alpha3: 0.1     # ruido de traslación por traslación
+    alpha4: 0.1     # ruido de traslación por rotación
+    alpha5: 0.1     # solo lo usa el modelo omnidireccional; aquí no aplica
+
+    # ── Partículas ────────────────────────────────────────────────────────────
+    # El ejemplo trae 500/2000. Aquí menos, y por una razón medida: el
+    # laboratorio es una sala pequeña (los mapas hechos van de 1.5 a 7.1 m² de
+    # espacio libre), así que la nube converge enseguida y no hace falta poblarla
+    # tanto. Y el Pi 4 ya lleva Nav2 al ~58 % de un núcleo.
+    min_particles: 200
+    max_particles: 1500
+    pf_err: 0.05
+    pf_z: 0.99
+    recovery_alpha_slow: 0.001
+    recovery_alpha_fast: 0.1
+
+    # ── Cuándo actualizar ─────────────────────────────────────────────────────
+    # 0.15 m y 0.15 rad, contra los 0.25/0.20 del ejemplo. Escalado al robot: con
+    # 22 cm de ancho, esperar a 25 cm para corregir es esperar más de un cuerpo.
+    update_min_d: 0.15
+    update_min_a: 0.15
+    resample_interval: 1
+    transform_tolerance: 0.2    # el mismo que el resto del stack
+
+    # ── La pose inicial ───────────────────────────────────────────────────────
+    # 🔴 AMCL NO SABE DÓNDE ESTÁ EL ROBOT AL ARRANCAR. Sin pose inicial la nube
+    # de partículas está repartida y la localización puede converger a un sitio
+    # equivocado — en una sala con simetrías, casi seguro.
+    #
+    # Con `set_initial_pose: true` se le dice al arrancar. 0,0,0 es el origen del
+    # mapa, que es donde estaba el robot cuando se mapeó.
+    #
+    # ⏳ PARA LA FLOTA: cada robot arrancará en su sitio, así que esto tendrá que
+    #    venir por robot — del `robot_id.txt` o de un parámetro del launch. Sin
+    #    resolver todavía (FLOTA.md).
+    set_initial_pose: true
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
+    always_reset_initial_pose: false
+    first_map_only: false
+    save_pose_rate: 0.5
+
+    # `tf_broadcast: true` = AMCL publica `map -> odom`. Es lo que hace falta,
+    # y es exactamente por lo que no puede convivir con slam_toolbox.
+    tf_broadcast: true

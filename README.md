@@ -1,5 +1,101 @@
 # Sphero RVR ROS Driver - Atriz
 
+> # 🔴 ESTE README DESCRIBE EL SISTEMA VIEJO (ROS 1 / Noetic)
+>
+> Estás en la rama **`ros2`**, y casi todo lo que hay debajo de este aviso está **obsoleto**:
+> habla de `catkin`, de `/cmd_degrees` y de 5 servicios cuando el driver tiene **18**.
+> Se conserva porque documenta el sistema Noetic, que sigue siendo la ruta de vuelta atrás.
+>
+> **Lo que vale hoy está en el bloque de aquí abajo**, y el detalle completo —con el porqué de
+> cada decisión y lo que se midió— en el repositorio privado `Atriz_migracion_ros2`:
+> `02_manual/MANUAL_ATRIZ_ROS2.md`.
+
+---
+
+## ⚡ Referencia ROS 2 Jazzy — lo que de verdad corre (2026-07-31)
+
+### Arrancar
+
+**No hay que arrancar nada:** `atriz-robot.service` levanta el robot al encender.
+
+```bash
+systemctl status atriz-robot
+atriz-escaneo on        # 🔴 SIN ESTO EL ROBOT NO CONDUCE (ver abajo)
+```
+
+A mano, parando antes el servicio (`sudo systemctl stop atriz-robot`):
+
+```bash
+ros2 launch atriz_rvr_bringup robot.launch.py        # driver + URDF + LIDAR + collision_monitor
+ros2 launch atriz_rvr_bringup slam.launch.py         # mapear
+ros2 launch atriz_rvr_bringup localizacion.launch.py # localizar sobre un mapa guardado (EXCLUYENTE con slam)
+ros2 launch atriz_rvr_bringup nav2.launch.py         # navegar
+```
+
+Argumentos de `robot.launch.py`: `lidar`, `collision_monitor`, `color_detection` (def. **false**,
+enciende un LED bajo el chasis), `publicar_inclinacion` (def. **false**), `keepalive_period`,
+`silence_timeout`.
+
+### 🔴 Al arrancar el robot NO CONDUCE, y no está roto
+
+El barrido del lidar arranca **apagado** a propósito: si no, el X2 giraría a 11.8 Hz de forma
+permanente en los 16 robots, se usen o no. Sin `/scan` el `collision_monitor` **bloquea el
+movimiento** — medido: **0.0 cm** con el barrido apagado contra **9.9 cm** con él encendido,
+mismo comando.
+
+```bash
+atriz-escaneo on | off | estado
+```
+
+### Topics
+
+| Topic | Tipo | QoS | Nota |
+|---|---|---|---|
+| `/odom` | `nav_msgs/Odometry` | **BEST_EFFORT** | 16.5 Hz · `odom → base_footprint` |
+| `/imu` | `sensor_msgs/Imu` | **BEST_EFFORT** | 16.5 Hz |
+| `/color` | `atriz_rvr_msgs/Color` | **BEST_EFFORT** | `[0,0,0]` salvo `color_detection:=true` |
+| `/battery_state` | `sensor_msgs/BatteryState` | | cada 30 s · `percentage` es **0–1**, no % |
+| `/scan` | `sensor_msgs/LaserScan` | **BEST_EFFORT** | 10.1 Hz · 0 si el barrido está apagado |
+| `/cmd_vel` | `geometry_msgs/Twist` | | 🔴 **NO publiques aquí**: salta la seguridad |
+| `/cmd_vel_raw` | `geometry_msgs/Twist` | | ✅ **la entrada correcta**, pasa por el monitor |
+
+🔴 **`/odom`, `/imu`, `/color` y `/scan` son BEST_EFFORT.** Un suscriptor con el RELIABLE por
+defecto de `rclpy` **no recibe nada**, sin error ni aviso. Y `ros2 topic hz` no puede medirlos.
+
+### Los 18 servicios
+
+```
+release_emergency_stop     set_led_rgb              set_multiple_leds
+set_leds                   get_rgbc_sensor_values   get_encoders
+get_system_info            get_control_state        trigger_led_event
+send_infrared_message      set_ir_mode              set_ir_evading
+set_drive_parameters       set_pos_and_yaw          move_timed
+raw_motors                 move_to_pose             move_to_pos_and_yaw
+```
+
+⚠️ Los de **movimiento** (`move_timed`, `raw_motors`, `move_to_*`) hablan al RVR por el puerto
+serie: **se saltan el `collision_monitor` y el watchdog**. Sí respetan la parada de emergencia.
+Y `raw_motors` **no tiene corte automático**.
+
+📝 `ros2 service list` **no es autoritativo** — omitió 1 de los 18. Usa un cliente.
+
+### Parada de emergencia
+
+```bash
+ros2 topic pub --once /rvr/emergency_stop std_msgs/msg/Empty "{}"   # el que usa la web
+ros2 service call /release_emergency_stop std_srvs/srv/Empty
+```
+
+Escucha **tres** nombres (`emergency_stop`, `is_emergency_stop`, `/rvr/emergency_stop`) con QoS
+**RELIABLE + VOLATILE**. Ha fallado cuatro veces en la historia del proyecto, siempre en
+silencio: nombre, namespace, QoS, y no cancelar Nav2.
+
+✅ Desde el 2026-07-31 el nodo **`cancelar_nav2`** (lo arranca `nav2.launch.py`) cancela los
+objetivos de Nav2 al pulsarla. Sin él, **liberar** la parada devolvía el robot a navegar: medido
+**34.7 cm** sin el arreglo contra **0.0 cm** con él.
+
+---
+
 Este repositorio contiene el código necesario para operar el robot Sphero RVR utilizando ROS (Robot Operating System). Está diseñado como parte de un proyecto para la Universidad de Nariño, facilitando la integración y control del Sphero RVR en entornos de investigación y desarrollo.
 
 ## 🚀 Características Principales

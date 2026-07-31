@@ -153,8 +153,13 @@ def euler_desde_cuaternion(q: Quaternion) -> tuple[float, float, float]:
     """(roll, pitch, yaw) en radianes desde un cuaternión.
 
     Hace falta para poder RESTAR el yaw del arranque sin perder el roll y el
-    pitch — que en este robot no son cero: está inclinado ~8°, confirmado por
-    tres vías independientes.
+    pitch, que en este robot no son cero: la IMU reporta ~8° de inclinación.
+
+    🔴 Eso NO significa que el robot esté inclinado. Se decía «confirmado por
+    tres vías independientes» y no lo eran —TF, cuaternión y acelerómetro salen
+    todos de la misma IMU—, y el 2026-07-31 se midió con una regla que el disco
+    del LIDAR está a la misma altura en los cuatro puntos: el robot está
+    horizontal. Ver `_h_quaternion` y el manual, cap. 13.
     """
     x, y, z, w = q.x, q.y, q.z, q.w
     roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
@@ -834,8 +839,31 @@ class RvrDriverNode(Node):
             # constante: el origen del yaw depende de cuánto se haya movido el
             # robot desde que se encendió, y eso no se puede saber de antemano.
             #
-            # Se conservan roll y pitch: el robot está inclinado ~8° y esa
-            # inclinación es real, no un error de referencia.
+            # 🔴 SE CONSERVAN roll y pitch, PERO LA PREMISA CAMBIÓ (2026-07-31).
+            #
+            # Aquí ponía «el robot está inclinado ~8° y esa inclinación es real».
+            # Se apoyaba en tres confirmaciones supuestamente independientes:
+            # el árbol TF, el Roll de la IMU y el acelerómetro.
+            #
+            # NO SON INDEPENDIENTES. El TF toma su rotación de esta misma línea,
+            # esta línea sale del cuaternión del RVR, el cuaternión lo calcula la
+            # IMU, y el acelerómetro es el MISMO chip. Es UNA sola fuente contada
+            # tres veces.
+            #
+            # Y el 2026-07-31 el usuario midió con una regla que el disco del
+            # LIDAR está a la MISMA altura en los cuatro puntos —delante, detrás,
+            # izquierda, derecha— respecto al suelo. Es decir: **el robot está
+            # físicamente horizontal**, y los ~8° son un desvío de la IMU.
+            #
+            # ⏳ CONSECUENCIA, SIN APLICAR TODAVÍA: esto publica un roll falso de
+            #    ~8° en `/odom` y en TF. Un roll en `odom -> base_footprint`
+            #    inclina el plano del láser, y comprime los alcances por cos(8°) =
+            #    0.990: un 1 %, ~1 cm por metro. Cabe dentro de la deriva medida
+            #    de SLAM (1-3 cm), así que **podría ser parte de ella**.
+            #
+            #    La corrección sería `roll = pitch = 0.0`. NO se aplica sin
+            #    medirla: hay que repetir la caracterización de deriva con y sin,
+            #    y comparar. Manual, cap. 13.
             if self._yaw_offset is None:
                 self._yaw_offset = yaw
                 self.get_logger().info(

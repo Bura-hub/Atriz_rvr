@@ -64,60 +64,76 @@
           usuario dio la medida al probar un paso estrecho.
 
        Consecuencias, que no son cosméticas:
-         media longitud  0.09 m  (antes 0.109)  -> fija dónde para el
-                                 collision_monitor: hueco ≈ radius − 0.09
-         media anchura   0.11 m  (antes 0.0925)
-         radio INSCRITO      0.09 m
-         radio CIRCUNSCRITO  0.142 m = √(0.09² + 0.11²)
+         media longitud  0.091 m  -> fija dónde para el collision_monitor:
+                                     hueco ≈ radius − 0.091
+         media anchura   0.1085 m
+         radio INSCRITO      0.091 m
+         radio CIRCUNSCRITO  0.142 m = √(0.091² + 0.1085²)
                              -> ES EL QUE VA EN `robot_radius` DE NAV2.
                                 Estuvo en 0.11, que no es ninguno de los dos.
 
-       📝 base_height sigue SIN MEDIR (ficha del RVR). Es el sospechoso número
-          uno si el mapa sale inclinado (ver el bloque del LIDAR, abajo).
+       ✅ `base_height` 0.070 también MEDIDO (2026-07-31): del suelo a la tapa
+          del RVR. La ficha decía 0.114 — **4.4 cm de más**. Sobre esa tapa hay
+          además un piso de montaje de 4.6 cm donde va el LIDAR (ver abajo).
 
-       ⚠️ SIN RESOLVER: `wheel_separation` 0.150 más `wheel_width` 0.025 dan
-          17.5 cm de oruga a oruga, pero el robot mide 22 cm. O la separación
-          está corta o el cuerpo sobresale de las orugas. Es solo visual —la
-          odometría la da el locator del RVR, no estas cotas— pero está sin
-          comprobar. -->
-  <xacro:property name="base_length" value="0.18"/>    <!-- X, hacia delante  ✅ medido -->
-  <xacro:property name="base_width"  value="0.22"/>    <!-- Y, hacia la izquierda ✅ medido -->
-  <xacro:property name="base_height" value="0.114"/>   <!-- Z  📝 ficha, sin medir -->
+       ✅ RESUELTO el desajuste de las orugas: son de 3.5 cm de ancho (no 2.5) y
+          van de borde interno a borde interno a 14.8 cm, o sea 18.3 entre
+          centros. Comprobación: 14.8 + 2×3.5 = 21.8 ≈ 21.7 medidos de lado a
+          lado. Las orugas ocupan TODO el ancho del robot. -->
+  <xacro:property name="base_length" value="0.182"/>   <!-- X, frente-atrás   ✅ medido -->
+  <xacro:property name="base_width"  value="0.217"/>   <!-- Y, lado a lado    ✅ medido -->
+  <xacro:property name="base_height" value="0.070"/>   <!-- Z, suelo a la tapa ✅ medido -->
 
   <!-- Ruedas/orugas. 📝 NO MEDIDO. El RVR lleva orugas de goma sobre ruedas, así
        que "radio" es una aproximación útil para visualizar y para que
        base_footprint quede a la altura correcta.
        IMPORTANTE: estos valores NO se usan para calcular odometría — el RVR la
        entrega ya hecha por su locator interno. Son geométricos. -->
-  <xacro:property name="wheel_radius"    value="0.032"/>
-  <xacro:property name="wheel_width"     value="0.025"/>
-  <xacro:property name="wheel_separation" value="0.150"/>  <!-- entre centros, eje Y -->
+  <xacro:property name="wheel_radius"    value="0.032"/>   <!-- 📝 SIN MEDIR, ficha -->
+  <xacro:property name="wheel_width"     value="0.035"/>   <!-- ✅ medido 2026-07-31 -->
+  <!-- ✅ 0.183 = 0.148 (borde interno a borde interno) + 0.035 (un ancho de
+       oruga) = distancia entre CENTROS. Medido el 2026-07-31.
+       Cuadra: 0.148 + 2×0.035 = 0.218 ≈ 0.217 de ancho total. -->
+  <xacro:property name="wheel_separation" value="0.183"/>  <!-- entre centros, eje Y -->
 
   <!-- ══ POSICIÓN DEL LIDAR ══════════════════════════════════════════════════
-       ✅ CENTRADO confirmado por el usuario el 2026-07-30: el X2 está en el
-          centro del RVR, así que x=0 e y=0.
-       🟡 ALTURA DERIVADA, no medida directamente. El usuario midió **4 cm de
-          hueco entre la tapa del RVR y la base del LIDAR**. De ahí:
+       ✅ TODO MEDIDO el 2026-07-31, con el robot apagado sobre suelo plano.
 
-              base_height        0.114   alto del RVR (ESPECIFICACIÓN, sin medir)
-            + laser_gap          0.040   hueco medido por el usuario  ✅
-            + x2_height/2        0.0205  del apoyo al centro del disco
-            ─────────────────────────
-              laser_z            0.1745  altura del plano de barrido sobre el suelo
+           suelo → tapa del RVR                 7.0 cm   ✅
+           tapa  → base del LIDAR (piso extra)  4.6 cm   ✅
+           base del LIDAR → centro del disco    3.9 cm   (= 15.5 − 11.6)
+           ────────────────────────────────────────────
+           suelo → CENTRO DEL DISCO GIRATORIO  15.5 cm   ✅  <- `laser_z`
+           suelo → extremo superior            16.5 cm   ✅  (comprobación)
 
-       El término dudoso es `base_height`: viene de la ficha del RVR y NADIE lo
-       ha medido en esta unidad. Si el mapa sale inclinado, es el primer
-       sospechoso — mide del SUELO al centro del disco y pon el resultado
-       directamente en `laser_z`, ignorando la suma.
+       Comprobación cruzada: 7.0 + 4.6 + 5.0 (alto del LIDAR) = 16.6 ≈ 16.5. ✅
 
-       Para comparar: el valor que arrastraba el proyecto era 0.10, una
-       suposición declarada en GUIA_COMPLETA_LIDAR.md. Se queda **7.5 cm corto**.
+       🔴 CORREGIDO: `laser_z` estuvo en 0.1745 hasta esta fecha, DERIVADO de
+          `base_height` 0.114 (ficha, mal: son 0.070) + 4.0 cm de hueco + medio
+          alto del X2. El plano de barrido está **2 cm MÁS BAJO** de lo que decía
+          el modelo.
+
+          Consecuencia práctica: el robot ve 2 cm más abajo de lo documentado. El
+          límite «por debajo de X el LIDAR no ve nada» pasa de 17.45 a **15.5 cm**.
+
+          📝 Un error en `laser_z` es una traslación pura en Z: NO inclina nada y
+             no afecta a SLAM 2D ni a Nav2, que trabajan en el plano. Afecta a la
+             visualización y a ese límite de altura.
+
+       ✅ CENTRADO y NIVELADO, confirmado por el usuario:
+          · x = 0, y = 0 (2026-07-30)
+          · el disco está a la MISMA altura en los cuatro puntos —delante, detrás,
+            izquierda y derecha— (2026-07-31). Es decir: **el robot está físicamente
+            horizontal**, y la inclinación de ~8° que reporta la IMU NO es real.
+            Ver la cabecera de `rvr_driver_node.py` y el manual, cap. 13.
        ═══════════════════════════════════════════════════════════════════════ -->
   <xacro:property name="laser_x"   value="0.0"/>
   <xacro:property name="laser_y"   value="0.0"/>
-  <xacro:property name="laser_gap" value="0.040"/>   <!-- ✅ medido 2026-07-30 -->
-  <xacro:property name="x2_height" value="0.041"/>   <!-- alto del X2, de su ficha -->
-  <xacro:property name="laser_z"   value="${base_height + laser_gap + x2_height/2}"/>
+  <xacro:property name="laser_gap" value="0.046"/>   <!-- tapa → base del LIDAR ✅ -->
+  <xacro:property name="x2_height" value="0.050"/>   <!-- alto del X2 ✅ medido -->
+  <!-- 🔴 VALOR DIRECTO, no la suma. La suma daba 0.1745 con una ficha
+       equivocada; esto está medido con una regla desde el suelo. -->
+  <xacro:property name="laser_z"   value="0.155"/>
 
   <!-- IMU. Va dentro del RVR, en su placa. 📝 NO MEDIDO; se coloca en el centro
        geométrico, que es una aproximación razonable y no afecta a la odometría

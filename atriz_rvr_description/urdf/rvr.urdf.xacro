@@ -84,12 +84,19 @@
   <xacro:property name="base_width"  value="0.217"/>   <!-- Y, lado a lado    ✅ medido -->
   <xacro:property name="base_height" value="0.070"/>   <!-- Z, suelo a la tapa ✅ medido -->
 
-  <!-- Ruedas/orugas. 📝 NO MEDIDO. El RVR lleva orugas de goma sobre ruedas, así
-       que "radio" es una aproximación útil para visualizar y para que
-       base_footprint quede a la altura correcta.
+  <!-- Ruedas/orugas. ✅ TODO MEDIDO el 2026-07-31. El RVR lleva orugas de goma
+       sobre ruedas, así que "radio" es la distancia del suelo al centro del eje.
+
+       ✅ COMPROBACIÓN QUE CIERRA EL MODELO:
+            wheel_radius 0.035 → oruga de 0.070 de diámetro
+            base_height             = 0.070
+          Son iguales, así que la caja del chasis va **del suelo a 7 cm**, que es
+          exactamente como se ve el RVR: las orugas ocupan todo el alto del
+          lateral. El modelo cuadra por dos caminos distintos.
+
        IMPORTANTE: estos valores NO se usan para calcular odometría — el RVR la
        entrega ya hecha por su locator interno. Son geométricos. -->
-  <xacro:property name="wheel_radius"    value="0.032"/>   <!-- 📝 SIN MEDIR, ficha -->
+  <xacro:property name="wheel_radius"    value="0.035"/>   <!-- ✅ medido 2026-07-31 -->
   <xacro:property name="wheel_width"     value="0.035"/>   <!-- ✅ medido 2026-07-31 -->
   <!-- ✅ 0.183 = 0.148 (borde interno a borde interno) + 0.035 (un ancho de
        oruga) = distancia entre CENTROS. Medido el 2026-07-31.

@@ -65,10 +65,28 @@ controller_server:
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
 
+    # 🔴 RELAJADO el 2026-07-31, y la razón es la capa de seguridad.
+    #
+    # Con los valores de fábrica —0.5 m en 10 s, o sea 5 cm/s de media— el
+    # `follow_path` ABORTÓ rodeando un obstáculo:
+    #
+    #   [controller_server] [ERROR] Failed to make progress
+    #   [controller_server] [WARN]  [follow_path] [ActionServer] Aborting handle.
+    #
+    # No estaba atascado: el `collision_monitor` lo había frenado al 40 % y luego
+    # `approach` bajó más la velocidad al pasar junto al obstáculo. El árbol de
+    # comportamiento replanificó y el objetivo acabó en SUCCEEDED, pero en un paso
+    # más estrecho podría no recuperarse.
+    #
+    # Con una capa de seguridad delante, **ir despacio ya no es prueba de estar
+    # atascado**, que es lo único que este comprobador debería detectar. Un robot
+    # de verdad atascado se mueve 0 m y lo sigue disparando igual.
+    #
+    #   0.25 m en 15 s = 1.7 cm/s   (antes 5.0 cm/s)
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.5
-      movement_time_allowance: 10.0
+      required_movement_radius: 0.25
+      movement_time_allowance: 15.0
 
     general_goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"

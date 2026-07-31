@@ -1,0 +1,291 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Nav2 para el Sphero RVR de Atriz
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Creado el 2026-07-31. Base: los ficheros de ejemplo de Nav2, con **todos** los
+# valores del robot sustituidos por los MEDIDOS en este RVR.
+#
+# 🔴 NO se copian los valores del TurtleBot. El ejemplo oficial viene con
+#    `robot_radius: 0.22`, `max_vel_x: 0.26` y una resolución de 0.05 que es la
+#    única que coincide por casualidad. Un radio del doble del real hace que el
+#    robot se niegue a pasar por huecos por los que cabe de sobra.
+#
+# LO MEDIDO DE ESTE ROBOT — y dónde está la evidencia:
+#
+#   velocidad lineal máx.   0.40 m/s   meseta al 100 %, alcanzada en ~0.5 s
+#   velocidad angular máx.  2.0 rad/s  99-102 % del comando en 4 velocidades
+#   rampa de aceleración    ~0.5 s     de 0 a la velocidad de crucero
+#   tamaño del robot        22 x 18 cm  -> radio circunscrito 0.11 m
+#   LIDAR                   8 m útiles, 10 Hz, 260 puntos, altura 17.5 cm
+#   /odom                   16.7 Hz, deriva de 1.0-2.7 cm en recorridos de 1.6-2.4 m
+#   CPU libre               el stack (driver+LIDAR+SLAM) usa ~30 % de UN núcleo
+#                           en un Pi 4 de cuatro
+#   -> 15_velocidad_odom.txt · 14_deriva_slam_caracterizada.txt · manual cap. 9 y 10
+#
+# ⚠️ DOS COSAS QUE PUEDEN FALLAR EN SILENCIO, y hay que comprobar al arrancar:
+#
+#   1. El QoS de `/scan`. El driver del LIDAR publica BEST_EFFORT. Si la capa de
+#      obstáculos se suscribiera RELIABLE, DDS no emparejaría y **el costmap se
+#      quedaría vacío sin dar ningún error**: el robot navegaría creyendo que no
+#      hay nada delante. Comprobar con `ros2 topic info /scan --verbose`.
+#
+#   2. Nav2 son **nodos de ciclo de vida**, igual que slam_toolbox. Arrancan en
+#      `unconfigured` y no hacen nada hasta que el `lifecycle_manager` los
+#      activa. `ros2 node list` los muestra igual. Ver manual, cap. 9.2.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    # 🔴 base_footprint, NO base_link. Es la raíz del URDF proyectada al suelo, y
+    # el frame que publica el driver. Poner base_link parte el árbol TF en dos y
+    # falla EN SILENCIO — pasó en la Fase 4. Manual, cap. 9.4.
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    # Sin `default_nav_to_pose_bt_xml`: se usa el árbol por defecto de Nav2, que
+    # es el correcto para empezar. Personalizarlo antes de tener el robot
+    # navegando sería optimizar a ciegas.
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 10.0
+    # 10 Hz y no 20: es el ritmo de `/scan`, así que a más frecuencia el
+    # controlador recalcularía sobre datos que no han cambiado, gastando CPU del
+    # Pi 4 para nada.
+
+    # Umbrales por debajo de los cuales se considera que el robot está parado.
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5      # diferencial: no hay velocidad lateral
+    min_theta_velocity_threshold: 0.001
+
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+
+    general_goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      stateful: True
+      # 10 cm y 0.25 rad (14°). Ajustado a lo que este robot puede repetir: la
+      # deriva medida de SLAM es de 1-3 cm, así que pedir menos de 10 cm sería
+      # pedirle precisión que la localización no garantiza.
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.25
+
+    FollowPath:
+      # Regulated Pure Pursuit: es lo que el plan eligió para un diferencial, y
+      # es mucho más barato en CPU que MPPI o DWB. En un Pi 4 que ya lleva el
+      # driver, el LIDAR y SLAM, eso importa.
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+
+      # 🔴 0.25 m/s para empezar, aunque el robot LLEGA A 0.40 (medido, meseta al
+      # 100 %). Se arranca conservador a propósito: es la primera vez que este
+      # robot navega solo, y no tiene evitación reactiva más allá del costmap.
+      # Subirlo a 0.40 cuando haya navegado sin incidentes — el robot da de sí.
+      desired_linear_vel: 0.25
+      max_linear_accel: 0.8          # de la rampa medida: 0.40 m/s en ~0.5 s
+      max_linear_decel: 0.8
+
+      # Distancia a la que "mira" sobre el camino. Escalada al tamaño del robot:
+      # con 22 cm de largo, mirar a 1.5 m (el valor del TurtleBot) haría que
+      # cortara las curvas.
+      lookahead_dist: 0.4
+      min_lookahead_dist: 0.2
+      max_lookahead_dist: 0.7
+      use_velocity_scaled_lookahead_dist: true
+      lookahead_time: 1.5
+
+      transform_tolerance: 0.2
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.0
+
+      # Frena en las curvas cerradas. Con un robot pequeño y ágil no es
+      # estrictamente necesario, pero hace la navegación mucho más legible para
+      # un estudiante que la está mirando.
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 0.5
+      regulated_linear_scaling_min_speed: 0.10
+
+      # Giro sobre el eje cuando el objetivo está muy desalineado. El RVR es
+      # diferencial y gira sobre su centro sin problema: medido, sigue el comando
+      # angular al 99-102 % hasta 2.0 rad/s.
+      use_rotate_to_heading: true
+      rotate_to_heading_min_angle: 0.785      # 45°
+      rotate_to_heading_angular_vel: 1.0      # la mitad del máximo medido
+      max_angular_accel: 2.0
+
+      allow_reversing: false
+      max_robot_pose_search_dist: 10.0
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      # NavFn: el planificador clásico y el más barato. Suficiente para un
+      # laboratorio con obstáculos estáticos. Smac se plantea si hiciera falta
+      # respetar la cinemática, y este robot puede girar sobre su eje, así que
+      # no la necesita.
+      plugin: "nav2_navfn_planner::NavfnPlanner"
+      tolerance: 0.25
+      use_astar: false
+      allow_unknown: true
+
+behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait", "assisted_teleop"]
+    spin:
+      plugin: "nav2_behaviors::Spin"
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors::DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors::Wait"
+    assisted_teleop:
+      plugin: "nav2_behaviors::AssistedTeleop"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.2
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 2.0
+
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    scale_velocities: False
+    feedback: "OPEN_LOOP"
+    # Los máximos MEDIDOS de este robot, no los del ejemplo.
+    max_velocity: [0.40, 0.0, 2.0]     # [x, y, theta] — y=0: es diferencial
+    min_velocity: [-0.40, 0.0, -2.0]
+    max_accel: [0.8, 0.0, 2.0]
+    max_decel: [-0.8, 0.0, -2.0]
+    odom_topic: "odom"
+    odom_duration: 0.1
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COSTMAPS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint
+      rolling_window: true
+      # 3 x 3 m: el robot ve 8 m, pero mantener un costmap local mayor cuesta
+      # CPU y memoria sin aportar nada — el controlador solo mira el entorno
+      # inmediato. El planificador global usa el mapa completo.
+      width: 3
+      height: 3
+      # 5 cm, la misma resolución del mapa de SLAM. Coincidir evita reescalar.
+      resolution: 0.05
+
+      # 🔴 0.11 m = la mitad de la diagonal del RVR (22 x 18 cm). El ejemplo de
+      # Nav2 trae 0.22, que es el TurtleBot: el DOBLE. Con ese valor el robot se
+      # negaría a pasar por huecos por los que cabe de sobra.
+      robot_radius: 0.11
+
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          # 🔴 8.0 m, el alcance REAL del X2. Poner más haría que Nav2
+          # despejara como "libre" espacio que el sensor NUNCA midió: inventaría
+          # zonas despejadas, que para navegar es peor que no tener nada.
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        # Radio del robot + 14 cm de margen. Con el robot a 0.25 m/s y el LIDAR
+        # a 10 Hz, en un ciclo recorre 2.5 cm: el margen cubre eso de sobra.
+        inflation_radius: 0.25
+
+      always_send_full_costmap: True
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_footprint
+      robot_radius: 0.11
+      resolution: 0.05
+      track_unknown_space: true
+
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+        # 🔴 TRANSIENT_LOCAL porque `/map` se publica así (latched). Con el
+        # perfil por defecto, el costmap esperaría al siguiente mapa —hasta 5 s
+        # con `map_update_interval: 5.0`— o no lo recibiría nunca.
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 8.0
+          obstacle_min_range: 0.0
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.25
+
+      always_send_full_costmap: True
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Lo que NO está aquí, y por qué
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# `map_server` y `amcl` NO se configuran todavía. Para las primeras pruebas Nav2
+# se apoya en `slam_toolbox`, que ya publica `map -> odom` y está verificado
+# (deriva de 1-3 cm). Añadir localización con un mapa guardado es la Fase 4c, y
+# hasta entonces mezclarlas solo añade una fuente más de fallo silencioso: dos
+# nodos publicando `map -> odom` a la vez parten el árbol TF sin dar error.
+#
+# `collision_monitor` tampoco. Es la capa de seguridad que para el robot ante un
+# obstáculo cercano, y hace falta ANTES de dejar esto en manos de estudiantes —
+# pero configurarla sin haber visto navegar al robot sería adivinar sus umbrales.
+# Va justo después de la primera navegación con éxito.

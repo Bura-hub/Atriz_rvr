@@ -1870,22 +1870,54 @@ if __name__ == '__main__':
 # esto es trabajo de rclpy, NO de averiguar si el sensor responde: si un servicio
 # portado no funciona, el fallo está en el port y en ningún otro sitio.
 #
-# ── SERVICIOS (16) ────────────────────────────────────────────────────────────
-#   LEDs        set_led_rgb (SetLEDRGB) · set_multiple_leds (SetMultipleLEDs)
-#   Infrarrojos ir_mode (SetIRMode) · send_infrared_message (SendInfraredMessage)
-#               set_ir_evading (SetIREvading)
-#   Sensores    get_encoders (GetEncoders) · get_rgbc_sensor_values (GetRGBCSensorValues)
-#               battery_state (BatteryState) · enable_color (std_srvs/SetBool)
-#   Movimiento  raw_motors (RawMotors) · move_timed (MoveTimed)
-#               move_to_pose (MoveToPose) · move_to_pos_and_yaw (MoveToPosAndYaw)
-#   Estado      get_system_info (GetSystemInfo) · get_control_state (GetControlState)
-#   Config      set_drive_parameters (SetDriveParameters)
-#               configure_streaming (ConfigureStreaming) · start_streaming (StartStreaming)
-#   Odometría   reset_odom (std_srvs/Empty)
+# ── ✅ PORTADO EL 2026-07-31: 18 SERVICIOS ────────────────────────────────────
+#   De los 16 que esta lista daba por pendientes, se portaron 14 y se añadieron 4
+#   que no existían en ROS 1 (`set_leds`, `trigger_led_event`, `set_pos_and_yaw`,
+#   y `battery_state` pasó de servicio a TOPIC, que es mejor: la web no tiene que
+#   preguntar).
 #
-# ── TOPICS (4) ────────────────────────────────────────────────────────────────
-#   encoders (Encoder) · ambient_light (Float32)
-#   infrared_messages (InfraredMessage) · cmd_degrees (DegreesTwist)  ← entrada
+# ── 🔴 LO QUE SIGUE SIN ESTAR, Y NO ES CERO ───────────────────────────────────
+#
+#   SIN EQUIVALENTE — huecos de verdad:
+#     · `reset_odom` (std_srvs/Empty)      el driver resetea el locator AL ARRANCAR
+#                                          y no hay forma de volver a hacerlo en
+#                                          caliente. Para una sesión larga de
+#                                          laboratorio, esto se va a notar.
+#     · topic `ambient_light` (Float32)    el SDK tiene
+#                                          `get_ambient_light_sensor_value` y no se
+#                                          usa. El sensor está verificado.
+#     · topic `infrared_messages`          se puede ENVIAR IR (`send_infrared_message`)
+#       (InfraredMessage)                  pero NO RECIBIR. El tipo de mensaje ya
+#                                          está definido en atriz_rvr_msgs y no lo
+#                                          publica nadie.
+#     · topic `encoders` (Encoder)         existe el servicio `get_encoders`, así
+#                                          que hay acceso, pero no un flujo continuo.
+#
+#   DIFERIDOS A PROPÓSITO, con su razón:
+#     · `configure_streaming` / `start_streaming`  pueden romper la telemetría del
+#           propio driver: `_registrar_sensores` ya configura el streaming, y
+#           reconfigurarlo en caliente deja `/odom` mudo (es el mismo mecanismo por
+#           el que `enable_color_detection` no funciona una vez configurado).
+#     · `enable_color` (SetBool)  🔴 MEDIDO: NO PUEDE FUNCIONAR como servicio. Con
+#           el streaming ya configurado, `enable_color_detection` no hace nada —
+#           481 mensajes de /color, todos ceros, durante la llamada. Sustituido por
+#           el parámetro de launch `color_detection`, que se aplica ANTES.
+#     · `cmd_degrees` (DegreesTwist)  `/cmd_vel` en rad/s es el estándar de ROS
+#           (REP-103) y es lo que habla Nav2. Un segundo topic de entrada con otras
+#           unidades es una fuente de errores, no una comodidad.
+#     · `ir_messages` (String)  duplicado sin tipar de `infrared_messages`. Ver
+#           la decisión 1, más abajo.
+#
+# ── 📝 Y EL SDK OFRECE MUCHO MÁS QUE EL DRIVER DE ROS 1 ───────────────────────
+#   `SpheroRvrAsync` expone **94 métodos públicos**; este driver usa **27**.
+#   Entre lo que NO llega a ROS por ninguna vía hay cosas con uso real en un
+#   laboratorio: magnetómetro, temperatura, tensión de batería en voltios,
+#   notificaciones de **motor atascado** y **fallo de motor**, aviso de que el
+#   robot **va a dormirse**, lecturas IR robot-a-robot y paletas de color.
+#
+#   ⚠️ Así que «está todo lo del Sphero en ROS» es FALSO hoy. Lo que sí es cierto:
+#      está todo lo que el driver de ROS 1 exponía, menos los cuatro huecos de
+#      arriba, y con 4 piezas nuevas.
 #
 # ══════════════════════════════════════════════════════════════════════════════
 # LAS DOS DECISIONES DE DISEÑO, TOMADAS EL 2026-07-30

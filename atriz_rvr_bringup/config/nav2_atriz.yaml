@@ -85,11 +85,20 @@ controller_server:
       # driver, el LIDAR y SLAM, eso importa.
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
 
-      # 🔴 0.25 m/s para empezar, aunque el robot LLEGA A 0.40 (medido, meseta al
-      # 100 %). Se arranca conservador a propósito: es la primera vez que este
-      # robot navega solo, y no tiene evitación reactiva más allá del costmap.
-      # Subirlo a 0.40 cuando haya navegado sin incidentes — el robot da de sí.
-      desired_linear_vel: 0.25
+      # 0.40 m/s = el máximo real del robot (meseta medida al 100 %, fichero 16).
+      #
+      # Estuvo en 0.25 mientras no hubo evitación reactiva más allá del costmap.
+      # Se sube el 2026-07-31, con las tres condiciones cumplidas y medidas:
+      #   1. el robot navegó dos veces sin incidentes (cap. 11.7)
+      #   2. el `collision_monitor` está puesto y verificado (cap. 12)
+      #   3. y a 0.40 m/s la seguridad deja MÁS hueco que a 0.25 — 9.0 cm contra
+      #      8.0 —, porque `approach` empieza a frenar antes cuanto más rápido va.
+      #      Es el dato que quita el miedo a subirlo (cap. 12.4).
+      #
+      # 📝 El `lookahead_dist` se reescala solo: con
+      #    `use_velocity_scaled_lookahead_dist` y `lookahead_time: 1.5`, a 0.40 m/s
+      #    mira a 0.60 m en vez de a 0.375. No hay que tocarlo.
+      desired_linear_vel: 0.40
       max_linear_accel: 0.8          # de la rampa medida: 0.40 m/s en ~0.5 s
       max_linear_decel: 0.8
 

@@ -100,22 +100,34 @@ def generate_launch_description() -> LaunchDescription:
         description='Segundos sin telemetría del RVR antes de avisar e intentar '
                     'reanudar el streaming. 0 desactiva el detector.',
     )
-    # 🔬 Interruptor de MEDICIÓN, no de operación. El driver publica el roll y el
-    # pitch que reporta la IMU del RVR, que dan ~8° de inclinación. El 2026-07-31
-    # se midió con una regla que el robot está HORIZONTAL (manual, cap. 13), así
-    # que ese roll es un desvío del sensor y no una inclinación real.
+    # ✅ POR DEFECTO **FALSE** desde el 2026-07-31. El robot publica la
+    # orientación PLANA, que es la físicamente correcta.
     #
-    # Un roll en `odom -> base_footprint` inclina el plano del láser y comprime
-    # los alcances por cos(8°) = 0.990 — un 1 %, ~1 cm por metro. La deriva de
-    # SLAM medida es de 1-3 cm, así que PODRÍA ser parte de ella.
+    # 🔴 Y la razón NO es el efecto en la deriva de SLAM, que se midió y salió
+    #    de ~1 cm sin significación (p=0.142, n=6 por rama; manual 9.12d). Se
+    #    decidió NO perseguirlo: ~62 corridas y 5 h de robot para un efecto de
+    #    1 cm sobre una tolerancia de objetivo de 10.
     #
-    # Con false se publica la orientación plana. Existe para poder medir las dos
-    # y comparar; el valor por defecto NO se cambia sin esa medida.
+    #    La razón es que **la inclinación no existe**:
+    #      · el suelo está plano — medido con nivel, ≤ 0.40° en cuatro puntos
+    #      · el error del acelerómetro es FIJO EN EL MARCO DEL ROBOT: no gira
+    #        con él (accel.x −1.091 → −1.158 tras girar 177.8°)
+    #      · y |g| sale un 3.8 % corto (9.435 contra 9.807): está descalibrado
+    #
+    #    Publicar 6.9° de inclinación falsa en `odom -> base_footprint` es
+    #    publicar un dato que sabemos incorrecto, independientemente de que se
+    #    pueda o no medir su efecto. REP-105 espera ahí la pose del robot.
+    #
+    # ⚠️ Con `true` se recupera el comportamiento anterior. Hace falta si algún
+    #    día este robot trabaja en una superficie inclinada de verdad — pero
+    #    entonces habría que calibrar antes el acelerómetro, porque el que hay
+    #    no acierta ni el módulo.
     arg_inclinacion = DeclareLaunchArgument(
-        'publicar_inclinacion', default_value='true',
-        description='Publicar el roll y pitch de la IMU en /odom y TF. Con false '
-                    'se publican a cero. Es para MEDIR su efecto en la deriva de '
-                    'SLAM, no para usarlo a ciegas.',
+        'publicar_inclinacion', default_value='false',
+        description='Publicar el roll y pitch de la IMU en /odom y TF. Por '
+                    'defecto FALSE: la inclinación que reporta el RVR es un '
+                    'artefacto de su acelerómetro descalibrado, no una '
+                    'inclinación real (manual, cap. 13). Con true se recupera.',
     )
 
     # 🔴 Por defecto TRUE: la seguridad no se activa, se desactiva a propósito.

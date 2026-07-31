@@ -213,9 +213,11 @@ class RvrDriverNode(Node):
         # propósito (por ejemplo, para MEDIR de una vez el timeout real del RVR).
         self.declare_parameter('keepalive_period', PERIODO_KEEPALIVE_S)
         self.declare_parameter('silence_timeout', TIMEOUT_SILENCIO_S)
-        # 🔬 Interruptor para MEDIR si el roll de la IMU afecta a SLAM.
-        # Por defecto True = comportamiento de siempre. Ver `_h_quaternion`.
-        self.declare_parameter('publicar_inclinacion', True)
+        # ✅ Por defecto **False** desde el 2026-07-31: se publica la
+        # orientación PLANA, que es la físicamente correcta. La inclinación que
+        # reporta el RVR es un artefacto de su acelerómetro, no del robot.
+        # Ver `_h_quaternion` y el manual, cap. 13.
+        self.declare_parameter('publicar_inclinacion', False)
 
         p = self.get_parameter
         self._puerto = p('serial_port').value

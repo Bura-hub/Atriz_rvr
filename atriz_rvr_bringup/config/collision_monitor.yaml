@@ -33,8 +33,19 @@
 # DE DÓNDE SALEN LOS NÚMEROS
 # ═══════════════════════════════════════════════════════════════════════════════
 # Nada de esto está copiado del ejemplo de Nav2: sus polígonos son de 0.3-0.5 m
-# para un robot de 0.22 m de radio. El nuestro mide 0.218 x 0.185 m (URDF) — la
-# mitad — y con esos valores se pararía a medio metro de todo.
+# para un robot de 0.22 m de radio, y con esos valores el nuestro se pararía a
+# medio metro de todo.
+#
+# ✅ COTAS DEL ROBOT, medidas por el usuario el 2026-07-31 de punta a punta y CON
+#    LAS ORUGAS: **18 cm de frente a atrás, 22 cm de lado a lado**.
+#      media longitud  0.09   <- la que fija dónde para yendo de frente
+#      media anchura   0.11
+#      radio circunscrito 0.142
+#
+# 🔴 Antes de esa medida el URDF decía 0.218 x 0.185 (ficha publicada, y CRUZADO:
+#    modelaba un robot más largo que ancho siendo al revés). Todos los huecos
+#    medidos el 2026-07-31 se calcularon con media longitud 0.109 y por tanto
+#    salieron **2 cm cortos**. Corregidos en `17_collision_monitor.txt`.
 #
 #   Distancia de frenado, derivada de la medida del watchdog (CHANGELOG 2026-07-30,
 #   parte 5): 527 ms y 7.9 cm en total, de los cuales ~300 ms eran el
@@ -121,17 +132,27 @@ collision_monitor:
       #   `time_before_collision`, así que según baja la distancia baja la
       #   velocidad y el robot se acerca ASINTÓTICAMENTE AL CONTACTO.
       #
-      #   Medido el 2026-07-31 con radius 0.11 y media longitud de chasis 0.109:
-      #   la asíntota era 0.1 cm, y el robot **paró a 1.1 cm de la pared**.
+      #   Medido el 2026-07-31 con radius 0.11 y media longitud de chasis 0.09:
+      #   la asíntota era 2 cm, y el robot **paró a 3.0 cm de la pared**.
       #   Funcionó exactamente como está escrito; lo que estaba mal era esperar
       #   que dejara hueco.
       #
-      #   La holgura sale de inflar el círculo:  hueco ≈ radius − 0.109
-      #   0.18 − 0.109 = 7.1 cm de asíntota. Verificado en `17_collision_monitor.txt`.
+      #   La holgura sale de inflar el círculo:  hueco ≈ radius − 0.09
+      #   0.18 − 0.09 = 9 cm de asíntota; medido 9.9 cm a 0.25 m/s y 10.9 a 0.40.
+      #   Verificado en `17_collision_monitor.txt`.
       #
-      # ⚠️ Inflar esto es lo mismo que hacer el robot más gordo a efectos de
-      #    seguridad: con 0.18 no cruzará huecos de menos de ~40 cm. En el pasillo
-      #    de 0.8 m sobra.
+      # 📝 La holgura DEPENDE DE LA DIRECCIÓN, porque el robot no es un círculo:
+      #      de frente  0.18 − 0.09  = 9.0 cm   <- lo que se mide contra una pared
+      #      de costado 0.18 − 0.11  = 7.0 cm
+      #      en esquina 0.18 − 0.142 = 3.8 cm   <- el caso peor
+      #
+      # ⚠️ Inflar esto es hacer el robot más gordo a efectos de seguridad, y el
+      #    coste está MEDIDO, no estimado: con 0.18 el robot **NO cruza un paso de
+      #    40 cm**. El 2026-07-31 entró en la boca de uno, con el camino despejado
+      #    delante y sin tocar nada, y se quedó bloqueado — el borde estaba a
+      #    17 cm y el círculo mide 18. Sí pudo salir marcha atrás.
+      #      pasillo mínimo ≈ 2 × radius  ->  0.18 exige 36 cm + margen
+      #    Detalle en `19_paso_estrecho.txt`.
       radius: 0.18
       action_type: "approach"
       # 1.0 s cubre con holgura los ~0.38 s reales (0.15 latencia + 0.23 frenada).
@@ -151,10 +172,15 @@ collision_monitor:
     # pare deja al robot atrapado. Este solo reduce la velocidad, así que en el
     # peor caso el robot va lento — nunca queda inmóvil sin salida.
     #
-    # Caja alrededor del robot (media longitud 0.109, media anchura 0.0925):
-    #   delante 0.36 = 0.109 + 0.25    detrás -0.24 = -0.109 - 0.13
-    #   laterales ±0.20 = 0.0925 + 0.11
+    # Caja alrededor del robot. Con las cotas MEDIDAS (media longitud 0.09, media
+    # anchura 0.11) las holguras reales de esta caja son:
+    #   delante  0.36 − 0.09 = 27 cm
+    #   detrás   0.24 − 0.09 = 15 cm
+    #   laterales 0.20 − 0.11 = 9 cm
     # En el pasillo de pruebas de 0.8 m las paredes quedan a ±0.40: no lo tocan.
+    # 📝 La geometría no se ha cambiado al corregir las cotas: se dejó como estaba
+    #    porque es la que se probó (4 navegaciones, manual 11.13). Cambiarla
+    #    obligaría a repetirlas.
     Precaucion:
       type: "polygon"
       points: "[[0.36, 0.20], [0.36, -0.20], [-0.24, -0.20], [-0.24, 0.20]]"

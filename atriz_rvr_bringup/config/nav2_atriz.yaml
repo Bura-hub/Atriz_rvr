@@ -15,7 +15,12 @@
 #   velocidad lineal máx.   0.40 m/s   meseta al 100 %, alcanzada en ~0.5 s
 #   velocidad angular máx.  2.0 rad/s  99-102 % del comando en 4 velocidades
 #   rampa de aceleración    ~0.5 s     de 0 a la velocidad de crucero
-#   tamaño del robot        22 x 18 cm  -> radio circunscrito 0.11 m
+#   tamaño del robot        18 x 22 cm  ✅ MEDIDO con orugas el 2026-07-31
+#                           -> media longitud 0.09 · media anchura 0.11
+#                           -> radio circunscrito 0.142 -> `robot_radius: 0.145`
+#                           🔴 el URDF decía 21.8 x 18.5 (ficha, CRUZADO) y aquí
+#                              ponía 0.11 llamándolo circunscrito: las dos cosas
+#                              estaban mal. Corregidas el 2026-07-31.
 #   LIDAR                   8 m útiles, 10 Hz, 260 puntos, altura 17.5 cm
 #   /odom                   16.7 Hz, deriva de 1.0-2.7 cm en recorridos de 1.6-2.4 m
 #   CPU libre               el stack (driver+LIDAR+SLAM) usa ~30 % de UN núcleo
@@ -229,7 +234,16 @@ local_costmap:
       # 🔴 0.11 m = la mitad de la diagonal del RVR (22 x 18 cm). El ejemplo de
       # Nav2 trae 0.22, que es el TurtleBot: el DOBLE. Con ese valor el robot se
       # negaría a pasar por huecos por los que cabe de sobra.
-      robot_radius: 0.11
+      # 🔴 0.145, no 0.11. El 0.11 estuvo aquí desde el 2026-07-31 etiquetado
+      # como "radio circunscrito", y era aritmética mal hecha: con el robot
+      # medido (18 x 22 cm, orugas incluidas) el circunscrito es
+      # √(0.09² + 0.11²) = 0.142. Se redondea a 0.145.
+      #
+      # Un `robot_radius` corto hace que el planificador trace rutas donde una
+      # ESQUINA del robot roza, y no da ningún error: lo tapaba el
+      # collision_monitor con sus 0.18, que es probablemente por qué `approach`
+      # saltaba al rodear obstáculos (manual, cap. 11.13).
+      robot_radius: 0.145
 
       plugins: ["obstacle_layer", "inflation_layer"]
 
@@ -267,7 +281,16 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      robot_radius: 0.11
+      # 🔴 0.145, no 0.11. El 0.11 estuvo aquí desde el 2026-07-31 etiquetado
+      # como "radio circunscrito", y era aritmética mal hecha: con el robot
+      # medido (18 x 22 cm, orugas incluidas) el circunscrito es
+      # √(0.09² + 0.11²) = 0.142. Se redondea a 0.145.
+      #
+      # Un `robot_radius` corto hace que el planificador trace rutas donde una
+      # ESQUINA del robot roza, y no da ningún error: lo tapaba el
+      # collision_monitor con sus 0.18, que es probablemente por qué `approach`
+      # saltaba al rodear obstáculos (manual, cap. 11.13).
+      robot_radius: 0.145
       resolution: 0.05
       track_unknown_space: true
 

@@ -20,7 +20,17 @@ QUÉ AÑADE, Y QUÉ DA POR HECHO
     └────────────── esto TIENE que existir ya ──────────────────────────────────┘
 
 Nav2 pone encima: los costmaps, el planificador, el controlador y el árbol de
-comportamiento. Y publica `/cmd_vel`, que es lo que el driver ya sabe consumir.
+comportamiento. Su salida entra en `/cmd_vel_raw`, que es donde escucha el
+`collision_monitor` que arrancó `robot.launch.py`:
+
+    controller_server ─► cmd_vel_nav ─► velocity_smoother ─► cmd_vel_raw
+                                                                  │
+                             driver ◄── cmd_vel ◄── collision_monitor
+
+🔴 El `collision_monitor` NO se arranca aquí, y no es un descuido: los estudiantes
+teleoperan sin Nav2, así que la seguridad tiene que vivir con el robot. Si
+`robot.launch.py` corre con `collision_monitor:=false`, **nada mueve el robot**:
+`/cmd_vel_raw` no lo escucha nadie.
 
 🔴 SON NODOS DE CICLO DE VIDA, IGUAL QUE slam_toolbox
 
@@ -35,6 +45,14 @@ comportamiento. Y publica `/cmd_vel`, que es lo que el driver ya sabe consumir.
       ros2 lifecycle get /controller_server     # active [3]
       ros2 lifecycle get /planner_server        # active [3]
       ros2 lifecycle get /bt_navigator          # active [3]
+
+🔴 Y CONTAR LOS PUBLICADORES DE /cmd_vel — tiene que salir UNO
+
+      ros2 topic info /cmd_vel --verbose        # Publisher count: 1
+                                                # y es collision_monitor
+
+  Si salen SEIS, el `behavior_server` no está remapeado y sus cinco conductas de
+  recuperación conducen el robot saltándose la capa de seguridad.
 
 ⚠️ EL QoS DE `/scan`, OTRA VEZ
 
@@ -53,9 +71,10 @@ CÓMO MANDARLE UN OBJETIVO, sin RViz
       "{pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0},
         orientation: {w: 1.0}}}}"
 
-  ⚠️ El robot se moverá hasta 0.25 m/s y **no tiene evitación reactiva** más allá
-     del costmap: el `collision_monitor` todavía no está configurado. Espacio
-     despejado y alguien mirando.
+  El robot se moverá hasta 0.25 m/s. El `collision_monitor` frena al 40 % cuando
+  algo entra en la caja de precaución y corta el avance si predice choque dentro
+  de 1 s — pero **sigue haciendo falta espacio despejado y alguien mirando**: la
+  capa de seguridad reduce el daño, no lo elimina.
 ═══════════════════════════════════════════════════════════════════════════════
 """
 from launch import LaunchDescription
@@ -119,14 +138,31 @@ def generate_launch_description() -> LaunchDescription:
              remappings=[('cmd_vel', 'cmd_vel_nav')], **comunes),
         Node(package='nav2_planner', executable='planner_server',
              name='planner_server', **comunes),
+        # 🔴 ESTE REMAPEO NO ES OPCIONAL, Y FALTABA.
+        # El behavior_server abre UN publicador de `cmd_vel` POR CONDUCTA — spin,
+        # backup, drive_on_heading, wait, assisted_teleop: cinco. Sin remapear,
+        # los cinco publican DIRECTAMENTE en `/cmd_vel` y se saltan el
+        # collision_monitor.
+        #
+        # Y es el peor sitio posible para un agujero: las conductas de
+        # recuperación se ejecutan justo cuando el robot está atascado, o sea
+        # pegado a algo. `backup` retrocedería a ciegas.
+        #
+        # Se descubrió mirando `ros2 topic info /cmd_vel --verbose` y contando
+        # publicadores: salían SEIS. Comprobar que sale UNO es la verificación.
         Node(package='nav2_behaviors', executable='behavior_server',
-             name='behavior_server', **comunes),
+             name='behavior_server',
+             remappings=[('cmd_vel', 'cmd_vel_raw')], **comunes),
         Node(package='nav2_bt_navigator', executable='bt_navigator',
              name='bt_navigator', **comunes),
+        # 🔴 La salida va a `cmd_vel_raw`, NO a `cmd_vel`. En medio está el
+        # `collision_monitor`, que arranca con robot.launch.py y es el ÚNICO que
+        # publica `/cmd_vel`. Si esto se remapeara a `cmd_vel` otra vez, Nav2
+        # saltaría la capa de seguridad — y funcionaría, que es lo peligroso.
         Node(package='nav2_velocity_smoother', executable='velocity_smoother',
              name='velocity_smoother',
              remappings=[('cmd_vel', 'cmd_vel_nav'),
-                         ('cmd_vel_smoothed', 'cmd_vel')], **comunes),
+                         ('cmd_vel_smoothed', 'cmd_vel_raw')], **comunes),
 
         # 🔴 El gestor de ciclo de vida. Sin él, los cinco nodos de arriba
         # arrancan en `unconfigured` y se quedan ahí: vivos, listados por

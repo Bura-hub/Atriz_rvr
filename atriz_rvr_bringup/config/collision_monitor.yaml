@@ -1,0 +1,173 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# collision_monitor — la capa de seguridad del robot
+# ═══════════════════════════════════════════════════════════════════════════════
+# Manual, cap. 12. Se arranca desde `robot.launch.py`, NO desde `nav2.launch.py`.
+#
+# 🔴 POR QUÉ NO VA CON NAV2, que es donde lo pone el ejemplo oficial
+#
+#   Los estudiantes teleoperan el robot **sin Nav2**: la web hablará por rosbridge
+#   y publicará velocidades directamente (plan, Fase 5). Si el monitor viviera en
+#   `nav2.launch.py`, la teleoperación —que es justo el caso peligroso, porque hay
+#   una persona mandando al robot contra una pared desde otro edificio— no estaría
+#   protegida en absoluto.
+#
+#   Va con el robot. Todo lo que conduce pasa por él.
+#
+# 🔴 LA REGLA QUE HACE QUE ESTO FUNCIONE: `/cmd_vel` TIENE UN SOLO PUBLICADOR
+#
+#       Nav2 (velocity_smoother) ─┐
+#       web / rosbridge          ─┼─► /cmd_vel_raw ─► collision_monitor ─► /cmd_vel ─► driver
+#       teleop / scripts         ─┘
+#
+#   **Quien quiera mover el robot publica en `/cmd_vel_raw`.** Publicar en
+#   `/cmd_vel` funciona —el driver lo obedece— pero **salta la seguridad sin dar
+#   ningún aviso**. Es el tipo de fallo silencioso que este proyecto ya ha pagado
+#   varias veces, así que se comprueba explícitamente:
+#
+#       ros2 topic info /cmd_vel --verbose   # UN publicador, y es collision_monitor
+#
+#   Para las mediciones de banco que sí necesitan mandar velocidad cruda:
+#   `ros2 launch atriz_rvr_bringup robot.launch.py collision_monitor:=false`.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# DE DÓNDE SALEN LOS NÚMEROS
+# ═══════════════════════════════════════════════════════════════════════════════
+# Nada de esto está copiado del ejemplo de Nav2: sus polígonos son de 0.3-0.5 m
+# para un robot de 0.22 m de radio. El nuestro mide 0.218 x 0.185 m (URDF) — la
+# mitad — y con esos valores se pararía a medio metro de todo.
+#
+#   Distancia de frenado, derivada de la medida del watchdog (CHANGELOG 2026-07-30,
+#   parte 5): 527 ms y 7.9 cm en total, de los cuales ~300 ms eran el
+#   `cmd_vel_timeout` del driver conduciendo a plena velocidad. Lo FÍSICO son
+#   ~227 ms. Despejando a ~0.19 m/s:  frenada ≈ 0.116 · v  (m, con v en m/s).
+#
+#   Latencia de detección = edad del barrido (X2 a 11.5 Hz → ≤ 87 ms)
+#                         + un período de cmd_vel (smoother a 20 Hz → 50 ms)
+#                         ≈ 0.15 s
+#
+#              v      latencia   frenada    parada total
+#           0.25 m/s   3.8 cm     2.9 cm      6.7 cm
+#           0.40 m/s   6.0 cm     4.6 cm     10.6 cm     ← el máximo del robot
+#
+#   ⚠️ ESO ES LO QUE FRENA EL ROBOT, PERO NO ES LO QUE FIJA LA HOLGURA. Con un
+#      polígono `approach` quien manda es el `radius` (ver abajo): la velocidad
+#      baja sola según se acerca, así que la parada total no la marca la frenada
+#      sino la asíntota del controlador. Medido con el monitor en el lazo en
+#      `17_collision_monitor.txt`.
+#
+#   📝 El X2 tiene `range_min: 0.1` y va montado en el centro (`laser_x: 0.0`), así
+#      que su punto ciego de 10 cm cae DENTRO del chasis (media longitud 0.109 m).
+#      No hay zona muerta alrededor del robot que ningún polígono pueda cubrir.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+collision_monitor:
+  ros__parameters:
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+
+    # ── La cadena de arriba, en dos líneas ────────────────────────────────────
+    cmd_vel_in_topic: "cmd_vel_raw"
+    cmd_vel_out_topic: "cmd_vel"
+    state_topic: "collision_monitor_state"
+
+    transform_tolerance: 0.2
+
+    # 🔴 0.5 s, no los 5.0 del ejemplo. Si el LIDAR deja de publicar, el monitor
+    # para el robot: 0.5 s son ~6 barridos perdidos del X2. Cinco segundos a
+    # 0.25 m/s son 1.25 m conduciendo a ciegas.
+    #
+    # ⚠️ CONSECUENCIA: sin LIDAR el robot NO SE PUEDE CONDUCIR. Es lo correcto en
+    #    un laboratorio remoto donde nadie puede levantarlo, pero desconcierta si
+    #    no se sabe. La salida es `collision_monitor:=false`.
+    source_timeout: 0.5
+
+    # Corrige el movimiento del robot entre el instante del barrido y ahora,
+    # usando TF. Podemos permitírnoslo: `odom -> base_footprint` está verificado
+    # y la deriva de SLAM es de 1-3 cm (manual, cap. 9.12).
+    base_shift_correction: True
+
+    stop_pub_timeout: 1.0
+
+    # ── Se evalúan EN ESTE ORDEN, y el monitor corta en cuanto uno da STOP ────
+    polygons: ["Aproximacion", "Precaucion"]
+
+    # ── 1. La protección de verdad ────────────────────────────────────────────
+    # Proyecta la huella del robot a lo largo de la velocidad COMANDADA y para si
+    # predice choque dentro de `time_before_collision`.
+    #
+    # 🔴 ES DE TIPO `approach`, NO `stop`, Y LA RAZÓN IMPORTA:
+    #
+    #   Un polígono `stop` para CUALQUIER movimiento mientras haya algo dentro. Un
+    #   robot que quede pegado a una pared se congela: no puede ni retroceder ni
+    #   girar para salir. En un laboratorio remoto **no hay nadie que lo levante**,
+    #   así que ese robot queda inservible hasta que alguien vaya al edificio.
+    #
+    #   `approach` solo bloquea el movimiento que LLEVA al choque. Contra la pared,
+    #   el robot puede retroceder y girar; solo se le niega seguir avanzando.
+    #
+    #   Escala sola con la velocidad, que es la otra ventaja: a 0.40 m/s reacciona
+    #   a 40 cm, a 0.10 m/s a 10 cm. Un polígono fijo tendría que dimensionarse
+    #   para el peor caso y le impediría acercarse a nada yendo despacio.
+    Aproximacion:
+      # `circle`, no `polygon`: así NO depende de
+      # `/local_costmap/published_footprint`, que solo existe si Nav2 corre — y
+      # aquí el monitor tiene que funcionar también en teleoperación pura.
+      type: "circle"
+      # 🔴 0.18, NO el `robot_radius: 0.11` de los costmaps. Es el parámetro que
+      # fija la HOLGURA con la que para, y la primera vez lo puse mal:
+      #
+      #   `approach` NO es una parada de seguridad, es un frenado suave. Nav2
+      #   escala la velocidad para que el choque caiga justo en
+      #   `time_before_collision`, así que según baja la distancia baja la
+      #   velocidad y el robot se acerca ASINTÓTICAMENTE AL CONTACTO.
+      #
+      #   Medido el 2026-07-31 con radius 0.11 y media longitud de chasis 0.109:
+      #   la asíntota era 0.1 cm, y el robot **paró a 1.1 cm de la pared**.
+      #   Funcionó exactamente como está escrito; lo que estaba mal era esperar
+      #   que dejara hueco.
+      #
+      #   La holgura sale de inflar el círculo:  hueco ≈ radius − 0.109
+      #   0.18 − 0.109 = 7.1 cm de asíntota. Verificado en `17_collision_monitor.txt`.
+      #
+      # ⚠️ Inflar esto es lo mismo que hacer el robot más gordo a efectos de
+      #    seguridad: con 0.18 no cruzará huecos de menos de ~40 cm. En el pasillo
+      #    de 0.8 m sobra.
+      radius: 0.18
+      action_type: "approach"
+      # 1.0 s cubre con holgura los ~0.38 s reales (0.15 latencia + 0.23 frenada).
+      time_before_collision: 1.0
+      simulation_time_step: 0.05
+      # ⚠️ EL PRIMER PARÁMETRO A AJUSTAR si hay paradas fantasma o si el robot no
+      # ve una pata de silla. 2 es sensible a propósito: una parada de más molesta,
+      # una de menos choca. El X2 da 254 puntos en 360° (1.42°/punto), así que un
+      # obstáculo de 5 cm a 30 cm de distancia son ~7 puntos.
+      min_points: 2
+      visualize: True
+      polygon_pub_topic: "poligono_aproximacion"
+      enabled: True
+
+    # ── 2. Frenar antes, para que la parada no sea brusca ─────────────────────
+    # 🔴 `slowdown`, NUNCA `stop`, por lo mismo de arriba: un polígono fijo que
+    # pare deja al robot atrapado. Este solo reduce la velocidad, así que en el
+    # peor caso el robot va lento — nunca queda inmóvil sin salida.
+    #
+    # Caja alrededor del robot (media longitud 0.109, media anchura 0.0925):
+    #   delante 0.36 = 0.109 + 0.25    detrás -0.24 = -0.109 - 0.13
+    #   laterales ±0.20 = 0.0925 + 0.11
+    # En el pasillo de pruebas de 0.8 m las paredes quedan a ±0.40: no lo tocan.
+    Precaucion:
+      type: "polygon"
+      points: "[[0.36, 0.20], [0.36, -0.20], [-0.24, -0.20], [-0.24, 0.20]]"
+      action_type: "slowdown"
+      slowdown_ratio: 0.4       # 0.25 m/s -> 0.10 m/s
+      min_points: 4
+      visualize: True
+      polygon_pub_topic: "poligono_precaucion"
+      enabled: True
+
+    # ── La fuente ─────────────────────────────────────────────────────────────
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "scan"
+      enabled: True

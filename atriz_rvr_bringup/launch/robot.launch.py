@@ -1,11 +1,14 @@
-"""Arranca el robot completo: driver del RVR + descripción + LIDAR.
+"""Arranca el robot completo: driver del RVR + descripción + LIDAR + seguridad.
 
     ros2 launch atriz_rvr_bringup robot.launch.py
 
     # sin LIDAR (para probar solo el RVR):
     ros2 launch atriz_rvr_bringup robot.launch.py lidar:=false
 
-Es el punto de entrada único del robot. Los tres nodos que arranca se reparten el
+    # sin la capa de seguridad (mediciones de banco que mandan velocidad cruda):
+    ros2 launch atriz_rvr_bringup robot.launch.py collision_monitor:=false
+
+Es el punto de entrada único del robot. Los nodos que arranca se reparten el
 árbol TF, y hay que entender el reparto porque es donde estaba el bloqueante raíz
 del proyecto:
 
@@ -31,6 +34,20 @@ hablándole cada 30 s —y publicando `/battery_state` de paso— y, si aun así
 de llegar telemetría, lo dice y trata de reanudarla. Para reproducir el fallo a
 propósito: `keepalive_period:=0.0`.
 
+🔴 **LA CAPA DE SEGURIDAD VIVE AQUÍ, NO EN NAV2**, aunque el ejemplo oficial la
+ponga con la navegación. Los estudiantes teleoperan **sin Nav2** —la web hablará
+por rosbridge (plan, Fase 5)—, así que con el monitor en `nav2.launch.py` el caso
+peligroso de verdad, una persona conduciendo el robot contra una pared desde otro
+edificio, no estaría protegido. Detalle y los números en
+`config/collision_monitor.yaml`.
+
+    Nav2 (velocity_smoother) ─┐
+    web / rosbridge          ─┼─► /cmd_vel_raw ─► collision_monitor ─► /cmd_vel ─► driver
+    teleop / scripts         ─┘
+
+⚠️ **Quien quiera mover el robot publica en `/cmd_vel_raw`.** Publicar en
+`/cmd_vel` funciona —el driver obedece— pero **salta la seguridad en silencio**.
+
 VERIFICAR SIEMPRE tras arrancar:
 
     ros2 run tf2_ros tf2_echo odom base_footprint   # ← LA prueba: es lo que pide SLAM
@@ -38,6 +55,8 @@ VERIFICAR SIEMPRE tras arrancar:
     ros2 topic hz /scan                    # ~10 Hz (medido libre: 11.48 Hz)
     ros2 topic hz /odom                    # ~16.7 Hz  ← si es 0, ¿se durmió?
     ros2 topic echo /battery_state --once  # llega cada 30 s (es el keepalive)
+    ros2 lifecycle get /collision_monitor  # active [3] ← si no, NO FILTRA NADA
+    ros2 topic info /cmd_vel --verbose     # UN publicador, y es collision_monitor
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
@@ -81,8 +100,16 @@ def generate_launch_description() -> LaunchDescription:
         description='Segundos sin telemetría del RVR antes de avisar e intentar '
                     'reanudar el streaming. 0 desactiva el detector.',
     )
+    # 🔴 Por defecto TRUE: la seguridad no se activa, se desactiva a propósito.
+    arg_seguridad = DeclareLaunchArgument(
+        'collision_monitor', default_value='true',
+        description='Capa de seguridad. Con false, /cmd_vel_raw deja de existir y '
+                    'hay que publicar en /cmd_vel directamente: el robot NO '
+                    'esquiva nada. Solo para mediciones de banco.',
+    )
 
     ns = LaunchConfiguration('namespace')
+    seguridad_on = IfCondition(LaunchConfiguration('collision_monitor'))
 
     # ── El driver del RVR: publica odom -> base_footprint ─────────────────────
     rvr = Node(
@@ -133,7 +160,37 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[PathJoinSubstitution([bringup, 'config', 'ydlidar_x2.yaml'])],
     )
 
+    # ── La capa de seguridad: /cmd_vel_raw -> /cmd_vel ────────────────────────
+    # Los números de los polígonos y por qué son `approach`/`slowdown` y no
+    # `stop`, en config/collision_monitor.yaml.
+    monitor = Node(
+        package='nav2_collision_monitor',
+        executable='collision_monitor',
+        name='collision_monitor',
+        namespace=ns,
+        output='screen',
+        condition=seguridad_on,
+        parameters=[PathJoinSubstitution([bringup, 'config', 'collision_monitor.yaml']),
+                    {'use_sim_time': False}],
+    )
+
+    # 🔴 collision_monitor ES UN NODO DE CICLO DE VIDA. Sin gestor arranca en
+    # `unconfigured`: el proceso vive, `ros2 node list` lo muestra, **no filtra
+    # absolutamente nada** y `/cmd_vel_raw` no llega al robot. Es el mismo fallo
+    # que costó la Fase 4 con slam_toolbox, y aquí sería peor: el robot parecería
+    # protegido y no lo estaría.
+    #
+    # Gestor propio, no el de Nav2: esto tiene que funcionar en teleoperación,
+    # cuando nav2.launch.py ni siquiera está corriendo.
+    gestor_seguridad = Node(
+        package='nav2_lifecycle_manager', executable='lifecycle_manager',
+        name='lifecycle_manager_seguridad', namespace=ns, output='screen',
+        condition=seguridad_on,
+        parameters=[{'use_sim_time': False, 'autostart': True,
+                     'node_names': ['collision_monitor']}],
+    )
+
     return LaunchDescription([
-        arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio,
-        rvr, desc, lidar,
+        arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
+        rvr, desc, lidar, monitor, gestor_seguridad,
     ])

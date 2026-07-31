@@ -124,7 +124,8 @@ collision_monitor:
       # `/local_costmap/published_footprint`, que solo existe si Nav2 corre — y
       # aquí el monitor tiene que funcionar también en teleoperación pura.
       type: "circle"
-      # 🔴 0.18, NO el `robot_radius: 0.11` de los costmaps. Es el parámetro que
+      # 🔴 0.18, y NO tiene nada que ver con el `robot_radius: 0.145` de los
+      # costmaps —que es el circunscrito medido, otra cosa. Es el parámetro que
       # fija la HOLGURA con la que para, y la primera vez lo puse mal:
       #
       #   `approach` NO es una parada de seguridad, es un frenado suave. Nav2

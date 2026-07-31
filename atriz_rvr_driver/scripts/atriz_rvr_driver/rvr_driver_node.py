@@ -213,6 +213,9 @@ class RvrDriverNode(Node):
         # propósito (por ejemplo, para MEDIR de una vez el timeout real del RVR).
         self.declare_parameter('keepalive_period', PERIODO_KEEPALIVE_S)
         self.declare_parameter('silence_timeout', TIMEOUT_SILENCIO_S)
+        # 🔬 Interruptor para MEDIR si el roll de la IMU afecta a SLAM.
+        # Por defecto True = comportamiento de siempre. Ver `_h_quaternion`.
+        self.declare_parameter('publicar_inclinacion', True)
 
         p = self.get_parameter
         self._puerto = p('serial_port').value
@@ -225,6 +228,7 @@ class RvrDriverNode(Node):
         self._publicar_tf = bool(p('publish_tf').value)
         self._periodo_keepalive = float(p('keepalive_period').value)
         self._timeout_silencio = float(p('silence_timeout').value)
+        self._publicar_inclinacion = bool(p('publicar_inclinacion').value)
 
         if self._intervalo_ms < 60:
             self.get_logger().warn(
@@ -874,6 +878,13 @@ class RvrDriverNode(Node):
             yaw = math.atan2(math.sin(yaw), math.cos(yaw))   # normaliza a ±pi
 
             self._yaw_actual = yaw
+            if not self._publicar_inclinacion:
+                # 🔬 `publicar_inclinacion:=false` — para MEDIR, no para usar a
+                # ciegas. Publica la orientación plana que REP-105 espera de
+                # `odom -> base_footprint`, en vez del roll de ~8° de la IMU que
+                # no corresponde a ninguna inclinación real del robot.
+                roll = 0.0
+                pitch = 0.0
             orient = cuaternion_desde_euler(roll, pitch, yaw)
             self._odom.pose.pose.orientation = orient
             self._imu.orientation = orient

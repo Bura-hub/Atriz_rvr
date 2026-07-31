@@ -100,6 +100,24 @@ def generate_launch_description() -> LaunchDescription:
         description='Segundos sin telemetría del RVR antes de avisar e intentar '
                     'reanudar el streaming. 0 desactiva el detector.',
     )
+    # 🔬 Interruptor de MEDICIÓN, no de operación. El driver publica el roll y el
+    # pitch que reporta la IMU del RVR, que dan ~8° de inclinación. El 2026-07-31
+    # se midió con una regla que el robot está HORIZONTAL (manual, cap. 13), así
+    # que ese roll es un desvío del sensor y no una inclinación real.
+    #
+    # Un roll en `odom -> base_footprint` inclina el plano del láser y comprime
+    # los alcances por cos(8°) = 0.990 — un 1 %, ~1 cm por metro. La deriva de
+    # SLAM medida es de 1-3 cm, así que PODRÍA ser parte de ella.
+    #
+    # Con false se publica la orientación plana. Existe para poder medir las dos
+    # y comparar; el valor por defecto NO se cambia sin esa medida.
+    arg_inclinacion = DeclareLaunchArgument(
+        'publicar_inclinacion', default_value='true',
+        description='Publicar el roll y pitch de la IMU en /odom y TF. Con false '
+                    'se publican a cero. Es para MEDIR su efecto en la deriva de '
+                    'SLAM, no para usarlo a ciegas.',
+    )
+
     # 🔴 Por defecto TRUE: la seguridad no se activa, se desactiva a propósito.
     arg_seguridad = DeclareLaunchArgument(
         'collision_monitor', default_value='true',
@@ -134,6 +152,8 @@ def generate_launch_description() -> LaunchDescription:
                 LaunchConfiguration('keepalive_period'), value_type=float),
             'silence_timeout': ParameterValue(
                 LaunchConfiguration('silence_timeout'), value_type=float),
+            'publicar_inclinacion': ParameterValue(
+                LaunchConfiguration('publicar_inclinacion'), value_type=bool),
         }],
     )
 
@@ -192,5 +212,6 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
+        arg_inclinacion,
         rvr, desc, lidar, monitor, gestor_seguridad,
     ])

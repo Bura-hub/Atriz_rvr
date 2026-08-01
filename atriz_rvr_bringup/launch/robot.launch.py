@@ -228,6 +228,20 @@ def generate_launch_description() -> LaunchDescription:
     # ── La capa de seguridad: /cmd_vel_raw -> /cmd_vel ────────────────────────
     # Los números de los polígonos y por qué son `approach`/`slowdown` y no
     # `stop`, en config/collision_monitor.yaml.
+    #
+    # 🔴 `on_exit=Shutdown()`, igual que el driver y por una razón MÁS fuerte:
+    #    un robot **sin capa de seguridad que parece sano** es peligroso. Si este
+    #    nodo muere, `/cmd_vel_raw` deja de filtrarse y nadie se entera — el
+    #    servicio seguiría en `active (running)` porque su PID principal es el
+    #    `ros2 launch`.
+    #
+    #    ⚠️ OJO A LA ASIMETRÍA CON EL LIDAR: si se cae el LIDAR el launch NO se
+    #       cae, y no es una contradicción — sin `/scan` el propio
+    #       `collision_monitor` bloquea el movimiento, así que el robot queda
+    #       seguro. Si se cae el MONITOR, en cambio, el robot queda conduciendo
+    #       sin filtro. Son dos situaciones opuestas.
+    #
+    #    Decisión del usuario, 2026-08-01.
     monitor = Node(
         package='nav2_collision_monitor',
         executable='collision_monitor',
@@ -235,6 +249,7 @@ def generate_launch_description() -> LaunchDescription:
         namespace=ns,
         output='screen',
         condition=seguridad_on,
+        on_exit=Shutdown(),
         parameters=[PathJoinSubstitution([bringup, 'config', 'collision_monitor.yaml']),
                     {'use_sim_time': False}],
     )

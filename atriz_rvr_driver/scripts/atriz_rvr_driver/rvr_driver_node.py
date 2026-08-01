@@ -1708,6 +1708,16 @@ class RvrDriverNode(Node):
         self._conduciendo = False
         if self._rvr is not None:
             self._enviar(self._rvr.drive_stop(), 'parada de emergencia')
+            # 🔴 `drive_stop()` NO BASTA con los modos IR activos: `evading` y
+            #    `following` son modos del FIRMWARE, así que el RVR volvería a
+            #    conducir en la siguiente detección — la parada frenaría un
+            #    instante y el robot arrancaría solo. Es el mismo patrón que ya
+            #    mordió al liberar la parada con Nav2 (manual, cap. 15.4).
+            #    Se mandan siempre, cuesten o no: la parada no pregunta.
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_evading(),
+                         'parada: evasión IR')
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_following(),
+                         'parada: seguimiento IR')
 
     # ─────────────────────────────────────────────────────────────────────────
     # Servicios: LEDs
@@ -2023,6 +2033,11 @@ class RvrDriverNode(Node):
                 far_code=req.far_code, near_code=req.near_code),
             'following': lambda: self._rvr.start_robot_to_robot_infrared_following(
                 far_code=req.far_code, near_code=req.near_code),
+            # 🔴 'off' PARABA SOLO EL BROADCASTING (2026-08-01). Así que
+            #    `following` —que hace conducir al robot— no se podía apagar, y
+            #    `evading` no tenía forma alguna de apagarse desde ROS. Los tres
+            #    métodos existen en el SDK y ahora se llaman los tres: apagar
+            #    debe apagar, no apagar una de tres cosas.
             'off': lambda: self._rvr.stop_robot_to_robot_infrared_broadcasting(),
         }
         if modo not in acciones:
@@ -2030,6 +2045,13 @@ class RvrDriverNode(Node):
                 f"modo '{req.mode}' desconocido; usa {sorted(acciones)}")
             return resp
         ok, _, msg = self._pedir(acciones[modo](), f'set_ir_mode({modo})')
+        if modo == 'off' and ok:
+            # Los otros dos, que son los que conducen. Sin esperar respuesta:
+            # apagar no puede quedarse bloqueado.
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_following(),
+                         'set_ir_mode(off): following')
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_evading(),
+                         'set_ir_mode(off): evading')
         resp.success, resp.message = ok, msg or f'modo IR: {modo}'
         return resp
 
@@ -2040,6 +2062,15 @@ class RvrDriverNode(Node):
         `collision_monitor` tampoco lo ve — el RVR conduce por su cuenta. Se avisa
         en el log a nivel WARN por eso.
         """
+        # 🔴 ESTO FALTABA, y era un agujero de seguridad real (2026-08-01).
+        #    Este servicio hace CONDUCIR al robot, pero era el único de los que
+        #    mueven que NO comprobaba la parada de emergencia: con la parada
+        #    ACTIVA respondía `success=True` y el RVR se ponía a conducir solo.
+        #    Y el manual afirmaba lo contrario — «se comprueba en todos».
+        ok, msg = self._mover_permitido()
+        if not ok:
+            resp.success, resp.message = False, msg
+            return resp
         self.get_logger().warn(
             'set_ir_evading: el RVR conducirá SOLO al detectar IR. Ni el watchdog '
             'de cmd_vel ni el collision_monitor intervienen. Espacio despejado.')

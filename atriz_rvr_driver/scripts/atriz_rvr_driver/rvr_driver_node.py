@@ -1384,10 +1384,21 @@ class RvrDriverNode(Node):
              · el sensor RGBC, en cambio, da valores **idénticos** con los LEDs en
                rojo, verde o azul: está apantallado y solo ve lo que tiene debajo.
 
-           ⚠️ CONSECUENCIA PARA QUIEN LO USE: esta lectura **no mide la luz de la
-              sala**. Mide lo que le llega, y los LEDs del propio robot la dominan.
-              Si el robot enciende un LED, esta señal sube sin que la sala haya
-              cambiado.
+           ✅ Y EL PORQUÉ ES FÍSICO, no del software: el sensor mira **hacia
+              arriba**, y encima del Sphero está el **piso que sostiene el LIDAR**
+              —4.6 cm, ver `03_operacion/MEDIDAS_ROBOT.md`— que es **BLANCO**. Ese
+              piso le devuelve la luz de los propios LEDs del robot.
+
+           🔴 DECISIÓN (usuario, 2026-08-01): **ESTE TOPIC NO SE USA.** En este
+              montaje un valor alto significa «el robot tiene LEDs encendidos», no
+              «hay luz». Se probó solo para saber si el sensor responde, y
+              responde.
+
+              Se sigue publicando porque es gratis —va en el mismo stream que el
+              resto— pero **ningún consumidor debe apoyarse en él** mientras el
+              piso del LIDAR siga ahí, que será siempre. No se arregla con
+              software: haría falta pintar de negro la cara inferior del piso o
+              mover el sensor, y nada del laboratorio necesita luz ambiente.
 
         ⚠️ NO va por `_quiza_publicar`: no forma parte de `/odom`. Pero SÍ marca
            el latido, igual que el color — si no, un robot que solo enviara luz

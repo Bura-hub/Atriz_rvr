@@ -33,6 +33,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/DegreesTwist.msg"
   "msg/Encoder.msg"
   "msg/InfraredMessage.msg"
+  "msg/MotorStatus.msg"
   "msg/SystemInfo.msg"
 
   # ── Servicios (20) ─────────────────────────────────────────────────────────

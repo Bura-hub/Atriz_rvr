@@ -99,7 +99,7 @@ from std_srvs.srv import Empty as EmptySrv
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
-from atriz_rvr_msgs.msg import Color, ControlState, SystemInfo
+from atriz_rvr_msgs.msg import Color, ControlState, MotorStatus, SystemInfo
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
     SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
@@ -255,6 +255,20 @@ class RvrDriverNode(Node):
         self._recibidos: set[str] = set()
         self._lock = threading.Lock()
 
+        # ── Salud de los motores ─────────────────────────────────────────────
+        # El RVR notifica por EVENTOS, no por sondeo: si nunca ha pasado nada, no
+        # llega nada. Por eso el estado se guarda aquí y los tiempos arrancan a
+        # None — «nunca ha llegado una notificación» y «todo va bien» son cosas
+        # distintas, y confundirlas es el fallo silencioso favorito de este
+        # proyecto.
+        self._motor_atasco = [False, False]     # [izquierdo, derecho]
+        self._motor_fallo = False
+        self._motor_temp = [0.0, 0.0]
+        self._motor_estado_term = [0, 0]
+        self._t_ultimo_atasco: float | None = None      # solo la notificación
+        self._t_ultimo_fallo: float | None = None       # el sondeo
+        self._t_ultimo_termico: float | None = None     # el sondeo
+
         # ── Estado de vigilancia del enlace con el RVR ───────────────────────
         # `_t_ultima_muestra` lo tocan los handlers del SDK (hilo del asyncio) y
         # lo lee el temporizador de vigilancia (hilo del ejecutor de rclpy), así
@@ -358,6 +372,25 @@ class RvrDriverNode(Node):
         # último valor conocido sin esperar medio minuto.
         self.pub_bateria = self.create_publisher(
             BatteryState, 'battery_state',
+            QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
+        # La salud de los motores, con el MISMO QoS que la batería y por la misma
+        # razón: llega por eventos —puede pasar media hora sin un solo mensaje—
+        # así que un suscriptor que se conecte después tiene que recibir el
+        # último estado conocido, no esperar a que se rompa algo.
+        #
+        # 🔴 TRANSIENT_LOCAL EN EL PUBLICADOR sí añade garantía (guarda el último
+        #    mensaje para quien llegue tarde). Es en el SUSCRIPTOR donde no añade
+        #    nada y solo restringe — la confusión que costó la parada de
+        #    emergencia (manual, cap. 15.1). Un suscriptor VOLATILE, como el de
+        #    rosbridge, empareja con este publicador sin problema.
+        self.pub_motores = self.create_publisher(
+            MotorStatus, 'motor_status',
             QoSProfile(
                 depth=1,
                 reliability=QoSReliabilityPolicy.RELIABLE,
@@ -663,6 +696,7 @@ class RvrDriverNode(Node):
             await self._rvr.reset_yaw()
             await self._rvr.reset_locator_x_and_y()
             await self._registrar_sensores()
+            await self._registrar_notificaciones()
             await self._rvr.sensor_control.start(interval=self._intervalo_ms)
             # A partir de aquí SÍ hay silencio que vigilar. El reloj se pone en
             # marcha ahora, no antes: si no, el vigilante dispararía durante el
@@ -729,6 +763,10 @@ class RvrDriverNode(Node):
             # recuperación ya le está hablando al RVR, que es justo el objetivo.
             return
         self._enviar(self._leer_bateria(), 'keepalive')
+        # Y de paso se SONDEA la salud de los motores: en este firmware las
+        # notificaciones no llegan (ver `_sondear_motores`), así que preguntar es
+        # la única vía. Publica al terminar.
+        self._enviar(self._sondear_motores(), 'sondeo de motores')
 
     async def _leer_bateria(self) -> None:
         """Lee la batería. Es el keepalive, y de paso publica `battery_state`.
@@ -901,6 +939,156 @@ class RvrDriverNode(Node):
         await sc.add_sensor_data_handler(RvrStreamingServices.velocity, self._h_velocity)
         await sc.add_sensor_data_handler(RvrStreamingServices.accelerometer, self._h_accel)
         await sc.add_sensor_data_handler(RvrStreamingServices.color_detection, self._h_color)
+
+    async def _registrar_notificaciones(self) -> None:
+        """Notificaciones por EVENTO del RVR: atasco, fallo y térmica de motores.
+
+        🔴 POR QUÉ ESTO IMPORTA MÁS QUE PARECE
+           Hasta el 2026-08-01 un robot con una oruga trabada se veía IGUAL que
+           uno que navegaba mal: `/odom` avanzaba poco, Nav2 abortaba por «no
+           progresar», y nada distinguía un fallo de hardware de uno de
+           algoritmo. Con 16 robots en otro edificio, esa diferencia decide si
+           alguien tiene que ir hasta allí.
+
+        ⚠️ NO ES UN STREAM. No van por `sensor_control` ni tienen intervalo: el
+           RVR envía un mensaje **cuando pasa algo**. Puede estar media hora en
+           silencio con todo bien. Por eso el estado se guarda y se republica, y
+           por eso el mensaje lleva `antiguedad_*_s`.
+
+        📝 Fallar aquí NO debe tumbar el driver. Si el firmware no soporta alguna
+           de estas notificaciones, se avisa y se sigue: la telemetría y la
+           conducción no dependen de esto.
+        """
+        try:
+            # 🔴 `on_*_notify` NO espera la notificación: devuelve una **Task** que
+            #    se queda escuchando. Si esa task revienta, la excepción se queda
+            #    dentro del objeto Task y NO SE IMPRIME EN NINGÚN SITIO — el
+            #    driver seguiría diciendo «registradas» sobre algo muerto.
+            #    Por eso se guardan y se inspeccionan.
+            tareas = {
+                'atasco': await self._rvr.on_motor_stall_notify(
+                    handler=self._h_motor_atasco),
+                'fallo': await self._rvr.on_motor_fault_notify(
+                    handler=self._h_motor_fallo),
+                'térmica': await self._rvr.on_motor_thermal_protection_status_notify(
+                    handler=self._h_motor_termico),
+            }
+            # 🔴 SE REGISTRA LA RESPUESTA DE CADA `enable_*`, no solo que no
+            #    lance excepción. El SDK devuelve un dict de error en vez de
+            #    lanzar cuando el firmware rechaza un comando, así que un
+            #    `try/except` a secas daría «activas» sobre algo que el RVR ha
+            #    dicho que no. Es el mismo patrón que ya escondió tres fallos de
+            #    la parada de emergencia: `200 OK` y nada funcionando.
+            for nombre, coro in (
+                ('atasco',  self._rvr.enable_motor_stall_notify(is_enabled=True)),
+                ('fallo',   self._rvr.enable_motor_fault_notify(is_enabled=True)),
+                ('térmica', self._rvr.enable_motor_thermal_protection_status_notify(
+                    is_enabled=True)),
+            ):
+                r = await coro
+                self.get_logger().info(f'  enable {nombre}: respuesta = {r!r}')
+            # 📝 Estas tasks TERMINAN enseguida, y es lo normal: `on_command` del
+            #    SDK solo mete el manejador en la tabla de despacho
+            #    (`add_command_worker`) y vuelve. Se comprobó el 2026-08-01 —una
+            #    versión de este código avisaba de «la task ya terminó» como si
+            #    fuera un fallo, y era un FALSO POSITIVO.
+            self._tareas_notify = tareas
+            # Se guardan igualmente: si alguna guardara una excepción, se pierde
+            # en silencio, y esto deja dónde mirarlo.
+            for nombre, tarea in tareas.items():
+                if tarea is not None and tarea.done() and tarea.exception():
+                    self.get_logger().error(
+                        f'  🔴 {nombre}: excepción al registrar: {tarea.exception()!r}')
+            self.get_logger().info(
+                'notificaciones de motor registradas -> /motor_status')
+        except Exception:                                   # noqa: BLE001
+            self.get_logger().warn(
+                'no se pudieron registrar las notificaciones de motor; se seguirá '
+                f'sondeando igualmente:\n{traceback.format_exc()}')
+
+        # 🔴 LAS NOTIFICACIONES NO LLEGAN EN ESTE FIRMWARE — medido, ver
+        #    `_sondear_motores`. Por eso el estado real se consigue SONDEANDO,
+        #    no esperando, y este primer sondeo llena `/motor_status` con datos
+        #    de verdad desde el arranque en vez de con el valor inicial.
+        await self._sondear_motores()
+
+    async def _sondear_motores(self) -> None:
+        """Pregunta al RVR por el fallo y la térmica de los motores.
+
+        🔴 POR QUÉ SE SONDEA EN VEZ DE ESCUCHAR — medido el 2026-08-01
+
+           El SDK ofrece `enable_motor_*_notify` + `on_motor_*_notify`, y este
+           driver las registra correctamente. **No llega ni una.** Se comprobó:
+
+             · registro correcto: `on_command` mete el handler en la tabla de
+               despacho del SDK y vuelve (la task terminando es NORMAL).
+             · `enable_*` no da error — devuelven `None`, que en este SDK
+               significa «comando sin respuesta pedida», no «fallo».
+             · motores forzados a 220/255 con el robot sujeto: nada.
+             · 100 s esperando la térmica, que debería llegar sola: nada.
+               4 mensajes, los 4 del keepalive, todos con antigüedad -1.
+
+           Es el mismo caso que `core_time`: está en el SDK y **el firmware no
+           lo transmite**. Precedente documentado en CLAUDE.md.
+
+           Las consultas directas, en cambio, **SÍ responden**:
+               get_motor_fault_state                 -> {'is_fault': False}
+               get_motor_thermal_protection_status   -> 28.0 °C / 27.5 °C
+
+        ⚠️ EL ATASCO SE QUEDA FUERA. El SDK **no tiene** un `get_motor_stall_state`:
+           solo existe por notificación, y la notificación no llega. Así que
+           `atascado_*` seguirá en `false` con `antiguedad_atasco_s = -1` mientras
+           este firmware no cambie — y ese `-1` es justo lo que impide leerlo como
+           «no hay atasco».
+
+        📝 Cuesta dos lecturas por el puerto serie cada 30 s, junto al keepalive.
+           Son lecturas: no cambian nada del robot.
+        """
+        if self._rvr is None:
+            return
+        try:
+            f = await asyncio.wait_for(self._rvr.get_motor_fault_state(), timeout=5.0)
+            if isinstance(f, dict):
+                act = bool(f.get('is_fault', False))
+                with self._lock:
+                    cambio = self._motor_fallo != act
+                    self._motor_fallo = act
+                    self._t_ultimo_fallo = self._ahora_s()
+                if cambio and act:
+                    self.get_logger().error(
+                        '🔴 FALLO ELÉCTRICO DE MOTOR. Más grave que un atasco: '
+                        'NO se resuelve levantando el robot.')
+                elif cambio:
+                    self.get_logger().warn('fallo de motor: resuelto')
+        except Exception as e:                              # noqa: BLE001
+            self._avisar_una_vez('sondeo_fallo', f'get_motor_fault_state falló: {e!r}')
+
+        try:
+            d = await asyncio.wait_for(
+                self._rvr.get_motor_thermal_protection_status(), timeout=5.0)
+            if isinstance(d, dict):
+                with self._lock:
+                    self._motor_temp = [
+                        float(d.get('left_motor_temperature', 0.0)),
+                        float(d.get('right_motor_temperature', 0.0)),
+                    ]
+                    prev = list(self._motor_estado_term)
+                    self._motor_estado_term = [
+                        int(d.get('left_motor_status', 0)),
+                        int(d.get('right_motor_status', 0)),
+                    ]
+                    nuevo = list(self._motor_estado_term)
+                    temps = list(self._motor_temp)
+                    self._t_ultimo_termico = self._ahora_s()
+                if nuevo != prev and any(nuevo):
+                    self.get_logger().warn(
+                        f'⚠️ protección térmica activa: estado izq={nuevo[0]} '
+                        f'der={nuevo[1]} · {temps[0]:.1f} °C / {temps[1]:.1f} °C. '
+                        'El firmware limita la potencia: el robot navegará mal.')
+        except Exception as e:                              # noqa: BLE001
+            self._avisar_una_vez('sondeo_term',
+                                 f'get_motor_thermal_protection_status falló: {e!r}')
+        self._publicar_motores()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Handlers del SDK. Corren en el hilo del event loop, así que todo lo que
@@ -1155,6 +1343,130 @@ class RvrDriverNode(Node):
         msg.rgb_color = [int(c['R']), int(c['G']), int(c['B'])]
         msg.confidence = float(c['Confidence'])
         self.pub_color.publish(msg)
+
+    # ── Salud de los motores (notificaciones por evento) ─────────────────────
+    #
+    # 🔴 ESTOS TRES CORREN EN EL HILO DE ASYNCIO, igual que los handlers de
+    #    telemetría, y una excepción aquí NO da error visible: el 2026-07-31 una
+    #    en `_h_quaternion` dejó `/odom` e `/imu` mudos sin una sola línea en el
+    #    log. Por eso cada uno va envuelto: si el firmware manda un campo con
+    #    otro nombre, se avisa UNA vez y el driver sigue funcionando.
+
+    async def _h_motor_atasco(self, datos) -> None:
+        try:
+            # `motor_index`: 0 = izquierdo, 1 = derecho (`MotorIndexesEnum`).
+            idx = int(datos.get('motor_index', -1))
+            act = bool(datos.get('is_triggered', False))
+            if idx not in (0, 1):
+                self._avisar_una_vez('motor_atasco_idx',
+                                     f'motor_index inesperado: {datos!r}')
+                return
+            with self._lock:
+                cambio = self._motor_atasco[idx] != act
+                self._motor_atasco[idx] = act
+                self._t_ultimo_atasco = self._ahora_s()
+            lado = 'izquierdo' if idx == 0 else 'derecho'
+            if cambio:
+                # ERROR, no warn: en un laboratorio remoto esto decide si alguien
+                # tiene que ir al edificio.
+                if act:
+                    self.get_logger().error(
+                        f'🔴 MOTOR {lado.upper()} ATASCADO. No es que el robot esté '
+                        'parado: el firmware ve corriente y no ve giro. '
+                        'Comprueba la oruga.')
+                else:
+                    self.get_logger().warn(f'motor {lado}: atasco resuelto')
+            self._publicar_motores()
+        except Exception:                                   # noqa: BLE001
+            self._avisar_una_vez('motor_atasco_exc',
+                                 f'fallo en _h_motor_atasco:\n{traceback.format_exc()}')
+
+    async def _h_motor_fallo(self, datos) -> None:
+        try:
+            act = bool(datos.get('is_fault', False))
+            with self._lock:
+                cambio = self._motor_fallo != act
+                self._motor_fallo = act
+                self._t_ultimo_fallo = self._ahora_s()
+            if cambio:
+                if act:
+                    self.get_logger().error(
+                        '🔴 FALLO ELÉCTRICO DE MOTOR. Más grave que un atasco: '
+                        'NO se resuelve levantando el robot.')
+                else:
+                    self.get_logger().warn('fallo de motor: resuelto')
+            self._publicar_motores()
+        except Exception:                                   # noqa: BLE001
+            self._avisar_una_vez('motor_fallo_exc',
+                                 f'fallo en _h_motor_fallo:\n{traceback.format_exc()}')
+
+    async def _h_motor_termico(self, datos) -> None:
+        try:
+            with self._lock:
+                self._motor_temp = [
+                    float(datos.get('left_motor_temperature', 0.0)),
+                    float(datos.get('right_motor_temperature', 0.0)),
+                ]
+                prev = list(self._motor_estado_term)
+                self._motor_estado_term = [
+                    int(datos.get('left_motor_status', 0)),
+                    int(datos.get('right_motor_status', 0)),
+                ]
+                nuevo = list(self._motor_estado_term)
+                temps = list(self._motor_temp)
+                self._t_ultimo_termico = self._ahora_s()
+            # 📝 Solo se avisa cuando el estado CAMBIA y no es 0. Los valores
+            #    distintos de 0 los define el firmware y este proyecto no los ha
+            #    caracterizado, así que se dicen en crudo en vez de traducirlos.
+            if nuevo != prev and any(nuevo):
+                self.get_logger().warn(
+                    f'⚠️ protección térmica de motores activa: estado '
+                    f'izq={nuevo[0]} der={nuevo[1]} · '
+                    f'{temps[0]:.1f} °C / {temps[1]:.1f} °C. '
+                    'El firmware limita la potencia: el robot navegará mal.')
+            self._publicar_motores()
+        except Exception:                                   # noqa: BLE001
+            self._avisar_una_vez('motor_term_exc',
+                                 f'fallo en _h_motor_termico:\n{traceback.format_exc()}')
+
+    def _avisar_una_vez(self, clave: str, mensaje: str) -> None:
+        """Un aviso repetido a 16 Hz llena el journal y esconde lo demás."""
+        with self._lock:
+            visto = clave in self._recibidos
+            self._recibidos.add(clave)
+        if not visto:
+            self.get_logger().warn(mensaje)
+
+    def _publicar_motores(self) -> None:
+        """Publica el estado actual. Se llama desde los handlers y del keepalive.
+
+        🔴 `antiguedad_*_s = -1.0` significa **nunca ha llegado una notificación**,
+           no «hace mucho». Es la diferencia entre «todo va bien» y «no sé nada»,
+           y publicarlas iguales sería exactamente el tipo de fallo silencioso que
+           este driver lleva media docena de veces pagando.
+        """
+        ahora = self._ahora_s()
+        with self._lock:
+            m = MotorStatus()
+            m.atascado_izquierdo = self._motor_atasco[0]
+            m.atascado_derecho = self._motor_atasco[1]
+            m.fallo = self._motor_fallo
+            m.temperatura_izquierdo = float(self._motor_temp[0])
+            m.temperatura_derecho = float(self._motor_temp[1])
+            m.estado_termico_izquierdo = int(self._motor_estado_term[0])
+            m.estado_termico_derecho = int(self._motor_estado_term[1])
+            m.antiguedad_atasco_s = (
+                -1.0 if self._t_ultimo_atasco is None
+                else float(ahora - self._t_ultimo_atasco))
+            m.antiguedad_fallo_s = (
+                -1.0 if self._t_ultimo_fallo is None
+                else float(ahora - self._t_ultimo_fallo))
+            m.antiguedad_termico_s = (
+                -1.0 if self._t_ultimo_termico is None
+                else float(ahora - self._t_ultimo_termico))
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = 'base_link'
+        self.pub_motores.publish(m)
 
     def _quiza_publicar(self, componente: str) -> None:
         """Publica /odom e /imu cuando han llegado los cinco componentes."""

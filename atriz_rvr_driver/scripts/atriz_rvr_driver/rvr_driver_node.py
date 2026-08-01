@@ -112,6 +112,7 @@ from atriz_rvr_msgs.srv import (
 # (ver setup.py: package_dir={'': 'scripts'}). Es la pieza validada en Python
 # 3.12 el 2026-07-30 (Etapa D, GO) y no se ha tocado.
 from sphero_sdk import RvrLedGroups, RvrStreamingServices, SerialAsyncDal, SpheroRvrAsync
+from sphero_sdk.common.enums.power_enums import BatteryVoltageReadingTypesEnum
 
 #: Componentes de telemetría que deben haber llegado antes de publicar /odom.
 #: Es el mecanismo del nodo de ROS 1 y se conserva: el SDK entrega cada sensor
@@ -265,6 +266,11 @@ class RvrDriverNode(Node):
         self._parada_emergencia = False
         self._conduciendo = False
         self._t_ultimo_cmd_vel = 0.0
+        # Batería: último estado del firmware visto, y si las lecturas van bien.
+        # Aquí y no con `getattr`, que es donde nadie los busca.
+        self._estado_bateria = None
+        self._bat_v_ok = True
+        self._bat_s_ok = True
         self._recibidos: set[str] = set()
         # 🔴 CONJUNTO APARTE, no `_recibidos`. `_quiza_publicar` VACÍA `_recibidos`
         #    en cada ciclo de /odom —es el juego de componentes recibidos— así que
@@ -750,8 +756,22 @@ class RvrDriverNode(Node):
             # necesita para interpretar el `voltage` de `/battery_state`, y así
             # no se codifican a mano en dos sitios: se leen de donde son verdad.
             # Medidos en rvr-01: low 7.0 V · critical 6.5 V · histéresis 0.2 V.
+            # 🔴🔴 `timeout` EXPLÍCITO, Y NO ES OPCIONAL. El SDK usa `timeout=None`
+            #    por defecto, que en `asyncio.wait_for` significa **esperar para
+            #    siempre**. Y esta es la PRIMERA llamada del arranque que espera
+            #    respuesta: `wake`, `reset_yaw` y `reset_locator_x_and_y` no la
+            #    piden (sus comandos no declaran `outputs`).
+            #
+            #    Sin tope, con un RVR que no contesta, `_conectar_rvr` se queda
+            #    parado aquí: nunca llega a `sensor_control.start()`,
+            #    `_streaming_activo` sigue en False, **el detector de silencio se
+            #    autodesactiva**, y el `except` de abajo no salta porque un
+            #    cuelgue no es una excepción. Resultado: nodo vivo, topics
+            #    registrados, CERO datos y CERO errores — el peor modo de fallo
+            #    de este proyecto, reintroducido por código escrito para
+            #    observabilidad. Encontrado en auditoría el 2026-08-01.
             try:
-                u = await self._rvr.get_battery_voltage_state_thresholds()
+                u = await self._rvr.get_battery_voltage_state_thresholds(timeout=5.0)
                 self.get_logger().info(
                     f"umbrales de batería (firmware): baja {u['low_threshold']:.2f} V · "
                     f"crítica {u['critical_threshold']:.2f} V · "
@@ -863,15 +883,41 @@ class RvrDriverNode(Node):
         #    cuestan un viaje extra al puerto serie ni despiertan nada.
         voltios = estado = None
         try:
-            r = await self._rvr.get_battery_voltage_in_volts(reading_type=0)
+            # 🔴 Con `timeout=None` un RVR mudo dejaría esta corrutina esperando
+            #    para siempre, y **no se publicaría `/battery_state` en absoluto**
+            #    — ni siquiera el porcentaje, que ya se leyó bien más arriba.
+            #    Y el topic es TRANSIENT_LOCAL: un suscriptor tardío recibiría el
+            #    último voltaje bueno *latched*, y la web tiene instrucción de
+            #    mirar `voltage`.
+            #    3 s: de sobra para una lectura, y muy por debajo de los 30 s del
+            #    keepalive, así que dos pasadas no se solapan.
+            r = await self._rvr.get_battery_voltage_in_volts(
+                reading_type=BatteryVoltageReadingTypesEnum.calibrated_and_filtered,
+                timeout=3.0)
             voltios = float(r['voltage'])
         except Exception as e:                                  # noqa: BLE001
-            self._avisar_una_vez('bat_v', f'sin voltaje de batería: {e}')
+            # 🔴 NO se usa `_avisar_una_vez`: su set de claves no se vacía nunca,
+            #    así que un fallo transitorio al arrancar quemaría la clave y un
+            #    fallo PERMANENTE después sería invisible — `voltage` volvería a
+            #    NaN cada 30 s en silencio. Se avisa en cada TRANSICIÓN.
+            if self._bat_v_ok:
+                self.get_logger().warn(f'sin voltaje de batería: {e}')
+            self._bat_v_ok = False
+        else:
+            if not self._bat_v_ok:
+                self.get_logger().info('voltaje de batería recuperado')
+            self._bat_v_ok = True
         try:
-            r = await self._rvr.get_battery_voltage_state()
+            r = await self._rvr.get_battery_voltage_state(timeout=3.0)
             estado = int(r['state'])
         except Exception as e:                                  # noqa: BLE001
-            self._avisar_una_vez('bat_s', f'sin estado de batería: {e}')
+            if self._bat_s_ok:
+                self.get_logger().warn(f'sin estado de batería: {e}')
+            self._bat_s_ok = False
+        else:
+            if not self._bat_s_ok:
+                self.get_logger().info('estado de batería recuperado')
+            self._bat_s_ok = True
 
         # El SDK devuelve {'percentage': N}. Si algún día cambia, es preferible
         # un aviso a un KeyError que mata el keepalive para siempre.
@@ -919,7 +965,7 @@ class RvrDriverNode(Node):
         # 🔴 El aviso se da al CAMBIAR de estado, no en cada lectura: un WARN cada
         #    30 s durante media hora es ruido que se acaba ignorando. Y la
         #    histéresis (0.2 V) la aplica el FIRMWARE, así que no rebota sola.
-        if estado is not None and estado != getattr(self, '_estado_bateria', None):
+        if estado is not None and estado != self._estado_bateria:
             nombre = {0: 'desconocido', 1: 'ok', 2: 'BAJA', 3: 'CRÍTICA'}.get(estado, '?')
             v = f'{voltios:.2f} V' if voltios is not None else 'sin voltaje'
             if estado == 3:

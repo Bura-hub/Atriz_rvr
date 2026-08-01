@@ -1,0 +1,67 @@
+--- a/src/ydlidar_ros2_driver_node.cpp
++++ b/src/ydlidar_ros2_driver_node.cpp
+@@ -20,6 +20,7 @@
+ #include <memory>
+ #include "sensor_msgs/msg/point_cloud.hpp"
+ #include "rclcpp/clock.hpp"
++#include <atomic>
+ #include "rclcpp/rclcpp.hpp"
+ #include "rclcpp/time_source.hpp"
+ #include "sensor_msgs/msg/laser_scan.hpp"
+@@ -187,21 +188,37 @@
+   auto laser_pub = node->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS());
+   auto pc_pub = node->create_publisher<sensor_msgs::msg::PointCloud>("point_cloud", rclcpp::SensorDataQoS());
+   
++  // ── PARCHE ATRIZ: recordar si el barrido esta encendido ──────────────────
++  // El driver original llama a turnOff() y NO GUARDA ESE ESTADO, asi que el
++  // bucle de abajo sigue sondeando el puerto serie 20 veces por segundo, falla
++  // siempre, y emite "Failed to get scan" a ese ritmo.
++  //
++  // Medido en rvr-01 el 2026-08-01: 25 errores/s = el 99 % del journal del
++  // servicio (47 291 de 47 551 lineas), 2.17 millones de mensajes al dia POR
++  // ROBOT. Eso ahoga cualquier error de verdad y son escrituras 24/7 sobre una
++  // microSD, que es lo que las mata.
++  //
++  // El barrido apagado es el ESTADO NORMAL en reposo de los 16 robots
++  // (decision de diseño: si no, el X2 gira a 11.8 Hz 24/7 en vez de a 2.7).
++  std::atomic<bool> escaneando{true};   // turnOn() ya se llamo mas arriba
++
+   auto stop_scan_service =
+-    [&laser](const std::shared_ptr<rmw_request_id_t> request_header,
++    [&laser, &escaneando](const std::shared_ptr<rmw_request_id_t> request_header,
+   const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+   std::shared_ptr<std_srvs::srv::Empty::Response> response) -> bool
+   {
++    escaneando = false;
+     return laser.turnOff();
+   };
+ 
+   auto stop_service = node->create_service<std_srvs::srv::Empty>("stop_scan",stop_scan_service);
+ 
+   auto start_scan_service =
+-    [&laser](const std::shared_ptr<rmw_request_id_t> request_header,
++    [&laser, &escaneando](const std::shared_ptr<rmw_request_id_t> request_header,
+   const std::shared_ptr<std_srvs::srv::Empty::Request> req,
+   std::shared_ptr<std_srvs::srv::Empty::Response> response) -> bool
+   {
++    escaneando = true;
+     return laser.turnOn();
+   };
+ 
+@@ -211,6 +228,16 @@
+ 
+   while (ret && rclcpp::ok()) {
+ 
++    // ── PARCHE ATRIZ ────────────────────────────────────────────────────────
++    // Con el barrido parado NO se sondea el puerto. Se sigue atendiendo a ROS
++    // —los servicios tienen que responder para poder volver a encenderlo— pero
++    // no se toca el hardware ni se escribe en el log.
++    if (!escaneando) {
++      rclcpp::spin_some(node);
++      loop_rate.sleep();
++      continue;
++    }
++
+     LaserScan scan;//
+ 
+     if (laser.doProcessSimple(scan)) {

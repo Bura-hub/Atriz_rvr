@@ -213,6 +213,17 @@ class RvrDriverNode(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         # La IMU vive en su propio frame: los datos NO están en base_frame.
         self.declare_parameter('imu_frame', 'imu_link')
+        # El CHASIS. Es distinto de `base_frame` (que es `base_footprint`, la
+        # proyección en el suelo) porque los sensores están en el cuerpo, no en
+        # el suelo. Lo usan `/ambient_light` y `/motor_status`.
+        #
+        # 🔴 ESTABA ESCRITO A FUEGO en esos dos publicadores hasta el 2026-08-01.
+        #    Con `namespace` sin usar hoy daba igual, pero dejaba ROTO el camino
+        #    de escape: si algún día se mete a los 16 robots en un mismo dominio
+        #    DDS, un namespace renombra los TOPICS pero **no los `frame_id`**, y
+        #    estos dos se habrían quedado sin prefijo partiendo el árbol TF — el
+        #    mismo fallo que costó la Fase 3. Ahora es un parámetro.
+        self.declare_parameter('body_frame', 'base_link')
         self.declare_parameter('streaming_interval_ms', INTERVALO_STREAMING_MS)
         self.declare_parameter('cmd_vel_timeout', 0.3)
         self.declare_parameter('publish_tf', True)
@@ -235,6 +246,7 @@ class RvrDriverNode(Node):
         self._odom_frame = p('odom_frame').value
         self._base_frame = p('base_frame').value
         self._imu_frame = p('imu_frame').value
+        self._body_frame = p('body_frame').value
         self._intervalo_ms = int(p('streaming_interval_ms').value)
         self._cmd_vel_timeout = float(p('cmd_vel_timeout').value)
         self._publicar_tf = bool(p('publish_tf').value)
@@ -1424,7 +1436,7 @@ class RvrDriverNode(Node):
             self._t_ultima_muestra = self._ahora_s()
         m = Illuminance()
         m.header.stamp = self.get_clock().now().to_msg()
-        m.header.frame_id = 'base_link'
+        m.header.frame_id = self._body_frame
         m.illuminance = float(datos['AmbientLight']['Light'])
         m.variance = 0.0            # 0.0 = desconocida (REP de sensor_msgs)
         self.pub_luz.publish(m)
@@ -1583,7 +1595,7 @@ class RvrDriverNode(Node):
                 -1.0 if self._t_ultimo_termico is None
                 else float(ahora - self._t_ultimo_termico))
         m.header.stamp = self.get_clock().now().to_msg()
-        m.header.frame_id = 'base_link'
+        m.header.frame_id = self._body_frame
         self.pub_motores.publish(m)
 
     def _quiza_publicar(self, componente: str) -> None:

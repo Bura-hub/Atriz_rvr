@@ -745,6 +745,20 @@ class RvrDriverNode(Node):
             await self._rvr.wake()
             await self._rvr.reset_yaw()
             await self._rvr.reset_locator_x_and_y()
+
+            # Los umbrales de batería del FIRMWARE, una vez y al log. La web los
+            # necesita para interpretar el `voltage` de `/battery_state`, y así
+            # no se codifican a mano en dos sitios: se leen de donde son verdad.
+            # Medidos en rvr-01: low 7.0 V · critical 6.5 V · histéresis 0.2 V.
+            try:
+                u = await self._rvr.get_battery_voltage_state_thresholds()
+                self.get_logger().info(
+                    f"umbrales de batería (firmware): baja {u['low_threshold']:.2f} V · "
+                    f"crítica {u['critical_threshold']:.2f} V · "
+                    f"histéresis {u['hysteresis']:.2f} V")
+            except Exception as e:                              # noqa: BLE001
+                self.get_logger().warn(f'sin umbrales de batería: {e}')
+
             await self._registrar_sensores()
             await self._registrar_notificaciones()
             await self._rvr.sensor_control.start(interval=self._intervalo_ms)
@@ -837,6 +851,28 @@ class RvrDriverNode(Node):
         """
         resp = await self._rvr.get_battery_percentage()
 
+        # ── Voltaje y estado, del propio firmware ────────────────────────
+        # 🔴 POR QUÉ NO BASTA EL PORCENTAJE: medido el 2026-08-01, decía **100 %**
+        #    con la batería a **8.29 V**, a 1.29 V del umbral de «low». El
+        #    porcentaje es una estimación gruesa; el voltaje y el estado son lo
+        #    que el firmware usa para decidir, con su propia histéresis.
+        #    Con 16 robots, «¿cuál se está quedando sin carga?» se responde con
+        #    esto, no con el porcentaje. Evidencia 43.
+        #
+        # 📝 Son dos lecturas más en la MISMA pasada del keepalive, así que no
+        #    cuestan un viaje extra al puerto serie ni despiertan nada.
+        voltios = estado = None
+        try:
+            r = await self._rvr.get_battery_voltage_in_volts(reading_type=0)
+            voltios = float(r['voltage'])
+        except Exception as e:                                  # noqa: BLE001
+            self._avisar_una_vez('bat_v', f'sin voltaje de batería: {e}')
+        try:
+            r = await self._rvr.get_battery_voltage_state()
+            estado = int(r['state'])
+        except Exception as e:                                  # noqa: BLE001
+            self._avisar_una_vez('bat_s', f'sin estado de batería: {e}')
+
         # El SDK devuelve {'percentage': N}. Si algún día cambia, es preferible
         # un aviso a un KeyError que mata el keepalive para siempre.
         if not isinstance(resp, dict) or 'percentage' not in resp:
@@ -851,19 +887,48 @@ class RvrDriverNode(Node):
         msg = BatteryState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self._base_frame
-        # El RVR da porcentaje, no voltios ni amperios. BatteryState usa NaN para
-        # «no medido», y poner ceros ahí mentiría: 0.0 V es un dato, no un hueco.
-        msg.voltage = float('nan')
+        # BatteryState usa NaN para «no medido», y poner ceros ahí mentiría:
+        # 0.0 V es un dato, no un hueco. El RVR no da amperios
+        # (`get_current_sense_amplifier_current` responde `bad_cid`, evidencia 41).
+        msg.voltage = voltios if voltios is not None else float('nan')
         msg.current = float('nan')
         msg.charge = float('nan')
         msg.capacity = float('nan')
         msg.design_capacity = float('nan')
         msg.percentage = pct / 100.0          # BatteryState lo quiere en 0.0–1.0
         msg.power_supply_status = BatteryState.POWER_SUPPLY_STATUS_UNKNOWN
-        msg.power_supply_health = BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN
+        # Estados del firmware: 0 unknown · 1 ok · 2 low · 3 critical.
+        #
+        # ⚠️ `power_supply_health` NO PUEDE EXPRESAR «low», y no se fuerza: una
+        #    batería con poca carga está SANA, no averiada. Marcarla como DEAD
+        #    engañaría a cualquier consumidor.
+        # 🔴 **La señal autoritativa para la web es `voltage`**, comparada con los
+        #    umbrales del firmware (low 7.0 V, critical 6.5 V), que se registran
+        #    en el log al arrancar. Aquí solo se refleja lo que el campo admite.
+        msg.power_supply_health = {
+            None: BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN,
+            0: BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN,
+            1: BatteryState.POWER_SUPPLY_HEALTH_GOOD,
+            2: BatteryState.POWER_SUPPLY_HEALTH_GOOD,   # «low» ≠ enferma
+            3: BatteryState.POWER_SUPPLY_HEALTH_DEAD,   # crítica: va a apagarse
+        }.get(estado, BatteryState.POWER_SUPPLY_HEALTH_UNKNOWN)
         msg.power_supply_technology = BatteryState.POWER_SUPPLY_TECHNOLOGY_LION
         msg.present = True
         self.pub_bateria.publish(msg)
+
+        # 🔴 El aviso se da al CAMBIAR de estado, no en cada lectura: un WARN cada
+        #    30 s durante media hora es ruido que se acaba ignorando. Y la
+        #    histéresis (0.2 V) la aplica el FIRMWARE, así que no rebota sola.
+        if estado is not None and estado != getattr(self, '_estado_bateria', None):
+            nombre = {0: 'desconocido', 1: 'ok', 2: 'BAJA', 3: 'CRÍTICA'}.get(estado, '?')
+            v = f'{voltios:.2f} V' if voltios is not None else 'sin voltaje'
+            if estado == 3:
+                self.get_logger().error(f'BATERÍA {nombre} ({v}) — el RVR se apagará')
+            elif estado == 2:
+                self.get_logger().warn(f'batería {nombre} ({v}) — toca cargar')
+            else:
+                self.get_logger().info(f'estado de batería: {nombre} ({v})')
+            self._estado_bateria = estado
 
         # Se avisa al bajar de umbral, UNA vez por cruce y no en cada lectura:
         # un WARN cada 30 s durante media hora es ruido que se acaba ignorando,

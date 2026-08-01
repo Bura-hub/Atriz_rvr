@@ -950,9 +950,10 @@ class RvrDriverNode(Node):
                 'Deja un LED blanco encendido bajo el chasis mientras el driver viva.')
         else:
             self.get_logger().warn(
-                '/color publicará [0, 0, 0] y /ambient_light publicará 0.0: el '
-                'sensor óptico está APAGADO. Actívalo con color_detection:=true '
-                '— enciende un LED blanco bajo el chasis y gasta batería.')
+                '/color publicará [0, 0, 0]: el sensor de color está APAGADO. '
+                'Actívalo con color_detection:=true — enciende un LED blanco bajo '
+                'el chasis y gasta batería. (/ambient_light NO depende de esto: '
+                'es otro sensor, en otro sitio, y funciona igual.)')
 
         sc = self._rvr.sensor_control
         await sc.add_sensor_data_handler(RvrStreamingServices.locator, self._h_locator)
@@ -1372,16 +1373,21 @@ class RvrDriverNode(Node):
     async def _h_luz(self, datos) -> None:
         """Luz ambiente. Clave del stream: `AmbientLight` -> `Light`.
 
-        🔴 DA 0.0 SI `color_detection` ESTÁ APAGADO, que es lo normal. Medido el
-           2026-08-01: con el parámetro en `false` da **0.0 siempre** —incluso con
-           el robot LEVANTADO, 247 muestras seguidas— y por las dos vías, stream y
-           `get_ambient_light_sensor_value()`. Con `color_detection:=true` pasa a
-           **2.497**.
+        ✅ FUNCIONA SIEMPRE, y NO depende de `color_detection`. Este comentario
+           llegó a decir lo contrario y era **falso** — ver el manual, cap. 18.4.
 
-           El sensor de luz comparte la óptica del sensor de color y necesita el
-           mismo encendido. Es la misma trampa que dejó `/color` publicando
-           `[0,0,0]` a 16 Hz durante meses: **el topic existe, el ritmo es
-           correcto, y el dato es un cero constante**.
+        🔴 ES OTRO SENSOR, EN OTRO SITIO, que el de color. Medido el 2026-08-01, y
+           es la medida que lo separa:
+
+             · encender los 10 grupos de LED del chasis lo sube de **1.76 a
+               23.55** (13.3x). O sea que VE LOS PROPIOS LEDS DEL ROBOT.
+             · el sensor RGBC, en cambio, da valores **idénticos** con los LEDs en
+               rojo, verde o azul: está apantallado y solo ve lo que tiene debajo.
+
+           ⚠️ CONSECUENCIA PARA QUIEN LO USE: esta lectura **no mide la luz de la
+              sala**. Mide lo que le llega, y los LEDs del propio robot la dominan.
+              Si el robot enciende un LED, esta señal sube sin que la sala haya
+              cambiado.
 
         ⚠️ NO va por `_quiza_publicar`: no forma parte de `/odom`. Pero SÍ marca
            el latido, igual que el color — si no, un robot que solo enviara luz

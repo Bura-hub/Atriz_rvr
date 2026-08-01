@@ -59,7 +59,8 @@ VERIFICAR SIEMPRE tras arrancar:
     ros2 topic info /cmd_vel --verbose     # UN publicador, y es collision_monitor
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import (DeclareLaunchArgument, IncludeLaunchDescription,
+                            Shutdown)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -156,12 +157,28 @@ def generate_launch_description() -> LaunchDescription:
     seguridad_on = IfCondition(LaunchConfiguration('collision_monitor'))
 
     # ── El driver del RVR: publica odom -> base_footprint ─────────────────────
+    #
+    # 🔴 `on_exit=Shutdown()`: SI EL DRIVER MUERE, SE CAE EL LAUNCH ENTERO.
+    #
+    #    Sin esto, un nodo que muere deja el resto en pie —y `atriz-robot.service`
+    #    sigue en `active (running)`, porque su PID principal es el `ros2 launch`,
+    #    no el nodo. `Restart=always` NO se entera.
+    #
+    #    Medido el 2026-08-01: el driver estuvo **cuatro minutos muerto** por un
+    #    `SyntaxError` con el servicio en verde. En un laboratorio remoto eso es un
+    #    robot inservible sin que nadie lo sepa.
+    #
+    #    Con esto, la muerte del driver tumba el launch, systemd lo ve y lo
+    #    reinicia en ~15 s. Solo se pone en el DRIVER: sin él no hay robot. Si se
+    #    cae el LIDAR el robot sigue siendo útil para teleoperar, así que ese no
+    #    tumba nada.
     rvr = Node(
         package='atriz_rvr_driver',
         executable='rvr_driver_node',
         name='rvr_driver',
         namespace=ns,
         output='screen',
+        on_exit=Shutdown(),
         parameters=[{
             'serial_port': LaunchConfiguration('rvr_port'),
             # 🔴 base_footprint, NO base_link. Un frame solo puede tener UN

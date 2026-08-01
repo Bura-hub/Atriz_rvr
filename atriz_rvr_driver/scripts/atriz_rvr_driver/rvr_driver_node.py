@@ -567,6 +567,22 @@ class RvrDriverNode(Node):
                 'deja de enviar, el nodo no lo dirá.'
             )
 
+        # 🔴 REPUBLICAR LA SALUD DE MOTORES A 1 Hz, aunque no haya cambiado.
+        #
+        #    El publicador es TRANSIENT_LOCAL, así que en teoría «un suscriptor
+        #    que llegue tarde recibe el último estado». **Eso resultó NO SER
+        #    FIABLE**: medido el 2026-08-01, un suscriptor nuevo se quedaba sin
+        #    recibir nada en 10 s **2 de cada 3 veces**, con el topic publicando
+        #    perfectamente y en su propio proceso.
+        #
+        #    Con el sondeo cada 30 s, eso dejaba a la web hasta medio minuto a
+        #    ciegas sobre si un motor está en fallo — que es justo el dato que
+        #    decide si alguien tiene que ir al edificio.
+        #
+        #    Republicar es GRATIS: no toca el puerto serie, solo reenvía lo que ya
+        #    está en memoria. El SONDEO sigue a 30 s, que es lo que sí cuesta.
+        self.create_timer(1.0, self._publicar_motores, callback_group=g_salud)
+
         self.get_logger().info(
             f'rvr_driver arrancando · puerto={self._puerto} baud={self._baud} '
             f'interval={self._intervalo_ms}ms frames={self._odom_frame}->{self._base_frame} '

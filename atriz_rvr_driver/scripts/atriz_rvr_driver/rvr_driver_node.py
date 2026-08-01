@@ -93,13 +93,14 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
-from sensor_msgs.msg import BatteryState, Imu
+from sensor_msgs.msg import BatteryState, Illuminance, Imu
 from std_msgs.msg import Empty
 from std_srvs.srv import Empty as EmptySrv
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
-from atriz_rvr_msgs.msg import Color, ControlState, MotorStatus, SystemInfo
+from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, MotorStatus,
+                                SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
     SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
@@ -253,6 +254,13 @@ class RvrDriverNode(Node):
         self._conduciendo = False
         self._t_ultimo_cmd_vel = 0.0
         self._recibidos: set[str] = set()
+        # 🔴 CONJUNTO APARTE, no `_recibidos`. `_quiza_publicar` VACÍA `_recibidos`
+        #    en cada ciclo de /odom —es el juego de componentes recibidos— así que
+        #    un «avisa una vez» apoyado en él avisaba 13 VECES POR SEGUNDO, desde
+        #    el hilo de asyncio y contra el journal. Medido el 2026-08-01: bastó
+        #    para tumbar la telemetría entera y hacer creer que la culpa era de
+        #    un comando de LED.
+        self._avisos_dados: set[str] = set()
         self._lock = threading.Lock()
 
         # ── Salud de los motores ─────────────────────────────────────────────
@@ -357,6 +365,20 @@ class RvrDriverNode(Node):
         self.pub_odom = self.create_publisher(Odometry, 'odom', qos_tel)
         self.pub_imu = self.create_publisher(Imu, 'imu', qos_tel)
         self.pub_color = self.create_publisher(Color, 'color', qos_tel)
+        # Los dos que faltaban del driver de ROS 1. Van con el MISMO QoS que el
+        # resto de la telemetría: son flujos continuos, no estados.
+        #
+        # 📝 `sensor_msgs/Illuminance` y no `std_msgs/Float32` como en ROS 1:
+        #    lleva `header`, así que el dato viene fechado. ⚠️ El campo se llama
+        #    `illuminance` y su unidad canónica es el LUX — pero **este valor NO
+        #    está calibrado contra ningún patrón**: es lo que reporta el RVR.
+        #    Por eso `variance` va a 0.0, que en ROS significa «desconocida», y
+        #    no a un número inventado.
+        self.pub_luz = self.create_publisher(Illuminance, 'ambient_light', qos_tel)
+        # Los encoders son la ÚNICA fuente que no depende del marco de
+        # referencia (7792 ticks/m, calibrados contra cinta métrica), así que un
+        # flujo continuo vale para depurar la odometría, no solo el servicio.
+        self.pub_encoders = self.create_publisher(Encoder, 'encoders', qos_tel)
         self._tf = TransformBroadcaster(self) if self._publicar_tf else None
 
         # La batería es un subproducto GRATIS del keepalive: para no dormirse hay
@@ -928,9 +950,9 @@ class RvrDriverNode(Node):
                 'Deja un LED blanco encendido bajo el chasis mientras el driver viva.')
         else:
             self.get_logger().warn(
-                '/color publicará [0, 0, 0]: el sensor de color está APAGADO. '
-                'Actívalo con color_detection:=true — enciende un LED blanco bajo '
-                'el chasis y gasta batería.')
+                '/color publicará [0, 0, 0] y /ambient_light publicará 0.0: el '
+                'sensor óptico está APAGADO. Actívalo con color_detection:=true '
+                '— enciende un LED blanco bajo el chasis y gasta batería.')
 
         sc = self._rvr.sensor_control
         await sc.add_sensor_data_handler(RvrStreamingServices.locator, self._h_locator)
@@ -939,6 +961,8 @@ class RvrDriverNode(Node):
         await sc.add_sensor_data_handler(RvrStreamingServices.velocity, self._h_velocity)
         await sc.add_sensor_data_handler(RvrStreamingServices.accelerometer, self._h_accel)
         await sc.add_sensor_data_handler(RvrStreamingServices.color_detection, self._h_color)
+        await sc.add_sensor_data_handler(RvrStreamingServices.ambient_light, self._h_luz)
+        await sc.add_sensor_data_handler(RvrStreamingServices.encoders, self._h_encoders)
 
     async def _registrar_notificaciones(self) -> None:
         """Notificaciones por EVENTO del RVR: atasco, fallo y térmica de motores.
@@ -1011,6 +1035,7 @@ class RvrDriverNode(Node):
         #    no esperando, y este primer sondeo llena `/motor_status` con datos
         #    de verdad desde el arranque en vez de con el valor inicial.
         await self._sondear_motores()
+
 
     async def _sondear_motores(self) -> None:
         """Pregunta al RVR por el fallo y la térmica de los motores.
@@ -1344,6 +1369,66 @@ class RvrDriverNode(Node):
         msg.confidence = float(c['Confidence'])
         self.pub_color.publish(msg)
 
+    async def _h_luz(self, datos) -> None:
+        """Luz ambiente. Clave del stream: `AmbientLight` -> `Light`.
+
+        🔴 DA 0.0 SI `color_detection` ESTÁ APAGADO, que es lo normal. Medido el
+           2026-08-01: con el parámetro en `false` da **0.0 siempre** —incluso con
+           el robot LEVANTADO, 247 muestras seguidas— y por las dos vías, stream y
+           `get_ambient_light_sensor_value()`. Con `color_detection:=true` pasa a
+           **2.497**.
+
+           El sensor de luz comparte la óptica del sensor de color y necesita el
+           mismo encendido. Es la misma trampa que dejó `/color` publicando
+           `[0,0,0]` a 16 Hz durante meses: **el topic existe, el ritmo es
+           correcto, y el dato es un cero constante**.
+
+        ⚠️ NO va por `_quiza_publicar`: no forma parte de `/odom`. Pero SÍ marca
+           el latido, igual que el color — si no, un robot que solo enviara luz
+           parecería mudo al detector de silencio.
+        """
+        with self._lock:
+            self._t_ultima_muestra = self._ahora_s()
+        m = Illuminance()
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = 'base_link'
+        m.illuminance = float(datos['AmbientLight']['Light'])
+        m.variance = 0.0            # 0.0 = desconocida (REP de sensor_msgs)
+        self.pub_luz.publish(m)
+
+    async def _h_encoders(self, datos) -> None:
+        """Cuentas de encoder. Clave del stream: `Encoders` -> `Left`, `Right`.
+
+        📝 7792 ticks/m, calibrados contra cinta métrica (CLAUDE.md). Es la única
+           fuente del robot que NO depende del marco de referencia, así que sirve
+           para contrastar `/odom` cuando se sospecha de los marcos.
+        """
+        with self._lock:
+            self._t_ultima_muestra = self._ahora_s()
+        e = datos['Encoders']
+        m = Encoder()
+        # 🔴 LAS CLAVES SON `LeftTicks`/`RightTicks`, NO `Left`/`Right`. La tabla
+        #    de documentación del propio SDK
+        #    (`sensor_streaming_control.py`, «| Encoders | Left, Right |») dice
+        #    otra cosa que el payload real. Con las claves malas el handler
+        #    lanzaba `KeyError`, el topic quedaba registrado y **cero mensajes**:
+        #    el síntoma exacto de un RVR dormido. Medido el 2026-08-01 mirando el
+        #    dict crudo, que es lo único que lo desempata.
+        #
+        # 🔴 Y VIENEN SIN SIGNO, en 32 bits: un retroceso llega como 4294965940,
+        #    que son -1356. `Encoder.msg` es int32, así que sin convertir se
+        #    publicaría un número absurdo — y creciente, que es peor: parecería
+        #    un encoder que funciona.
+        m.left_wheel_count = self._u32_a_signed(e['LeftTicks'])
+        m.right_wheel_count = self._u32_a_signed(e['RightTicks'])
+        self.pub_encoders.publish(m)
+
+    @staticmethod
+    def _u32_a_signed(v) -> int:
+        """Entero de 32 bits sin signo -> con signo. 4294965940 -> -1356."""
+        v = int(v)
+        return v - (1 << 32) if v >= (1 << 31) else v
+
     # ── Salud de los motores (notificaciones por evento) ─────────────────────
     #
     # 🔴 ESTOS TRES CORREN EN EL HILO DE ASYNCIO, igual que los handlers de
@@ -1432,8 +1517,8 @@ class RvrDriverNode(Node):
     def _avisar_una_vez(self, clave: str, mensaje: str) -> None:
         """Un aviso repetido a 16 Hz llena el journal y esconde lo demás."""
         with self._lock:
-            visto = clave in self._recibidos
-            self._recibidos.add(clave)
+            visto = clave in self._avisos_dados
+            self._avisos_dados.add(clave)
         if not visto:
             self.get_logger().warn(mensaje)
 
@@ -1589,6 +1674,33 @@ class RvrDriverNode(Node):
     #    `RvrLedGroups`, sino `enable_color_detection`. Si no se desactiva, se
     #    queda encendido gastando batería (CLAUDE.md).
 
+    @staticmethod
+    def _brillos_para(grupo: int, r: int, g: int, b: int) -> list[int]:
+        """Cuántos valores de brillo espera este grupo. NO son siempre tres.
+
+        🔴 ESTE ERA UN BUG REAL, y del peor tipo: `success=True` con el LED
+           apagado. Encontrado el 2026-08-01 mirando el robot mientras el
+           servicio decía que sí — el usuario vio encenderse diez de los doce
+           grupos, y los dos que faltaban son justo los que NO tienen 3 canales.
+
+        `led_group` es una MÁSCARA DE BITS, un bit por canal, y `set_all_leds`
+        espera **un valor de brillo por bit encendido**:
+
+            los 10 grupos normales   3 bits  -> [r, g, b]
+            all_lights              30 bits  -> [r, g, b] x 10
+            undercarriage_white      1 bit   -> un solo valor (es blanco, no RGB)
+
+        Mandar tres valores a un grupo de 1 o de 30 bits no da error: el RVR lo
+        acepta y no hace nada. Por eso hay que contar los bits en vez de suponer.
+        """
+        bits = bin(grupo).count('1')
+        if bits % 3 == 0:
+            return [r, g, b] * (bits // 3)
+        # Un LED de canal único (el blanco de los bajos): no tiene color, solo
+        # brillo. Se usa el máximo de los tres para que «ponme rojo» encienda
+        # algo en vez de quedarse a oscuras por tener el verde y el azul a cero.
+        return [max(r, g, b)] * bits
+
     def _srv_led_rgb(self, req, resp):
         """Un LED, un color."""
         if not 0 <= req.led_id < len(self.LEDS):
@@ -1603,7 +1715,8 @@ class RvrDriverNode(Node):
         ok, _, msg = self._pedir(
             self._rvr.set_all_leds(
                 led_group=grupo,
-                led_brightness_values=[req.red, req.green, req.blue]),
+                led_brightness_values=self._brillos_para(
+                    grupo, req.red, req.green, req.blue)),
             f'set_led_rgb({self.LEDS[req.led_id]})')
         resp.success = ok
         resp.message = msg or f'{self.LEDS[req.led_id]} = ({req.red}, {req.green}, {req.blue})'
@@ -1629,10 +1742,11 @@ class RvrDriverNode(Node):
                 return resp
         hechos = []
         for i, r, g, b in zip(req.led_ids, req.red_values, req.green_values, req.blue_values):
+            grupo_i = getattr(RvrLedGroups, self.LEDS[i]).value
             ok, _, msg = self._pedir(
                 self._rvr.set_all_leds(
-                    led_group=getattr(RvrLedGroups, self.LEDS[i]).value,
-                    led_brightness_values=[r, g, b]),
+                    led_group=grupo_i,
+                    led_brightness_values=self._brillos_para(grupo_i, r, g, b)),
                 f'set_multiple_leds({self.LEDS[i]})')
             if not ok:
                 resp.success, resp.message = False, f'falló en {self.LEDS[i]}: {msg}'
@@ -1648,10 +1762,14 @@ class RvrDriverNode(Node):
             self.get_logger().warn(
                 f'set_leds: rgb_color debe ser [r, g, b] con valores 0..255, llegó {c}')
             return resp
+        # `c * 10` era correcto —all_lights tiene 30 bits— pero se usa el helper
+        # para que exista UNA sola regla: si mañana cambia la máscara, cambia en
+        # un sitio. Este servicio funcionaba; los otros dos no.
         self._pedir(
             self._rvr.set_all_leds(
                 led_group=RvrLedGroups.all_lights.value,
-                led_brightness_values=c * 10),
+                led_brightness_values=self._brillos_para(
+                    RvrLedGroups.all_lights.value, *c)),
             'set_leds')
         return resp
 

@@ -59,8 +59,21 @@ uint8 estado_termico_derecho
 #    tranquilidad, que es peor que no publicar el campo.
 #
 #   fallo y térmica  -> se SONDEAN cada 30 s, así que su antigüedad es real
-#   atasco           -> solo existe por notificación, y en este firmware
-#                       NO LLEGA NINGUNA: se queda en -1.0 para siempre
+#   atasco           -> solo existe por notificación (el SDK no tiene
+#                       `get_motor_stall_state`), y ✅ ESA NOTIFICACIÓN SÍ LLEGA:
+#                       verificado el 2026-08-01 con el robot bloqueado a mano,
+#                       3 de 3 detecciones y acertando la oruga las tres veces.
+#
+#                       🔴 Este comentario decía «NO LLEGA NINGUNA: se queda en
+#                       -1.0 para siempre». Era FALSO. La medida que lo afirmaba
+#                       forzó los motores con `raw_motors` —PWM crudo—, que se
+#                       salta el sistema de control del RVR, y la detección de
+#                       atasco vive DENTRO de ese sistema. Con `drive_rc_si_units`
+#                       (lo que usa `cmd_vel`) salta a los ~5 s.
+#
+#                       ⚠️ El -1.0 sigue apareciendo mientras no haya habido
+#                       ningún atasco desde que arrancó el driver: significa
+#                       «nunca se ha sabido nada», que es correcto.
 float32 antiguedad_atasco_s
 float32 antiguedad_fallo_s
 float32 antiguedad_termico_s

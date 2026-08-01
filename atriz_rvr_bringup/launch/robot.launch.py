@@ -138,6 +138,17 @@ def generate_launch_description() -> LaunchDescription:
     # luz: medido, canal claro 4 apagada contra 741 encendida, 185 veces
     # (manual, cap. 16). El driver lo avisa por el log al arrancar en vez de
     # publicar ceros en silencio, que es lo que hacía antes.
+    # 🔴 rosbridge: es POR DONDE HABLA LA WEB (ARQUITECTURA.md, D2). Va aquí y no
+    # en una unidad systemd propia porque así hereda el entorno ROS del servicio y
+    # el ROS_DOMAIN_ID del robot, que es justo lo que systemd no sabe dar solo.
+    #
+    # 📝 Por defecto ENCENDIDO: un robot al que la web no puede hablar no sirve
+    #    para nada en este laboratorio. Se apaga con `rosbridge:=false` para
+    #    depurar en local.
+    arg_rosbridge = DeclareLaunchArgument(
+        'rosbridge', default_value='true',
+        description='Servidor WebSocket para la web, en el puerto 9090.')
+
     arg_color = DeclareLaunchArgument(
         'color_detection', default_value='false',
         description='Encender el sensor de color. Con false, /color publica '
@@ -270,8 +281,21 @@ def generate_launch_description() -> LaunchDescription:
                      'node_names': ['collision_monitor']}],
     )
 
+    # El puente con la web. `unregister_timeout` alto: sobre un WiFi que ya
+    # registra reintentos, un corte breve no debe tirar las suscripciones del
+    # navegador.
+    #
+    # 📝 NO VERIFICADO todavía: `ros-jazzy-rosbridge-suite` no está instalado en
+    #    rvr-01 a fecha 2026-08-01. `provision.sh` ya lo instala.
+    puente = Node(
+        package='rosbridge_server', executable='rosbridge_websocket',
+        name='rosbridge_websocket', namespace=ns, output='screen',
+        condition=IfCondition(LaunchConfiguration('rosbridge')),
+        parameters=[{'port': 9090, 'use_sim_time': False}],
+    )
+
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
-        arg_inclinacion, arg_color,
-        rvr, desc, lidar, monitor, gestor_seguridad,
+        arg_inclinacion, arg_color, arg_rosbridge,
+        rvr, desc, lidar, monitor, gestor_seguridad, puente,
     ])

@@ -80,7 +80,13 @@
           van de borde interno a borde interno a 14.8 cm, o sea 18.3 entre
           centros. Comprobación: 14.8 + 2×3.5 = 21.8 ≈ 21.7 medidos de lado a
           lado. Las orugas ocupan TODO el ancho del robot. -->
-  <xacro:property name="base_length" value="0.182"/>   <!-- X, frente-atrás   ✅ medido -->
+  <!-- 🔴 0.190 desde el 2026-08-02, no 0.182. Las DOS estaban anotadas como
+       medidas con cinta y con orugas, y difieren 0.8 cm; se toma la mas reciente,
+       que es la misma con la que se midio `laser_x` — mezclarlas daria un modelo
+       incoherente consigo mismo. ⏳ Conviene arbitrarlo con una escuadra.
+       📝 No cambia `robot_radius`: hypot(9.5, 10.85) = 14.4 cm contra los
+          0.145 m configurados. 0.8 mm. -->
+  <xacro:property name="base_length" value="0.190"/>   <!-- X, frente-atrás   ✅ medido 2026-08-02 -->
   <xacro:property name="base_width"  value="0.217"/>   <!-- Y, lado a lado    ✅ medido -->
   <xacro:property name="base_height" value="0.070"/>   <!-- Z, suelo a la tapa ✅ medido -->
 
@@ -127,15 +133,28 @@
              no afecta a SLAM 2D ni a Nav2, que trabajan en el plano. Afecta a la
              visualización y a ese límite de altura.
 
-       ✅ CENTRADO y NIVELADO, confirmado por el usuario:
-          · x = 0, y = 0 (2026-07-30)
+       🔴 NO ESTABA CENTRADO EN X. Medido con cinta el 2026-08-02:
+          · chasis 19.0 cm de frente a atras (con orugas) -> centro en 9.5 cm
+          · centro del TAMBOR GIRATORIO a 9.0 cm del borde trasero
+          · => laser_x = -0.005 m, medio centimetro POR DETRAS del centro
+          El «x = 0» de abajo venia del 2026-07-30 y estaba anotado como
+          «centrado» SIN cinta detras — igual que `laser_z`, que al medirse de
+          verdad resulto estar 2 cm mal.
+          📝 Lo destapo una discrepancia de ~2 cm entre lo que leia /scan tras
+             una parada del collision_monitor y lo que el usuario media en el
+             suelo. Con laser_x = 0 el residuo era 2.3 cm (fuera del ruido de
+             medida); con -0.005 baja a 1.4, que ya no se distingue del error
+             de la propia cinta. Evidencia 51.
+
+       ✅ CENTRADO EN Y y NIVELADO, confirmado por el usuario:
+          · y = 0, medido con cinta sobre los 21.7 cm de ancho (2026-08-02)
           · el disco está a la MISMA altura en los cuatro puntos —delante, detrás,
             izquierda y derecha— (2026-07-31). Es decir: **el robot está físicamente
             horizontal**, y la inclinación de ~8° que reporta la IMU NO es real.
             Ver la cabecera de `rvr_driver_node.py` y el manual, cap. 13.
        ═══════════════════════════════════════════════════════════════════════ -->
-  <xacro:property name="laser_x"   value="0.0"/>
-  <xacro:property name="laser_y"   value="0.0"/>
+  <xacro:property name="laser_x"   value="-0.005"/>  <!-- ✅ medido 2026-08-02 -->
+  <xacro:property name="laser_y"   value="0.0"/>     <!-- ✅ medido 2026-08-02 -->
   <xacro:property name="laser_gap" value="0.046"/>   <!-- tapa → base del LIDAR ✅ -->
   <xacro:property name="x2_height" value="0.050"/>   <!-- alto del X2 ✅ medido -->
   <!-- 🔴 VALOR DIRECTO, no la suma. La suma daba 0.1745 con una ficha

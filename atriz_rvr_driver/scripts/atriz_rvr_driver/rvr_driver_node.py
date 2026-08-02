@@ -269,6 +269,8 @@ class RvrDriverNode(Node):
         # Batería: último estado del firmware visto, y si las lecturas van bien.
         # Aquí y no con `getattr`, que es donde nadie los busca.
         self._estado_bateria = None
+        #: Ultimo estado sano/fallo de cada sondeo periodico, para `_avisar_transicion`.
+        self._estado_sondeo: dict = {}
         self._bat_v_ok = True
         self._bat_s_ok = True
         self._recibidos: set[str] = set()
@@ -869,7 +871,22 @@ class RvrDriverNode(Node):
         el enlace con el RVR se ha caído, y llega antes que el detector de
         silencio. `_enviar` la registra en el log a través de su callback.
         """
-        resp = await self._rvr.get_battery_percentage()
+        # 🔴 TIMEOUT AQUI TAMBIEN, y esta es la linea que importa: es la PRIMERA
+        #    del keepalive. `get_battery_percentage` declara `outputs`, asi que
+        #    espera respuesta — y sin tope esperaba PARA SIEMPRE.
+        #
+        #    Con el RVR mudo se colgaba aqui y **las lecturas de voltaje y estado
+        #    de abajo no llegaban a ejecutarse nunca**: sus `timeout=3.0` eran
+        #    irrelevantes. `/battery_state` dejaba de publicarse entero y, al ser
+        #    TRANSIENT_LOCAL, un suscriptor tardio recibia el ultimo voltaje bueno
+        #    *latched* — exactamente el daño que el comentario de abajo dice
+        #    evitar. Y sin una linea en el log: `_enviar` registra por
+        #    `add_done_callback`, y ese future no termina nunca.
+        #
+        #    Preexistente (2026-07-30), pero encontrado el 2026-08-01 en una
+        #    auditoria adversarial de los arreglos de ESE MISMO DIA. 📝 Arreglar
+        #    dos de tres llamadas deja el fallo intacto: **la mas temprana manda**.
+        resp = await self._rvr.get_battery_percentage(timeout=3.0)
 
         # ── Voltaje y estado, del propio firmware ────────────────────────
         # 🔴 POR QUÉ NO BASTA EL PORCENTAJE: medido el 2026-08-01, decía **100 %**
@@ -938,6 +955,9 @@ class RvrDriverNode(Node):
         # (`get_current_sense_amplifier_current` responde `bad_cid`, evidencia 41).
         msg.voltage = voltios if voltios is not None else float('nan')
         msg.current = float('nan')
+        # Coherencia con el criterio de arriba: el RVR no da temperatura de
+        # BATERIA (la de `/motor_status` es de los motores), así que NaN, no 0.0.
+        msg.temperature = float('nan')
         msg.charge = float('nan')
         msg.capacity = float('nan')
         msg.design_capacity = float('nan')
@@ -1669,6 +1689,26 @@ class RvrDriverNode(Node):
         except Exception:                                   # noqa: BLE001
             self._avisar_una_vez('motor_term_exc',
                                  f'fallo en _h_motor_termico:\n{traceback.format_exc()}')
+
+    def _avisar_transicion(self, clave: str, ok: bool, mensaje: str) -> None:
+        """Avisa en cada CAMBIO sano<->fallo, no una sola vez en la vida.
+
+        🔴 POR QUE NO VALE `_avisar_una_vez` PARA UN SONDEO PERIODICO: su conjunto
+           de claves **no se vacia nunca**. Un fallo transitorio al arrancar quema
+           la clave, y si despues empieza a fallar de verdad —cada 30 s, para
+           siempre— **no se dice ni una palabra**. El dato se queda congelado y
+           parece sano.
+
+           Encontrado el 2026-08-01: se habia arreglado en la bateria y **se dejo
+           en pie en el sondeo de motores**, que tiene el mismo patron.
+        """
+        with self._lock:
+            antes = self._estado_sondeo.get(clave, True)
+            self._estado_sondeo[clave] = ok
+        if ok and not antes:
+            self.get_logger().info(f'{clave}: recuperado')
+        elif not ok and antes:
+            self.get_logger().warn(mensaje)
 
     def _avisar_una_vez(self, clave: str, mensaje: str) -> None:
         """Un aviso repetido a 16 Hz llena el journal y esconde lo demás."""

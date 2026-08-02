@@ -281,21 +281,104 @@ def generate_launch_description() -> LaunchDescription:
                      'node_names': ['collision_monitor']}],
     )
 
-    # El puente con la web. `unregister_timeout` alto: sobre un WiFi que ya
-    # registra reintentos, un corte breve no debe tirar las suscripciones del
-    # navegador.
+    # ═══════════════════════════════════════════════════════════════════════
+    # EL PUENTE CON LA WEB, Y SU LISTA BLANCA
+    # ═══════════════════════════════════════════════════════════════════════
+    # 🔴🔴 HASTA EL 2026-08-02 ESTO ESTABA ABIERTO DE PAR EN PAR: solo se pasaba
+    #    `port`, y eso deja los 18 servicios del driver alcanzables por cualquiera
+    #    en la red — incluido `raw_motors`, que **se salta el collision_monitor y
+    #    el watchdog y no tiene corte automatico**. Verificado de extremo a
+    #    extremo: un navegador de otra subred abrio el WebSocket y encendio los
+    #    faros de un robot (evidencia 39).
     #
-    # 📝 NO VERIFICADO todavía: `ros-jazzy-rosbridge-suite` no está instalado en
-    #    rvr-01 a fecha 2026-08-01. `provision.sh` ya lo instala.
+    # 🔴 Y NO SE PUEDE ARREGLAR CON AUTENTICACION: **rosbridge 2.7.0 en Jazzy no
+    #    la tiene**. No es que este sin configurar — no existe: `rosauth` no es
+    #    dependencia, no hay parametro `authenticate`, la capacidad
+    #    `Authentication` no esta en el protocolo, y `check_origin()` devuelve
+    #    `True` incondicionalmente (`websocket_handler.py:233-234`), asi que
+    #    tampoco filtra por origen. Lo unico que ofrece son LISTAS BLANCAS.
+    #    → La identidad por usuario llega en la Fase B, con un proxy que valida
+    #      el JWT delante de un rosbridge atado a 127.0.0.1.
+    #      Diseño completo: `atriz_migracion/03_operacion/SEGURIDAD_ROSBRIDGE.md`
+    #
+    # 📝 SINTAXIS, que no es obvia (`rosbridge_websocket.py:115-126`): son CADENAS
+    #    que contienen una lista estilo Python de patrones **fnmatch**, no regex.
+    #        ""          -> sin filtro. TODO PERMITIDO. Era lo de antes.
+    #        "[]"        -> filtra y no casa nada: TODO DENEGADO.
+    #        "['/odom']" -> lista blanca.
+    #    Y `services_glob`, si no es None, recibe `/rosapi/*` automaticamente.
+    #
+    # 🔴 ROSBRIDGE DENIEGA EN SILENCIO: registra un `warn` y hace `return`, SIN
+    #    respuesta de error al cliente (`call_service.py:109-113`,
+    #    `publish.py:96-99`, `subscribe.py:296-299`). Una lista mal puesta se
+    #    manifiesta como «la web no responde», no como un fallo.
+    #    → Por eso existe `mediciones_banco/probar_lista_blanca.py`, que comprueba
+    #      las DOS direcciones: que lo prohibido se rechaza Y que lo permitido
+    #      sigue funcionando. Si tocas estas listas, pasalo.
+
+    #: Lo que la web LEE. Contrato en ARQUITECTURA.md.
+    LEER = ['/odom', '/imu', '/scan', '/battery_state', '/motor_status',
+            '/encoders', '/color', '/map', '/tf', '/tf_static',
+            '/collision_monitor_state', '/amcl_pose']
+
+    #: Lo que la web MANDA. 🔴 `cmd_vel_raw`, NUNCA `cmd_vel`: `/cmd_vel` es la
+    #: SALIDA del collision_monitor, y publicar ahi funciona y salta la seguridad
+    #: entera sin ningun aviso.
+    ESCRIBIR = ['/cmd_vel_raw', '/emergency_stop', '/initialpose']
+
+    #: Los servicios que la web necesita. De los 18 del driver, el ciclo normal
+    #: usa MUY POCOS.
+    #: 🔴 `set_pos_and_yaw` va DENTRO, y costo una revision darse cuenta: es el
+    #:    UNICO modo de poner la odometria a cero entre alumnos. `reset_odom` no
+    #:    existe; lo que hay es `set_pos_and_yaw(0,0,0)`, que llama a
+    #:    `reset_locator_x_and_y()` y pone `_yaw_offset = None`. Solo acepta
+    #:    (0,0,0) y rechaza el resto, asi que exponerlo es seguro. Sin el, la web
+    #:    no puede resetear entre sesiones.
+    #: 📝 `start_scan`/`stop_scan` son del nodo del YDLIDAR, no del driver.
+    SERVICIOS = ['/start_scan', '/stop_scan', '/release_emergency_stop',
+                 '/set_pos_and_yaw',
+                 '/set_led_rgb', '/set_multiple_leds', '/set_leds',
+                 '/trigger_led_event']
+
+    def _glob(lista):
+        """rosbridge quiere una CADENA con una lista, no una lista."""
+        return str(lista)
+
     puente = Node(
         package='rosbridge_server', executable='rosbridge_websocket',
         name='rosbridge_websocket', namespace=ns, output='screen',
         condition=IfCondition(LaunchConfiguration('rosbridge')),
-        parameters=[{'port': 9090, 'use_sim_time': False}],
+        parameters=[{
+            'port': 9090, 'use_sim_time': False,
+            'topics_sub_glob': _glob(LEER),
+            'topics_pub_glob': _glob(ESCRIBIR),
+            'services_glob': _glob(SERVICIOS),
+            'actions_glob': _glob(['/navigate_to_pose']),
+            # 🔴 La web NO cambia parametros ROS. "[]" es denegar todo; "" seria
+            #    permitir todo, que es justo lo contrario.
+            'params_glob': '[]',
+        }],
+    )
+
+    # 🔴 `rosapi_node` NO se arrancaba, y sin el `ros.getTopics()`,
+    #    `getServices()` y `getTopicType()` de roslibjs **se cuelgan sin error**:
+    #    ninguna UI puede descubrir topics por introspeccion. El launch oficial de
+    #    rosbridge si lo arranca; este no lo hacia.
+    #    Se levanta con las mismas listas para que la introspeccion no revele lo
+    #    que la lista blanca esconde.
+    introspeccion = Node(
+        package='rosapi', executable='rosapi_node',
+        name='rosapi', namespace=ns, output='screen',
+        condition=IfCondition(LaunchConfiguration('rosbridge')),
+        parameters=[{
+            'topics_glob': _glob(LEER + ESCRIBIR),
+            'services_glob': _glob(SERVICIOS),
+            'params_glob': '[]',
+        }],
     )
 
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
         arg_inclinacion, arg_color, arg_rosbridge,
-        rvr, desc, lidar, monitor, gestor_seguridad, puente,
+        rvr, desc, lidar, monitor, gestor_seguridad, puente, introspeccion,
     ])

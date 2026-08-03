@@ -1,6 +1,10 @@
 {
   "velocidad": 0.08,
-  "umbral_claro": 400,
+  "umbral_negro": 400,
+  "umbral_claro": 1000,
+  "margen_histeresis": 50,
+  "lado_borde": 1,
+  "tiempo_perdido_max": 1.0,
   "pid": {
     "kp": 0.5,
     "ki": 0.0,

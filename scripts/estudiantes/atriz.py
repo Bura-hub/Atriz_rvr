@@ -543,6 +543,13 @@ class Robot:
            cerrado. Para girar de verdad usa `girar(grados)`: mide el rumbo y
            acierta, y esta no — pidiendole 90 grados asi salen 86.6 / 86.2 /
            87.7 (n=3, medido en este robot).
+
+        🔴 Publica al MISMO ritmo que `girar()` (20 Hz: `mover()` + `sleep(0.05)`),
+           a proposito y NO con `_mandar()` (10 Hz). Si este lazo publicara a un
+           ritmo distinto del cerrado, la practica 4 estaria comparando DOS
+           variables a la vez (el sensor Y el ritmo de publicacion) y le
+           atribuiria el resultado a una sola — el mismo error de metodo que la
+           regla "mide antes de atribuir" de este proyecto existe para evitar.
         """
         velocidad, aviso = limitar(velocidad, VEL_GIRO_MAX, 'giro', 'rad/s')
         if aviso:
@@ -552,7 +559,8 @@ class Robot:
             print(aviso)
         limite = time.monotonic() + segundos
         while time.monotonic() < limite:
-            self._mandar(0.0, velocidad)
+            self.mover(0.0, velocidad)
+            time.sleep(0.05)
         self.parar()
 
     # ── Sensores ────────────────────────────────────────────────────────────

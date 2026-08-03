@@ -19,6 +19,22 @@ se aciertan una vez, y el alumno escribe robótica.
 Están documentadas una a una en `03_operacion/API_LABORATORIO.md`.
 """
 import math
+import signal
+import sys
+import threading
+import time
+
+import rclpy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from rcl_interfaces.srv import GetParameters
+from rclpy.executors import SingleThreadedExecutor
+from rclpy.node import Node
+from rclpy.qos import (QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy)
+from rclpy.signals import SignalHandlerOptions
+from sensor_msgs.msg import BatteryState, LaserScan
+from std_msgs.msg import Empty
+from std_srvs.srv import Empty as EmptySrv
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONSTANTES — cada una tiene una medida detrás. No se cambian sin otra.
@@ -111,3 +127,233 @@ def velocidad_giro(restante_rad):
     if restante > math.radians(8.0):
         return 0.40
     return 0.20
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EL ROBOT
+# ═══════════════════════════════════════════════════════════════════════════
+
+class Robot:
+    """El robot del laboratorio. Se conecta al construirlo.
+
+        with Robot() as robot:
+            robot.avanzar(0.20, 3)
+
+    Usa `with`: así el robot se para y el barrido se apaga aunque tu programa
+    falle a la mitad.
+    """
+
+    def __init__(self, velocidad_maxima=VEL_MAX):
+        self._vel_max = min(abs(float(velocidad_maxima)), VEL_MAX)
+        self._cerrado = False
+
+        # 🔴 signal_handler_options=NO, Y NO ES OPCIONAL.
+        #    `rclpy.init()` instala SU manejador de SIGINT e invalida su propio
+        #    contexto: el `except KeyboardInterrupt` que intenta parar el robot
+        #    muere con «publisher's context is invalid». Medido el 2026-08-02:
+        #    0 lineas de parada con el defecto, 5 con esta opcion. Y ES
+        #    INTERMITENTE, que es lo que lo hizo pasar desapercibido.
+        if not rclpy.ok():
+            rclpy.init(args=None,
+                       signal_handler_options=SignalHandlerOptions.NO)
+
+        self._nodo = Node('atriz_alumno')
+
+        # QoS de la telemetria: BEST_EFFORT. Un suscriptor RELIABLE NO RECIBE
+        # NADA, sin error — DDS no empareja. Es la misma trampa de QoS que costo
+        # la parada de emergencia.
+        sensor = QoSProfile(depth=10,
+                            reliability=QoSReliabilityPolicy.BEST_EFFORT)
+        # La bateria es la excepcion: el driver la publica RELIABLE +
+        # TRANSIENT_LOCAL cada 30 s. Pidiendo lo mismo, el ultimo valor llega al
+        # suscribirse en vez de esperar medio minuto.
+        latch = QoSProfile(depth=1,
+                           reliability=QoSReliabilityPolicy.RELIABLE,
+                           durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
+
+        self._odom = None
+        self._scan = None
+        self._bateria = None
+        self._nodo.create_subscription(
+            Odometry, '/odom', lambda m: setattr(self, '_odom', m), sensor)
+        self._nodo.create_subscription(
+            LaserScan, '/scan', lambda m: setattr(self, '_scan', m), sensor)
+        self._nodo.create_subscription(
+            BatteryState, '/battery_state',
+            lambda m: setattr(self, '_bateria', m), latch)
+
+        self._pub_mando = self._nodo.create_publisher(Twist, TOPIC_MANDO, 1)
+        # La parada: RELIABLE + VOLATILE. Es el QoS que costo el tercer fallo de
+        # este boton — TRANSIENT_LOCAL en el suscriptor solo RESTRINGE.
+        self._pub_parada = self._nodo.create_publisher(
+            Empty, '/emergency_stop',
+            QoSProfile(depth=1,
+                       reliability=QoSReliabilityPolicy.RELIABLE,
+                       durability=QoSDurabilityPolicy.VOLATILE))
+
+        self._cli_iniciar = self._nodo.create_client(EmptySrv, '/start_scan')
+        self._cli_parar_barrido = self._nodo.create_client(EmptySrv, '/stop_scan')
+        self._cli_param = self._nodo.create_client(
+            GetParameters, '/rvr_driver/get_parameters')
+
+        # 🔴 EJECUTOR PROPIO Y PERSISTENTE, en un hilo de fondo.
+        #    `rclpy.spin_once(nodo)` en bucle engancha y desengancha el nodo del
+        #    ejecutor global en cada llamada, y en ese hueco se PIERDEN mensajes:
+        #    11.3 Hz medidos sobre un robot que iba a 16.5.
+        #    Y por eso este fichero NO llama a `rclpy.spin_*` en ningun sitio:
+        #    mezclarlo con un ejecutor propio ya costo una hora de diagnostico
+        #    falso en este proyecto.
+        self._ejecutor = SingleThreadedExecutor()
+        self._ejecutor.add_node(self._nodo)
+        self._hilo = threading.Thread(target=self._ejecutor.spin, daemon=True,
+                                      name='atriz-ejecutor')
+        self._hilo.start()
+
+        signal.signal(signal.SIGINT, self._al_ctrl_c)
+
+        print('Conectando con el robot...')
+        self._encender_barrido()
+        self.hay_color = self._comprobar_color()
+        print('Robot listo.')
+
+    # ── Puertas de entrada y salida ─────────────────────────────────────────
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.cerrar()
+        return False
+
+    def cerrar(self):
+        """Para el robot y apaga el barrido. Se puede llamar dos veces."""
+        if self._cerrado:
+            return
+        self._cerrado = True
+        try:
+            self._mandar(0.0, 0.0, repeticiones=5)
+            self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
+                         timeout=5.0, que='/stop_scan')
+        except Exception as e:                               # noqa: BLE001
+            print(f'AVISO al cerrar: {e}')
+        finally:
+            # El barrido se apaga SIEMPRE que se pueda: si no, el X2 se queda
+            # girando a 11.8 Hz en vez de 2.7, 24/7 y por 16 robots.
+            self._ejecutor.shutdown()
+            self._nodo.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+
+    def _al_ctrl_c(self, _signum, _frame):
+        """Ctrl-C: para el robot y sale. NO dispara la parada de emergencia.
+
+        🔴 Y es a proposito. La parada SE QUEDA ENGANCHADA hasta que alguien
+           llame a /release_emergency_stop, asi que un Ctrl-C que la disparara
+           dejaria el SIGUIENTE script del alumno sin funcionar y sin
+           explicacion. El camino correcto para terminar es el normal: cero, y
+           el watchdog de 0.3 s por debajo.
+        """
+        print('\nCtrl-C: parando el robot...')
+        self.cerrar()
+        sys.exit(130)
+
+    # ── Arranque ────────────────────────────────────────────────────────────
+    def _encender_barrido(self):
+        """🔴 Sin /scan el robot NO OBEDECE, y parece averiado.
+
+        El barrido arranca apagado a proposito (si no, el X2 gira a 11.8 Hz
+        24/7). Sin `/scan` el collision_monitor bloquea el movimiento: medido
+        0.0 cm contra 9.9 del control. Desde fuera es identico a un robot roto.
+        """
+        self._llamar(self._cli_iniciar, EmptySrv.Request(),
+                     timeout=10.0, que='/start_scan')
+        # Que el servicio conteste no prueba que lleguen barridos: se espera al
+        # EFECTO, que es un /scan de verdad.
+        self._ultimo('_scan', timeout=8.0, que='/scan')
+
+    def _comprobar_color(self):
+        """¿Se arranco el robot con el sensor de color encendido?
+
+        🔴 No se puede encender bajo demanda: con el streaming ya montado,
+           `enable_color_detection` NO HACE NADA (481 mensajes, todos ceros). Se
+           decide en el arranque, y el servicio systemd usa el defecto: false.
+           Sin esta comprobacion, `color()` devuelve negro y parece un dato.
+        """
+        peticion = GetParameters.Request()
+        peticion.names = ['color_detection']
+        try:
+            resp = self._llamar(self._cli_param, peticion, timeout=5.0,
+                                que='/rvr_driver/get_parameters')
+            activo = bool(resp.values[0].bool_value)
+        except Exception:                                    # noqa: BLE001
+            print('AVISO: no se pudo consultar color_detection. '
+                  'color() puede devolver ceros.')
+            return False
+        if not activo:
+            print('AVISO: el sensor de color esta APAGADO en este robot.\n'
+                  '       color() devolvera ceros. Para usarlo, el robot tiene\n'
+                  '       que arrancar asi (lo hace el profesor):\n'
+                  '         sudo systemctl stop atriz-robot\n'
+                  '         ros2 launch atriz_rvr_bringup robot.launch.py '
+                  'color_detection:=true')
+        return activo
+
+    # ── Fontaneria ──────────────────────────────────────────────────────────
+    def _llamar(self, cliente, peticion, timeout, que):
+        """Llama a un servicio y espera SONDEANDO el futuro.
+
+        🔴 No se usa `rclpy.spin_until_future_complete`: este nodo ya esta en un
+           ejecutor propio, y mezclarlos deja de atender las suscripciones. Aqui
+           el futuro lo completa el hilo de fondo; este solo mira si ya esta.
+        """
+        if not cliente.wait_for_service(timeout_sec=timeout):
+            raise ErrorAtriz(
+                f'{que} no aparece. Comprueba que el robot esta encendido:\n'
+                f'  systemctl is-active atriz-robot')
+        futuro = cliente.call_async(peticion)
+        limite = time.monotonic() + timeout
+        while not futuro.done() and time.monotonic() < limite:
+            time.sleep(0.01)
+        if not futuro.done():
+            raise ErrorAtriz(f'{que} no contesto en {timeout:.0f} s.')
+        return futuro.result()
+
+    def _ultimo(self, atributo, timeout, que):
+        """El ultimo mensaje recibido de un topic, esperando si aun no llego."""
+        limite = time.monotonic() + timeout
+        while getattr(self, atributo) is None and time.monotonic() < limite:
+            time.sleep(0.02)
+        mensaje = getattr(self, atributo)
+        if mensaje is None:
+            raise ErrorAtriz(
+                f'no llega nada por {que} en {timeout:.0f} s. El topic puede '
+                f'existir y estar mudo: mira el RITMO, no la lista de topics.')
+        return mensaje
+
+    def mover(self, velocidad, giro):
+        """Manda UNA orden de velocidad y vuelve enseguida. Para lazos de control.
+
+        📝 A diferencia de `avanzar()`, esta NO bloquea ni republica: la tienes
+           que llamar tu en tu bucle, MAS DE TRES VECES POR SEGUNDO. Si no, el
+           watchdog del driver corta a los 0.3 s y el robot ira a tirones.
+        """
+        velocidad, aviso = limitar(velocidad, self._vel_max, 'velocidad', 'm/s')
+        if aviso:
+            print(aviso)
+        giro, aviso = limitar(giro, VEL_GIRO_MAX, 'giro', 'rad/s')
+        if aviso:
+            print(aviso)
+        orden = Twist()
+        orden.linear.x = float(velocidad)
+        orden.angular.z = float(giro)
+        self._pub_mando.publish(orden)
+
+    def _mandar(self, lineal, angular, repeticiones=1):
+        """Publica una velocidad en cmd_vel_raw, con el ritmo del watchdog.
+
+        Se apoya en `mover()` para que exista UNA sola regla de construccion de
+        la orden. Lo que anade es el RITMO: republicar a RITMO_HZ, que es lo que
+        el watchdog de 0.3 s del driver necesita.
+        """
+        for _ in range(repeticiones):
+            self.mover(lineal, angular)
+            time.sleep(1.0 / RITMO_HZ)

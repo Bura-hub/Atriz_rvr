@@ -313,7 +313,7 @@ class Robot:
                                       name='atriz-ejecutor')
         self._hilo.start()
 
-        # 🔴 LAS TRES SEÑALES, no solo SIGINT. Cerrar la terminal manda SIGHUP
+        # 🔴 LAS CUATRO SEÑALES, no solo SIGINT. Cerrar la terminal manda SIGHUP
         #    y `systemctl stop`/`kill` mandan SIGTERM: con el manejador solo en
         #    SIGINT, los dos mataban el proceso sin pasar por `cerrar()` y el
         #    barrido del X2 se quedaba encendido. El watchdog de 0.3 s del

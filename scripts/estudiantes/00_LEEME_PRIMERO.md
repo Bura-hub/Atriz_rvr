@@ -115,14 +115,24 @@ biblioteca **ignora a propósito** las pulsaciones nuevas: te lo dirá por panta
 adelanta nada y antes dejaba el LIDAR girando a toda velocidad.
 
 Cerrar la terminal o perder la conexión SSH también para el robot y apaga el
-barrido: la biblioteca escucha las tres señales que puede escuchar (`SIGINT`,
-`SIGTERM` y `SIGHUP`).
+barrido. La biblioteca escucha **cuatro** señales: `SIGINT` (Ctrl-C), `SIGQUIT`
+(Ctrl-\), `SIGTERM` (`kill`) y `SIGHUP` (cerrar la terminal o perder el SSH).
 
-⚠️ **Lo único que no se puede cubrir es `kill -9` y quedarse sin corriente.** Esas
-dos no se pueden capturar desde Python: el robot se para igual (el driver tiene un
-watchdog que corta la velocidad a los 0.3 s sin recibir órdenes), pero **el barrido
-del LIDAR se queda encendido** hasta que el profesor lo apague con
-`atriz-escaneo off`. El watchdog es de los motores; del LIDAR no sabe nada.
+⚠️ **Lo que NO se puede cubrir**, y conviene que lo sepas en vez de creer que está
+todo tapado:
+
+| Final del programa | ¿Para el robot? | ¿Apaga el barrido? |
+|---|---|---|
+| Ctrl-C, Ctrl-\, `kill`, cerrar terminal, SSH caído | sí, cierre limpio | **sí** |
+| Fin normal del programa, o error sin capturar | sí, cierre limpio | **sí** |
+| `kill -9`, corte de corriente, caída dura del intérprete | sí, por el **watchdog** | 🔴 **NO** |
+
+En la última fila no corre nada nuestro —ni el manejador de señal ni la red de
+`atexit`—, así que **el barrido del LIDAR se queda encendido** hasta que el profesor
+lo apague con `atriz-escaneo off`. El robot sí se para: el driver tiene un watchdog
+que corta la velocidad a los 0.3 s sin recibir órdenes. **Pero ese watchdog es de
+los motores; del LIDAR no sabe nada.** Son dos mecanismos distintos, y esa
+distinción es justo lo que mide `99_test_ctrl_c.py`.
 
 ---
 
@@ -132,7 +142,7 @@ Este laboratorio tiene una regla: *nada se documenta sin haberse ejecutado*. Se
 aplica también a lo que estás leyendo, así que aquí va la parte incómoda.
 
 **Ningún guion de esta carpeta se ha ejecutado nunca contra el robot moviéndose.**
-La biblioteca está escrita, revisada y con 76 tests automáticos, pero esos tests
+La biblioteca está escrita, revisada y con 89 tests automáticos, pero esos tests
 comprueban las **funciones puras** (aritmética de ángulos, límites, la secuencia de
 apagado) sin robot. Lo que **no** está medido:
 

@@ -60,14 +60,23 @@ RITMO_HZ = 10.0
 # 🔴 TODAS las señales que terminan un programa y SE PUEDEN capturar. Con solo
 #    SIGINT, cerrar la terminal (SIGHUP) o perder el SSH dejaba el barrido del
 #    X2 girando a 11.8 Hz para siempre: el watchdog de 0.3 s del driver para los
-#    MOTORES, pero no hay nada que apague el LIDAR. Verificado provocando las
-#    tres señales sobre un proceso real (bloque A del informe final).
-#    ⚠️ SIGKILL (`kill -9`) y un corte de corriente NO se pueden capturar: en
-#       esos dos casos el barrido se queda encendido y solo lo apaga el
-#       profesor con `atriz-escaneo off`. Está dicho así en 00_LEEME_PRIMERO.md.
+#    MOTORES, pero no hay nada que apague el LIDAR. Verificado provocando cada
+#    señal sobre un proceso real (bloque A del informe final).
+#
+#    🔴 SIGQUIT (Ctrl-\) ESTA EN LA LISTA, y estuvo fuera. Se puede capturar
+#       igual que las otras, y es el camino MAS probable justo despues de este
+#       arreglo: ahora la biblioteca ignora los Ctrl-C repetidos y pide esperar,
+#       y ese es exactamente el momento en que alguien prueba Ctrl-\. Medido sin
+#       capturarla: salida 131, «core dumped», barrido ENCENDIDO.
+#
+#    ⚠️ LO QUE NO SE PUEDE CUBRIR, y conviene tenerlo escrito: SIGKILL
+#       (`kill -9`), SIGSTOP, un corte de corriente, un `os._exit()` y una caida
+#       dura del interprete (SIGSEGV/SIGABRT). En esos casos NO corre ni el
+#       manejador ni `atexit`, y el barrido se queda encendido hasta que el
+#       profesor lo apague con `atriz-escaneo off`. Medido, no supuesto.
 SENALES_DE_CIERRE = tuple(
     senal for senal in (getattr(signal, nombre, None)
-                        for nombre in ('SIGINT', 'SIGTERM', 'SIGHUP'))
+                        for nombre in ('SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'))
     if senal is not None)
 
 
@@ -314,6 +323,12 @@ class Robot:
         # 🔴 Y la ultima red: salida normal SIN `with`, `sys.exit()`, o una
         #    excepcion que llega arriba del todo. En esos tres casos no hay
         #    `__exit__` ni señal, y hasta ahora tampoco habia cierre.
+        #    ⚠️ `atexit` NO es una garantia universal, y no hay que venderla
+        #       como tal. Medido: corre con salida normal, `sys.exit()` y
+        #       excepcion sin capturar; NO corre con `os._exit()`, SIGKILL,
+        #       SIGSEGV, SIGABRT ni ante una señal que nadie capture. Por eso
+        #       los manejadores de arriba no sobran: son los que convierten una
+        #       señal en una salida por la que `atexit` SI pasa.
         atexit.register(self.cerrar)
 
         print('Conectando con el robot...')
@@ -350,10 +365,19 @@ class Robot:
         """
         if self._cerrado:
             return
-        self._cerrado = True
-        # 🔴 Mientras dure el cierre, las señales se IGNORAN: es lo que impide
-        #    que un segundo Ctrl-C aborte el apagado del barrido.
+        # 🔴 EL ORDEN DE ESTAS DOS LINEAS ES LA MITAD DEL ARREGLO. `_cerrando`
+        #    va PRIMERO. Al reves quedaba una ventana de dos sentencias en la
+        #    que `_cerrado` ya era True pero el guardia AUN NO estaba puesto: si
+        #    la señal caia justo ahi, el manejador veia `_cerrando == False`,
+        #    llamaba a `cerrar()`, esta salia por `if self._cerrado: return` y
+        #    el manejador hacia `sys.exit()`. Ni parar, ni /stop_scan, ni
+        #    desmontar — la mecanica exacta del segundo Ctrl-C que este arreglo
+        #    venia a cerrar. Reproducido entregando la señal en ese punto:
+        #    rastro VACIO. Con este orden, lo peor que pasa es que el cierre
+        #    corra entero desde el manejador: ['parar', '/stop_scan',
+        #    'desmontar'].
         self._cerrando = True
+        self._cerrado = True
         try:
             secuencia_de_cierre(
                 parar=lambda: self._mandar(0.0, 0.0, repeticiones=5),
@@ -397,8 +421,8 @@ class Robot:
             rclpy.shutdown()
 
     def _al_senal(self, signum, _frame):
-        """SIGINT (Ctrl-C), SIGTERM (`kill`) y SIGHUP (cerrar la terminal o
-        perder el SSH): para el robot, apaga el barrido y sale.
+        """SIGINT (Ctrl-C), SIGQUIT (Ctrl-\\), SIGTERM (`kill`) y SIGHUP (cerrar
+        la terminal o perder el SSH): para el robot, apaga el barrido y sale.
 
         🔴 NO dispara la parada de emergencia, a proposito. La parada SE QUEDA
            ENGANCHADA hasta que alguien llame a /release_emergency_stop, asi que
@@ -651,10 +675,25 @@ class Robot:
             #       despues de la orden de parada; ese paso de mas vale
             #       0.20 x dt, o sea el doble a 10 Hz que a 20.
             #
-            #    Se deja en 20 Hz igualmente, por dos razones que si se
-            #    sostienen: (1) en angulos grandes el sobregiro baja de verdad,
-            #    y (2) `girar_por_tiempo()` publica tambien a 20 Hz para que la
-            #    practica 4 compare UNA sola variable (el sensor) y no dos.
+            #    🔴 Y la ventaja NO CRECE CON EL ANGULO. Barrido de 1 a 720
+            #       grados: solo hay DOS valores posibles, 0 o 0.5730 — nunca
+            #       otra cosa — y empata en la mitad de los angulos de todos
+            #       los rangos por igual (52 % en 1-90, 48 % en 91-180, 50 % en
+            #       181-360, 51 % en 361-720). Es ALIASING de reticula (un paso
+            #       de 10 Hz vale exactamente dos de 20, asi que lo que decide
+            #       es la paridad del ultimo tramo), no una tendencia. Sobre
+            #       720 grados, 0.5730 es el 0.08 %.
+            #       📝 Una version anterior de este comentario decia «en angulos
+            #          grandes el sobregiro baja de verdad». Era una
+            #          generalizacion a partir de cuatro muestras (90/180/360/
+            #          720) — el mismo error de metodo que este fichero
+            #          persigue. Los cuatro numeros eran correctos; la
+            #          conclusion, no.
+            #
+            #    Se deja en 20 Hz igualmente, y por UNA razon que si se
+            #    sostiene: `girar_por_tiempo()` publica tambien a 20 Hz, para
+            #    que la practica 4 compare UNA sola variable (el sensor) y no
+            #    dos. Bajar este lazo a 10 Hz obligaria a bajar el otro tambien.
             #    ⚠️ Y ojo con el limite real: /odom llega a 16.5 Hz, asi que por
             #       encima de eso quien fija el paso ya no es este bucle sino la
             #       odometria. Nada de esto esta medido sobre el robot.

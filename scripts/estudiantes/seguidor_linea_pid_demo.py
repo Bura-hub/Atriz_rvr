@@ -5,6 +5,17 @@
 
 🔴 NECESITA EL ARRANQUE CON color_detection:=true. Lee la practica 5.
 
+🔴 ANTES DE EJECUTARLO — ESPACIO: una pista con linea negra sobre suelo
+   claro, y sitio para al menos 6 METROS DE RECORRIDO, que es el tope que
+   trae este guion (`distancia_max_m` en seguidor_config.json). A 0.08 m/s
+   son unos 75 segundos. Son metros de CAMINO, no en linea recta: en un
+   circuito con curvas el robot recorre mas metros de los que avanza, asi
+   que un circuito cerrado de 2 m de lado vale de sobra, pero una pista
+   recta necesita 6 m de verdad.
+   ⚠️ Este aviso va AQUI ARRIBA a proposito: los mensajes que imprime el
+      programa salen DESPUES de que Robot() haya conectado y encendido el
+      LIDAR, o sea demasiado tarde para despejar el suelo.
+
 Coloca el robot mirando en la direccion de avance, con el sensor JUSTO
 sobre el borde derecho de la linea: la LINEA (negro) a su izquierda y el
 SUELO (claro) a su derecha.

@@ -536,6 +536,25 @@ class Robot:
                              acumulado)
         return math.degrees(acumulado)
 
+    def girar_por_tiempo(self, velocidad, segundos):
+        """Gira a `velocidad` rad/s durante `segundos`. LAZO ABIERTO.
+
+        📝 Existe SOLO para la practica 4, que compara el lazo abierto con el
+           cerrado. Para girar de verdad usa `girar(grados)`: mide el rumbo y
+           acierta, y esta no — pidiendole 90 grados asi salen 86.6 / 86.2 /
+           87.7 (n=3, medido en este robot).
+        """
+        velocidad, aviso = limitar(velocidad, VEL_GIRO_MAX, 'giro', 'rad/s')
+        if aviso:
+            print(aviso)
+        segundos, aviso = limitar(abs(segundos), TIEMPO_MAX, 'tiempo', 's')
+        if aviso:
+            print(aviso)
+        limite = time.monotonic() + segundos
+        while time.monotonic() < limite:
+            self._mandar(0.0, velocidad)
+        self.parar()
+
     # ── Sensores ────────────────────────────────────────────────────────────
     def color(self):
         """El color que ve el robot: (rojo, verde, azul, claro).

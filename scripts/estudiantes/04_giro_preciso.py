@@ -1,162 +1,67 @@
 #!/usr/bin/env python3
+"""Practica 4 — Girar bien: lazo abierto contra lazo cerrado.
+
+    python3 04_giro_preciso.py
+
+Antes de ejecutarlo: ~40 cm libres alrededor, y un transportador o una cinta
+para marcar el rumbo.
+
+⚠️ Y deja el robot encendido unos 10 minutos antes de medir. La odometria deriva
+   ~1 grado cada 30 s los primeros minutos tras encender el RVR, y 0.001 siete
+   minutos despues: midiendo en frio no sabrias si el error es del lazo o de eso.
+
+═══════════════════════════════════════════════════════════════════════════════
+LA IDEA
+═══════════════════════════════════════════════════════════════════════════════
+Girar «durante el tiempo justo» es un LAZO ABIERTO: mandas la orden y confias.
+En este robot, pidiendo 90 grados asi salen 86.6 / 86.2 / 87.7 — un deficit de
+unos 3 grados que NO depende de la bateria (se midio del 55 % al 100 %).
+
+La salida barata seria multiplicar por 1.04. Funcionaria hoy, en este suelo, con
+este robot y esta bateria. `robot.girar()` hace otra cosa: MIDE el rumbo
+mientras gira y para cuando llega. Eso es un LAZO CERRADO.
+
+Este programa hace los dos y te deja comparar.
 """
-Script con función mejorada para giros precisos en grados
+import math
+import time
 
-ESTE SCRIPT ENSEÑA CÁLCULOS PRECISOS DE GIROS
-- Convierte grados a radianes automáticamente
-- Calcula el tiempo necesario para cada giro
-- Permite giros positivos (izquierda) y negativos (derecha)
-- Introduce conceptos matemáticos básicos
-"""
+from atriz import Robot
 
-# ============================================
-# IMPORTACIONES NECESARIAS
-# ============================================
-import rospy                    # Biblioteca principal de ROS para Python
-from geometry_msgs.msg import Twist  # Tipo de mensaje para comandos de velocidad
-import signal                   # Para manejar señales del sistema (Ctrl+C)
-import sys                      # Para salir del programa
-import math                     # Para operaciones matemáticas (π, conversiones)
+OBJETIVO = 90.0
+VELOCIDAD_GIRO = 0.8        # rad/s
 
-# ============================================
-# VARIABLES GLOBALES
-# ============================================
-# Variable global para el publicador - la usaremos en toda la función
-pub = None
+with Robot() as robot:
 
-# ============================================
-# FUNCIÓN DE EMERGENCIA
-# ============================================
-def detener(signum=None, frame=None):
-    """
-    Función de emergencia que se ejecuta cuando presionas Ctrl+C
-    
-    Args:
-        signum: Número de la señal recibida (no lo usamos)
-        frame: Frame actual de ejecución (no lo usamos)
-    """
-    print("\n🛑 DETENIENDO ROBOT...")
-    
-    # Crear comando de parada (velocidades en cero)
-    cmd = Twist()
-    cmd.linear.x = 0.0   # Sin movimiento hacia adelante/atrás
-    cmd.angular.z = 0.0  # Sin rotación
-    
-    # Enviar comando de parada varias veces para asegurar que se detenga
-    for _ in range(5):  # Repetir 5 veces
-        pub.publish(cmd)      # Enviar comando al robot
-        rospy.sleep(0.1)      # Esperar 0.1 segundos entre envíos
-    
-    print("✅ Robot detenido correctamente")
-    sys.exit(0)  # Salir del programa
+    # ── Lazo abierto ────────────────────────────────────────────────────────
+    # Cuanto «deberia» tardar: el angulo en radianes partido por la velocidad.
+    segundos = math.radians(OBJETIVO) / VELOCIDAD_GIRO
 
-# ============================================
-# FUNCIÓN DE GIRO PRECISO
-# ============================================
-def girar_grados(grados, velocidad_angular=0.5):
-    """
-    Gira el robot un número específico de grados con precisión matemática.
-    
-    Esta función es MUY ÚTIL porque:
-    - Convierte automáticamente grados a radianes
-    - Calcula el tiempo exacto necesario
-    - Permite giros en ambas direcciones
-    - Es reutilizable para cualquier ángulo
-    
-    Args:
-        grados: Ángulo a girar en grados
-                - Positivo = gira a la izquierda
-                - Negativo = gira a la derecha
-        velocidad_angular: Velocidad de rotación en rad/s (por defecto 0.5)
-    
-    Ejemplos de uso:
-        girar_grados(90)     # Gira 90° a la izquierda
-        girar_grados(-90)    # Gira 90° a la derecha
-        girar_grados(120)    # Gira 120° (útil para triángulos)
-        girar_grados(45)     # Gira 45° (útil para octágonos)
-    """
-    # PASO 1: Convertir grados a radianes
-    # Fórmula: radianes = grados × (π / 180)
-    # Ejemplo: 90° × (π/180) = π/2 radianes
-    radianes = grados * (math.pi / 180)
-    
-    # PASO 2: Calcular tiempo necesario para el giro
-    # Fórmula: tiempo = ángulo / velocidad
-    # Ejemplo: (π/2) / 0.5 = π segundos ≈ 3.14 segundos
-    tiempo = abs(radianes) / velocidad_angular
-    
-    # PASO 3: Determinar dirección de giro
-    # Si grados > 0: girar a la izquierda (velocidad positiva)
-    # Si grados < 0: girar a la derecha (velocidad negativa)
-    direccion = velocidad_angular if grados > 0 else -velocidad_angular
-    
-    # Mostrar información del giro
-    print(f"⚙️  Girando {grados}° ({radianes:.3f} rad) en {tiempo:.2f}s")
-    
-    # PASO 4: Ejecutar el giro
-    cmd = Twist()
-    cmd.linear.x = 0.0        # Sin movimiento hacia adelante/atrás
-    cmd.angular.z = direccion # Velocidad angular calculada
-    
-    # Enviar comando repetidamente durante el tiempo calculado
-    for _ in range(int(tiempo * 10)):  # tiempo × 10 Hz = número de iteraciones
-        pub.publish(cmd)      # Enviar comando al robot
-        rospy.sleep(0.1)      # Esperar 0.1 segundos (mantener 10 Hz)
-    
-    # Confirmar que el giro se completó
-    print(f"✅ Completado: {grados}°")
+    input('\n[1/2] LAZO ABIERTO. Marca el rumbo actual y pulsa Enter...')
+    antes = robot.rumbo()
+    robot.girar_por_tiempo(VELOCIDAD_GIRO, segundos)
+    time.sleep(0.5)                  # el robot sigue rodando un poco
+    # 📝 Resta rumbos ABSOLUTOS a proposito, no un descuido: es correcta para
+    #    90 grados, pero para OBJETIVO=360 el rumbo vuelve al punto de partida
+    #    y esto da ~0 — eso es justo lo que destapa el ejercicio 5 de abajo.
+    #    La forma que no tiene este problema es acumular el INCREMENTO de
+    #    rumbo (mira `acumular()` en atriz.py), no restar dos absolutos.
+    logrado_abierto = robot.rumbo() - antes
+    print(f'      pedido {OBJETIVO:.0f}, /odom dice {logrado_abierto:.1f}')
+    input('      Mide con el transportador y pulsa Enter...')
 
-# ============================================
-# CONFIGURACIÓN DE ROS
-# ============================================
-# Configurar Ctrl+C para que llame a nuestra función de emergencia
-signal.signal(signal.SIGINT, detener)
+    # ── Lazo cerrado ────────────────────────────────────────────────────────
+    input('\n[2/2] LAZO CERRADO. Marca el rumbo actual y pulsa Enter...')
+    logrado_cerrado = robot.girar(OBJETIVO)
+    print(f'      pedido {OBJETIVO:.0f}, logrado {logrado_cerrado:.1f}')
+    input('      Mide con el transportador y pulsa Enter...')
 
-# Inicializar el nodo ROS con un nombre único
-rospy.init_node('giro_preciso')
+    print(f'\nError del lazo abierto: {abs(OBJETIVO - logrado_abierto):.1f} grados')
+    print(f'Error del lazo cerrado: {abs(OBJETIVO - logrado_cerrado):.1f} grados')
 
-# Crear un publicador para enviar comandos al robot
-# - '/cmd_vel': nombre del tópico (canal de comunicación)
-# - Twist: tipo de mensaje (velocidad lineal + angular)
-# - queue_size=10: tamaño de la cola de mensajes
-pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
-
-# Esperar un momento para que ROS se configure correctamente
-rospy.sleep(0.5)
-
-# ============================================
-# PROGRAMA PRINCIPAL - DEMOSTRACIÓN
-# ============================================
-print("🎯 Demostrando giros precisos...")
-print()
-
-# Demostración de diferentes ángulos para mostrar la versatilidad
-print("1️⃣ Giro de 45° (izquierda)")
-girar_grados(45)  # Gira 45° a la izquierda
-rospy.sleep(1)    # Pausa de 1 segundo entre giros
-
-print("\n2️⃣ Giro de 90° (izquierda)")
-girar_grados(90)  # Gira 90° a la izquierda (cuadrado)
-rospy.sleep(1)    # Pausa de 1 segundo entre giros
-
-print("\n3️⃣ Giro de -90° (derecha)")
-girar_grados(-90) # Gira 90° a la derecha (negativo)
-rospy.sleep(1)   # Pausa de 1 segundo entre giros
-
-print("\n4️⃣ Giro de 180° (media vuelta)")
-girar_grados(180) # Gira 180° (media vuelta completa)
-rospy.sleep(1)    # Pausa de 1 segundo entre giros
-
-print("\n5️⃣ Vuelta completa (360°)")
-girar_grados(360) # Gira 360° (vuelta completa)
-
-print("\n✅ Demo completada!")
-print("\n💡 CONCEPTOS APRENDIDOS:")
-print("   - Conversión de grados a radianes")
-print("   - Cálculo de tiempo basado en velocidad angular")
-print("   - Giros positivos (izquierda) y negativos (derecha)")
-print("   - Uso de funciones reutilizables")
-
-# Llamar a la función de detención al finalizar
-detener()
-
+# EJERCICIOS
+#   1. ¿Cual de los dos se acerco mas? ¿Cuanto?
+#   2. Repite los dos tres veces. ¿Cual REPITE mejor? (no es lo mismo que acertar)
+#   3. Pon el robot sobre una alfombra y repite. ¿Cual aguanta el cambio?
+#   4. ¿Que necesita el lazo cerrado que el abierto no? (pista: un sensor)
+#   5. Cambia OBJETIVO a 360. Ojo: ¿por que no sale 0?

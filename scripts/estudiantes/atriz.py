@@ -239,6 +239,18 @@ class Robot:
             # El barrido se apaga SIEMPRE que se pueda: si no, el X2 se queda
             # girando a 11.8 Hz en vez de 2.7, 24/7 y por 16 robots.
             self._ejecutor.shutdown()
+            # 🔴 `shutdown()` SEÑALA al hilo de `spin()`, no lo ESPERA. Medido el
+            #    2026-08-02: el hilo seguia `is_alive()` justo despues de
+            #    `shutdown()` en 14/14 corridas (tardaba ~0.5 ms mas en unirse).
+            #    Sin este `join()`, `destroy_node()`/`rclpy.shutdown()` se
+            #    ejecutaban en paralelo con ese hilo todavia tocando el nodo:
+            #    SIGABRT intermitente (2 de cada 3 corridas medidas, sin este
+            #    join). El timeout es por si el hilo no llegara a soltar el
+            #    nodo — no debe colgar el cierre indefinidamente.
+            self._hilo.join(timeout=3.0)
+            if self._hilo.is_alive():
+                print('AVISO: el hilo del ejecutor no se unio a tiempo; '
+                      'destroy_node() puede fallar.')
             self._nodo.destroy_node()
             if rclpy.ok():
                 rclpy.shutdown()

@@ -18,6 +18,7 @@ se aciertan una vez, y el alumno escribe robótica.
 
 Están documentadas una a una en `03_operacion/API_LABORATORIO.md`.
 """
+import atexit
 import math
 import signal
 import sys
@@ -56,6 +57,19 @@ GRADOS_MAX = 720.0    # ° por llamada — ídem
 #    un robot que «no obedece». Hay que republicar más rápido que eso.
 RITMO_HZ = 10.0
 
+# 🔴 TODAS las señales que terminan un programa y SE PUEDEN capturar. Con solo
+#    SIGINT, cerrar la terminal (SIGHUP) o perder el SSH dejaba el barrido del
+#    X2 girando a 11.8 Hz para siempre: el watchdog de 0.3 s del driver para los
+#    MOTORES, pero no hay nada que apague el LIDAR. Verificado provocando las
+#    tres señales sobre un proceso real (bloque A del informe final).
+#    ⚠️ SIGKILL (`kill -9`) y un corte de corriente NO se pueden capturar: en
+#       esos dos casos el barrido se queda encendido y solo lo apaga el
+#       profesor con `atriz-escaneo off`. Está dicho así en 00_LEEME_PRIMERO.md.
+SENALES_DE_CIERRE = tuple(
+    senal for senal in (getattr(signal, nombre, None)
+                        for nombre in ('SIGINT', 'SIGTERM', 'SIGHUP'))
+    if senal is not None)
+
 
 class ErrorAtriz(Exception):
     """Algo del laboratorio no está como debería. El mensaje dice qué hacer."""
@@ -65,13 +79,71 @@ class ErrorAtriz(Exception):
 # FUNCIONES PURAS — sin ROS, sin robot. Tienen tests en atriz_migracion.
 # ═══════════════════════════════════════════════════════════════════════════
 
+def secuencia_de_cierre(parar, apagar_barrido, desmontar, avisar=print):
+    """Los tres pasos del cierre, y los tres se INTENTAN pase lo que pase.
+
+    Es el corazón de la promesa de esta biblioteca: *el barrido del LIDAR se
+    apaga siempre*. Vive aquí, separada de ROS, para que se pueda probar
+    provocando los fallos de verdad en vez de razonarlos.
+
+    🔴 Cada paso cuelga del `finally` del anterior. Antes había DOS `try` y un
+       solo `finally`: si `parar()` reventaba, `/stop_scan` no se llamaba.
+
+    🔴 Y se captura `BaseException`, no `Exception`. `SystemExit` y
+       `KeyboardInterrupt` NO son `Exception`: el SEGUNDO Ctrl-C entra por el
+       manejador de señal y lanza `SystemExit` desde dentro de este cierre.
+       Con `except Exception` esa excepción se llevaba por delante los pasos
+       que faltaban — `/stop_scan` no se llegaba a llamar y el X2 se quedaba
+       girando a 11.8 Hz en vez de 2.7, indefinidamente. Verificado
+       provocándolo, no razonándolo.
+    """
+    try:
+        parar()
+    except BaseException as e:                               # noqa: BLE001
+        avisar(f'AVISO al parar el robot: {e!r}')
+    finally:
+        try:
+            apagar_barrido()
+        except BaseException as e:                           # noqa: BLE001
+            avisar(f'AVISO al apagar el barrido del LIDAR: {e!r}')
+        finally:
+            try:
+                desmontar()
+            except BaseException as e:                       # noqa: BLE001
+                avisar(f'AVISO al soltar los recursos de ROS: {e!r}')
+
+
 def limitar(valor, tope, nombre, unidad):
     """Recorta `valor` a ±`tope`. Devuelve (valor, aviso o None).
 
     Recorta en vez de lanzar, y AVISA en vez de recortar en silencio: un
     programa que se muere a mitad deja el robot conduciendo, y uno que recorta
     calladito enseña al alumno que su número se aplicó.
+
+    🔴 PERO `NaN` e `inf` NO se recortan: se RECHAZAN con `ErrorAtriz`.
+       `math.copysign(tope, nan)` devuelve el TOPE, así que la función cuyo
+       trabajo es «llevar a un valor seguro» convertía la entrada menos fiable
+       de todas en la velocidad MÁXIMA — y combinada con el tope de tiempo,
+       en la distancia máxima: `avanzar(nan, nan)` conducía 0.40 m/s durante
+       10.0 s = 4.0 METROS. Un `NaN` no es «un número demasiado grande» que
+       tenga sentido recortar: es la señal de que el cálculo del alumno se
+       rompió antes de llegar aquí, y seguir conduciendo con él es lo peor
+       que se puede hacer.
+       📝 Mismo criterio que `aceptacion_nucleo.delta_angulo()`, que ya
+          rechaza lo no finito antes de normalizar: se falla alto y con una
+          excepción que el llamador puede distinguir de un valor válido.
     """
+    if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        raise ErrorAtriz(
+            f'{nombre}={valor!r}: tiene que ser un numero, no '
+            f'{type(valor).__name__}.')
+    if not math.isfinite(valor):
+        raise ErrorAtriz(
+            f'{nombre}={valor:g}: no es un numero finito. NO se recorta al '
+            f'limite ({tope:g} {unidad}) a proposito — recortar un NaN o un '
+            f'infinito daria justo el valor MAXIMO. Mira de donde sale ese '
+            f'valor: casi siempre es una division por cero o una resta de '
+            f'lecturas que aun no habian llegado.')
     if abs(valor) <= tope:
         return valor, None
     recortado = math.copysign(tope, valor)
@@ -165,6 +237,7 @@ class Robot:
     def __init__(self, velocidad_maxima=VEL_MAX):
         self._vel_max = min(abs(float(velocidad_maxima)), VEL_MAX)
         self._cerrado = False
+        self._cerrando = False
 
         # 🔴 signal_handler_options=NO, Y NO ES OPCIONAL.
         #    `rclpy.init()` instala SU manejador de SIGINT e invalida su propio
@@ -231,7 +304,17 @@ class Robot:
                                       name='atriz-ejecutor')
         self._hilo.start()
 
-        signal.signal(signal.SIGINT, self._al_ctrl_c)
+        # 🔴 LAS TRES SEÑALES, no solo SIGINT. Cerrar la terminal manda SIGHUP
+        #    y `systemctl stop`/`kill` mandan SIGTERM: con el manejador solo en
+        #    SIGINT, los dos mataban el proceso sin pasar por `cerrar()` y el
+        #    barrido del X2 se quedaba encendido. El watchdog de 0.3 s del
+        #    driver para los MOTORES; del LIDAR no sabe nada.
+        for senal in SENALES_DE_CIERRE:
+            signal.signal(senal, self._al_senal)
+        # 🔴 Y la ultima red: salida normal SIN `with`, `sys.exit()`, o una
+        #    excepcion que llega arriba del todo. En esos tres casos no hay
+        #    `__exit__` ni señal, y hasta ahora tampoco habia cierre.
+        atexit.register(self.cerrar)
 
         print('Conectando con el robot...')
         try:
@@ -260,68 +343,84 @@ class Robot:
         return False
 
     def cerrar(self):
-        """Para el robot y apaga el barrido. Se puede llamar dos veces."""
+        """Para el robot y apaga el barrido. Se puede llamar dos veces.
+
+        El orden y la garantía viven en `secuencia_de_cierre()`, que es pura y
+        tiene tests que PROVOCAN cada fallo (incluido el segundo Ctrl-C).
+        """
         if self._cerrado:
             return
         self._cerrado = True
-        # 🔴 DOS `try` separados, a proposito. Parar el robot y apagar el
-        #    barrido NO son un solo paso: si `_mandar()` revienta (por
-        #    ejemplo publicando sobre un contexto ya invalido), un unico
-        #    `try` habria dejado SIN EJECUTAR la llamada a `/stop_scan` de
-        #    abajo. El barrido se tiene que intentar apagar pase lo que pase
-        #    con la parada de velocidad.
+        # 🔴 Mientras dure el cierre, las señales se IGNORAN: es lo que impide
+        #    que un segundo Ctrl-C aborte el apagado del barrido.
+        self._cerrando = True
         try:
-            self._mandar(0.0, 0.0, repeticiones=5)
-        except Exception as e:                               # noqa: BLE001
-            print(f'AVISO al parar: {e}')
-        try:
-            self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
-                         timeout=5.0, que='/stop_scan')
-        except Exception as e:                               # noqa: BLE001
-            print(f'AVISO al cerrar: {e}')
+            secuencia_de_cierre(
+                parar=lambda: self._mandar(0.0, 0.0, repeticiones=5),
+                apagar_barrido=self._apagar_barrido,
+                desmontar=self._desmontar)
         finally:
-            # El barrido se apaga SIEMPRE que se pueda: si no, el X2 se queda
-            # girando a 11.8 Hz en vez de 2.7, 24/7 y por 16 robots.
-            self._ejecutor.shutdown()
-            # 🔴 `shutdown()` SEÑALA al hilo de `spin()`, no lo ESPERA. Medido el
-            #    2026-08-02: el hilo seguia `is_alive()` justo despues de
-            #    `shutdown()` en 14/14 corridas (tardaba ~0.5 ms mas en unirse).
-            #    Sin este `join()`, `destroy_node()`/`rclpy.shutdown()` se
-            #    ejecutaban en paralelo con ese hilo todavia tocando el nodo:
-            #    SIGABRT intermitente (2 de cada 3 corridas medidas, sin este
-            #    join).
-            self._hilo.join(timeout=3.0)
-            # 🔴 Si el hilo NO se unio en 3 s, NO se sigue a destroy_node().
-            #    Seguir habria sido la MISMA secuencia sin sincronizar que
-            #    provocaba el SIGABRT — estrechar la carrera no es cerrarla.
-            #    Lo importante para la seguridad ya se intento arriba (cero
-            #    velocidad + /stop_scan), asi que se prefiere dejar el nodo
-            #    sin destruir (fuga de recursos DDS que el SO recupera al
-            #    terminar el proceso) antes que arriesgar el abort. 3 s es
-            #    generoso frente a lo medido (uniones reales de ~0.5 ms); si
-            #    esto se dispara, es señal de que algo va realmente mal.
-            if self._hilo.is_alive():
-                print('AVISO: el hilo del ejecutor no se unio en 3 s. '
-                      'NO se destruye el nodo para no reproducir la carrera '
-                      'que provocaba el SIGABRT (el robot ya recibio orden '
-                      'de parar y de apagar el barrido, por encima).')
-                return
-            self._nodo.destroy_node()
-            if rclpy.ok():
-                rclpy.shutdown()
+            self._cerrando = False
 
-    def _al_ctrl_c(self, _signum, _frame):
-        """Ctrl-C: para el robot y sale. NO dispara la parada de emergencia.
+    def _apagar_barrido(self):
+        """/stop_scan. Si no se llama, el X2 se queda girando a 11.8 Hz en vez
+        de 2.7, 24/7 y multiplicado por 16 robots."""
+        self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
+                     timeout=5.0, que='/stop_scan')
 
-        🔴 Y es a proposito. La parada SE QUEDA ENGANCHADA hasta que alguien
-           llame a /release_emergency_stop, asi que un Ctrl-C que la disparara
-           dejaria el SIGUIENTE script del alumno sin funcionar y sin
-           explicacion. El camino correcto para terminar es el normal: cero, y
-           el watchdog de 0.3 s por debajo.
+    def _desmontar(self):
+        """Suelta el ejecutor, el hilo y el nodo. Va SIEMPRE el ultimo: lo que
+        importa para la seguridad ya se intento antes."""
+        self._ejecutor.shutdown()
+        # 🔴 `shutdown()` SEÑALA al hilo de `spin()`, no lo ESPERA. Medido el
+        #    2026-08-02: el hilo seguia `is_alive()` justo despues de
+        #    `shutdown()` en 14/14 corridas (tardaba ~0.5 ms mas en unirse).
+        #    Sin este `join()`, `destroy_node()`/`rclpy.shutdown()` se
+        #    ejecutaban en paralelo con ese hilo todavia tocando el nodo:
+        #    SIGABRT intermitente (2 de cada 3 corridas medidas, sin este
+        #    join).
+        self._hilo.join(timeout=3.0)
+        # 🔴 Si el hilo NO se unio en 3 s, NO se sigue a destroy_node().
+        #    Seguir habria sido la MISMA secuencia sin sincronizar que
+        #    provocaba el SIGABRT — estrechar la carrera no es cerrarla.
+        #    Se prefiere dejar el nodo sin destruir (fuga de recursos DDS que
+        #    el SO recupera al terminar el proceso) antes que arriesgar el
+        #    abort. Esta rama esta escrita y NO EJERCITADA: asi consta.
+        if self._hilo.is_alive():
+            print('AVISO: el hilo del ejecutor no se unio en 3 s. '
+                  'NO se destruye el nodo para no reproducir la carrera '
+                  'que provocaba el SIGABRT (el robot ya recibio orden '
+                  'de parar y de apagar el barrido, por encima).')
+            return
+        self._nodo.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+    def _al_senal(self, signum, _frame):
+        """SIGINT (Ctrl-C), SIGTERM (`kill`) y SIGHUP (cerrar la terminal o
+        perder el SSH): para el robot, apaga el barrido y sale.
+
+        🔴 NO dispara la parada de emergencia, a proposito. La parada SE QUEDA
+           ENGANCHADA hasta que alguien llame a /release_emergency_stop, asi que
+           un Ctrl-C que la disparara dejaria el SIGUIENTE script del alumno sin
+           funcionar y sin explicacion. El camino correcto para terminar es el
+           normal: cero, y el watchdog de 0.3 s por debajo.
+
+        🔴 Y si YA se esta cerrando, esta señal se IGNORA. Antes hacia
+           `sys.exit(130)` incondicionalmente: en un segundo Ctrl-C, `cerrar()`
+           reentraba, salia por `if self._cerrado: return`, y el `SystemExit`
+           escapaba desde dentro del cierre a medias — `/stop_scan` NO se
+           llamaba. Interrumpir un cierre en curso no adelanta nada (dura como
+           mucho unos segundos) y deja el LIDAR encendido.
         """
-        print('\nCtrl-C: parando el robot...')
+        nombre = getattr(signal.Signals(signum), 'name', str(signum))
+        if self._cerrando:
+            print(f'\n{nombre} otra vez: YA estoy cerrando, espera. '
+                  f'Interrumpir ahora dejaria el barrido del LIDAR encendido.')
+            return
+        print(f'\n{nombre}: parando el robot y apagando el barrido...')
         self.cerrar()
-        sys.exit(130)
+        sys.exit(128 + signum)
 
     # ── Arranque ────────────────────────────────────────────────────────────
     def _encender_barrido(self):
@@ -427,9 +526,21 @@ class Robot:
 
     # ── Movimiento ──────────────────────────────────────────────────────────
     def avanzar(self, velocidad, segundos):
-        """Avanza a `velocidad` m/s durante `segundos`. Negativo = hacia atras.
+        """Avanza a `velocidad` m/s durante `segundos`.
 
             robot.avanzar(0.20, 3)     # 20 cm/s durante 3 segundos
+            robot.avanzar(-0.20, 3)    # hacia ATRAS 3 segundos
+
+        🔴 Lo que hace ir hacia atras es la VELOCIDAD negativa, no el tiempo.
+           El tiempo pasa por `abs()`, asi que `avanzar(0.20, -3)` avanza hacia
+           DELANTE 3 segundos — no retrocede ni va «menos tres segundos». Si
+           quieres retroceder, el signo va en el primer argumento.
+
+        ⚠️ Y hacia atras no hay capa de seguridad: el poligono del
+           collision_monitor mira hacia DELANTE. Ademas frena igual aunque el
+           robot se este alejando del obstaculo (medido: 30 cm comandados hacia
+           atras dieron 14 cm), asi que un retroceso puede quedarse corto Y no
+           avisar de lo que tiene detras.
 
         Republica la orden a 10 Hz: el driver corta a los 0.3 s sin recibir
         nada, asi que un `sleep` largo entre publicaciones deja al robot
@@ -467,10 +578,31 @@ class Robot:
         ═══════════════════════════════════════════════════════════════════════
         POR QUE ESTO ES UN LAZO CERRADO Y NO UNA CONSTANTE
         ═══════════════════════════════════════════════════════════════════════
-        Pidiendole 90 grados por tiempo, este robot hace 86.6 / 86.2 / 87.7
-        (n=3, medido). La salida barata es multiplicar por 1.04 y seguir. Aqui
-        se mide el rumbo real y se para al llegar: la constante se equivoca en
-        cuanto cambie el suelo, la carga o el robot; el lazo, no.
+        Girar por tiempo es un lazo ABIERTO: mandas la orden y confias. Este
+        robot tiene un deficit medido haciendolo asi — 90 grados pedidos dieron
+        86.6 / 86.2 / 87.7 (n=3, evidencia 48).
+
+        🔴 PERO ESOS TRES NUMEROS NO SON LOS DE `girar_por_tiempo()`, y decir
+           que lo eran era atribuir mal una medida. Se tomaron con el servicio
+           `move_timed` del driver, a 1.0 rad/s. `girar_por_tiempo()` es OTRO
+           mecanismo (publica en /cmd_vel_raw a 20 Hz) y va a OTRA velocidad
+           (0.8 rad/s en la practica 4): otro camino, otra velocidad, otro
+           numero. **Cuanto se queda corto ESTE camino NO ESTA MEDIDO.**
+           Lo que los 86.6/86.2/87.7 si demuestran es que el deficit del lazo
+           abierto EXISTE en este robot y es de varios grados — y esa es toda
+           la razon que hace falta para cerrar el lazo.
+
+        La salida barata seria multiplicar por una constante. Aqui se mide el
+        rumbo real y se para al llegar: la constante se equivoca en cuanto
+        cambie el suelo, la carga o el robot; el lazo, no.
+
+        ⚠️ Con que precision acierta este lazo TAMPOCO esta medido con
+           transportador. Lo unico que se puede afirmar es aritmetica: el lazo
+           comprueba el rumbo cada 0.05 s, y en el ultimo tramo de la rampa va
+           a 0.20 rad/s, asi que solo la granularidad del bucle ya son
+           0.20 x 0.05 = 0.01 rad = 0.573 grados. A eso hay que sumarle lo que
+           el robot siga rodando tras la orden de parada, que NADIE HA MEDIDO.
+           No digas «unas decimas»: dilo cuando lo midas.
 
         🔴 Y se acumula el INCREMENTO de rumbo, nunca el yaw absoluto: `atan2`
            devuelve -pi..pi, asi que una vuelta entera leida en absoluto vuelve
@@ -502,7 +634,30 @@ class Robot:
                       f'de {grados:g} grados. Robot atascado o algo lo frena.')
                 break
 
-            # Publica a 20 Hz (0.05 s) en lugar de 10 Hz para reducir sobregiro
+            # 🔴 Publica a 20 Hz (0.05 s), no a 10. Y lo que eso compra es MENOS
+            #    de lo que decia este comentario, que afirmaba «para reducir
+            #    sobregiro» a secas. Simulado con la rampa real, ya con el
+            #    `parar()` del lazo bien modelado (scripts/simular_girar.py):
+            #
+            #        90°  -> 10 Hz y 20 Hz dan LO MISMO (90.5273). Ventaja: 0.
+            #        180° -> 0.573° menos de sobregiro a 20 Hz
+            #        360° -> 0.573° menos
+            #        720° -> 0.573° menos
+            #
+            #    🔴 O sea que A 90 GRADOS NO COMPRA NADA — y 90° es el angulo de
+            #       las practicas 2, 3, 4 y 10, el unico que el curso usa. La
+            #       «ventaja de +0.573° a 90°» que se reportaba antes era un
+            #       ARTEFACTO del simulador, que seguia integrando 0.20 rad/s
+            #       despues de la orden de parada; ese paso de mas vale
+            #       0.20 x dt, o sea el doble a 10 Hz que a 20.
+            #
+            #    Se deja en 20 Hz igualmente, por dos razones que si se
+            #    sostienen: (1) en angulos grandes el sobregiro baja de verdad,
+            #    y (2) `girar_por_tiempo()` publica tambien a 20 Hz para que la
+            #    practica 4 compare UNA sola variable (el sensor) y no dos.
+            #    ⚠️ Y ojo con el limite real: /odom llega a 16.5 Hz, asi que por
+            #       encima de eso quien fija el paso ya no es este bucle sino la
+            #       odometria. Nada de esto esta medido sobre el robot.
             self.mover(0.0, sentido * velocidad_giro(objetivo - acumulado))
             time.sleep(0.05)
 
@@ -541,8 +696,15 @@ class Robot:
 
         📝 Existe SOLO para la practica 4, que compara el lazo abierto con el
            cerrado. Para girar de verdad usa `girar(grados)`: mide el rumbo y
-           acierta, y esta no — pidiendole 90 grados asi salen 86.6 / 86.2 /
-           87.7 (n=3, medido en este robot).
+           acierta, y esta no.
+
+        🔴 CUANTO se queda corto ESTA funcion NO ESTA MEDIDO. Los
+           86.6 / 86.2 / 87.7 grados que circulan por la documentacion son del
+           servicio `move_timed` del driver a 1.0 rad/s (evidencia 48), no de
+           esta funcion, que publica en /cmd_vel_raw a 20 Hz. Sirven para saber
+           que el deficit del lazo abierto existe y es de varios grados; no
+           para predecir lo que va a imprimir la practica 4. El numero de esa
+           practica lo pone el alumno con el transportador.
 
         🔴 Publica al MISMO ritmo que `girar()` (20 Hz: `mover()` + `sleep(0.05)`),
            a proposito y NO con `_mandar()` (10 Hz). Si este lazo publicara a un
@@ -570,8 +732,9 @@ class Robot:
         📝 Sale del servicio /get_rgbc_sensor_values y no del topic /color, y
            por una razon medida: el mensaje `Color` NO trae el canal `claro`, y
            `claro` es el que discrimina de verdad — 12.6x entre blanco y negro,
-           contra un RGB que apenas se mueve. El servicio cuesta 13-20 ms, asi
-           que cabe de sobra en un lazo de control a 10 Hz.
+           contra un RGB que apenas se mueve. El servicio cuesta 20.6-20.8 ms
+           (medido, n=200), asi que cabe de sobra en un lazo de control a
+           10 Hz, que tiene 100 ms por vuelta.
 
         Normaliza por VERDE, que es el canal mas sensible: rojo sube R/G de 0.48
         a 2.74, azul sube B/G a 0.86.
@@ -601,6 +764,14 @@ class Robot:
         ⚠️ Un solo barrido no ve un objeto fino: a 0.68 m el X2 tira un rayo
            cada 1.7 cm, asi que algo de 5 cm da 2-3 puntos y puede desaparecer.
            Para geometria fina hay que acumular varios barridos.
+
+        🔴 Y «delante» aqui significa «el angulo 0 de /scan», que NO SE HA
+           CONTRASTADO NUNCA CON CINTA. El URDF no mete offset angular y el
+           `inverted` del X2 se verifico en SENTIDO DE GIRO, nunca en OFFSET DE
+           MONTAJE. Si el tambor esta montado girado unos grados, este cono
+           mira unos grados a un lado y nada lo delataria: seguiria devolviendo
+           distancias perfectamente plausibles. Con un cono de +-10 grados hace
+           falta un error grande para que importe, pero el dato no esta.
         """
         barrido = self._ultimo('_scan', timeout=5.0, que='/scan')
         cono = math.radians(10.0)
@@ -627,7 +798,21 @@ class Robot:
 
     # ── Luces y parada ──────────────────────────────────────────────────────
     def luces(self, rojo, verde, azul):
-        """Pone TODOS los faros del robot a un color (0-255 cada canal)."""
+        """Pone TODOS los faros del robot a un color (0-255 cada canal).
+
+        🔴 ES LA UNICA LLAMADA DE ESTA API SIN FORMA DE DETECTAR EL FALLO.
+           `SetLeds.srv` tiene la respuesta VACIA (comprobado: el fichero .srv
+           es `int32[] rgb_color` y nada debajo del `---`), asi que el driver no
+           tiene por donde decir que no. Lo que si se valida es lo que se puede
+           validar aqui: que los tres canales sean enteros de 0 a 255, ANTES de
+           convertir — eso lanza `ErrorAtriz`. Pero si la peticion sale bien y
+           los faros no se encienden, `luces()` vuelve sin decir nada.
+
+        ⚠️ Y en este firmware eso no es teorico: hay comandos de LED que el RVR
+           ACEPTA EN SILENCIO sin hacer nada (`set_all_leds` con una mascara mal
+           formada, `undercarriage_white`). La unica comprobacion que vale para
+           esta llamada es MIRAR EL ROBOT.
+        """
         for nombre, valor in (('rojo', rojo), ('verde', verde), ('azul', azul)):
             validar_canal_led(valor, nombre)
         peticion = SetLeds.Request()

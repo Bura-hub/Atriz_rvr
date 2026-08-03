@@ -86,19 +86,35 @@ VELOCIDAD = ajustes.get('velocidad', 0.08)                # m/s
 # este seguidor NO discrimina el azul de la linea negra.
 UMBRAL_NEGRO = ajustes.get('umbral_negro', 400)           # claro <= esto: sobre la linea
 UMBRAL_CLARO = ajustes.get('umbral_claro', 1000)          # claro >= esto: sobre el suelo
-MARGEN_HISTERESIS = ajustes.get('margen_histeresis', 50)  # ensancha 'borde'; ver clasificar()
+# 🔴 Se llamaba MARGEN_HISTERESIS y NO hay histeresis: `clasificar()` no tiene
+#    estado ni recuerda la lectura anterior. Lo unico que hace este numero es
+#    ensanchar la zona 'borde' hacia dentro de los dos umbrales. El nombre viejo
+#    prometia un disparador de Schmitt que no existe.
+MARGEN_BORDE = ajustes.get('margen_borde', 50)            # ensancha 'borde'; ver clasificar()
 LADO_INICIAL = ajustes.get('lado_borde', 1)               # +1: linea a la izquierda, suelo a la derecha
 TIEMPO_PERDIDO_MAX = ajustes.get('tiempo_perdido_max', 1.0)  # s en 'claro' antes de invertir la hipotesis
 PERIODO = 0.1                                              # s -> 10 Hz, y el watchdog
                                                             #     corta a los 0.3
 
+# 🔴 TOPE DE RECORRIDO. Este bucle era un `while True` a 0.08 m/s SIN NINGUN
+#    tope: si la pista se acaba, si el sensor se desalinea o si la hipotesis del
+#    lado del borde es la contraria, el robot se va recto y en silencio hasta
+#    que alguien lo coge. La practica 11 ya puso tope razonando que «sin tope
+#    seguiria avanzando en silencio»; aqui vale exactamente igual, y encima
+#    este guion es el proyecto FINAL, el que se deja corriendo mas rato.
+#    A 0.08 m/s, 6 m son ~75 s. Es recorrido de CAMINO (lo que anda el robot),
+#    no distancia en linea recta: en una pista con curvas el robot recorre mas
+#    metros de los que avanza.
+DISTANCIA_MAX_M = ajustes.get('distancia_max_m', 6.0)
+
 
 def clasificar(claro, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO,
-                margen=MARGEN_HISTERESIS):
+                margen=MARGEN_BORDE):
     """'negro' / 'borde' / 'claro'.
 
-    🔴 Ronda de arreglo 3: `margen` NO es histeresis de verdad -- esta
-    funcion no tiene estado ni recuerda la clasificacion anterior. Lo
+    🔴 `margen` NO es histeresis de verdad -- esta funcion no tiene
+    estado ni recuerda la clasificacion anterior. Por eso la constante se
+    llama MARGEN_BORDE y no MARGEN_HISTERESIS, que era el nombre viejo. Lo
     unico que hace es ensanchar la zona 'borde' hacia dentro de los dos
     umbrales. Una lectura oscilando justo en `umbral_negro + margen`
     cambia de 'negro' a 'borde' en cada muestra, exactamente igual que
@@ -171,10 +187,29 @@ def main():
         pid = PID(**ajustes.get('pid', {}))
         lado_borde = LADO_INICIAL
         perdido_desde = None
-        print('Siguiendo el borde de la linea. Ctrl-C para parar.\n')
+        recorrido = 0.0
+        arranque = time.monotonic()
+        print(f'Siguiendo el borde de la linea (tope: {DISTANCIA_MAX_M:.1f} m de '
+              f'camino, ~{DISTANCIA_MAX_M / VELOCIDAD:.0f} s). Ctrl-C para parar.\n')
 
         while True:
             inicio = time.monotonic()
+
+            # El tope de recorrido, ANTES de mandar nada mas.
+            recorrido = VELOCIDAD * (inicio - arranque)
+            if recorrido >= DISTANCIA_MAX_M:
+                robot.parar()
+                print(f'\nAVISO: {DISTANCIA_MAX_M:.1f} m de camino recorridos sin '
+                      f'que nadie parase esto. Parando.\n'
+                      f'       Si el robot iba bien, sube `distancia_max_m` en '
+                      f'seguidor_config.json.\n'
+                      f'       Si no, revisa en este orden:\n'
+                      f'         1. ¿el sensor arranco JUSTO sobre el borde de la '
+                      f'linea, con el negro al lado que dice `lado_borde`?\n'
+                      f'         2. ¿el robot arranco con color_detection:=true?\n'
+                      f'         3. ¿la pista tiene curvas mas cerradas de lo que '
+                      f'este PID puede seguir a {VELOCIDAD} m/s?')
+                sys.exit(1)
             _, _, _, claro = robot.color()
             estado = clasificar(claro)
 
@@ -195,7 +230,8 @@ def main():
 
             # 🔴 El ritmo lo marca este sleep, y tiene que ser menor que 0.3 s: es
             #    lo que tarda el watchdog del driver en cortar. Leer el color cuesta
-            #    13-20 ms, asi que cabe de sobra.
+            #    20.6-20.8 ms (medido, n=200), asi que cabe de sobra en los 100 ms
+            #    de PERIODO.
             time.sleep(max(0.0, PERIODO - (time.monotonic() - inicio)))
 
 

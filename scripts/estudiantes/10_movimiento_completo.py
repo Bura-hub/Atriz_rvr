@@ -3,11 +3,17 @@
 
     python3 10_movimiento_completo.py
 
-Antes de ejecutarlo: al menos 2.5 m despejados en la direccion en que mire
-el robot al arrancar. No un cuadrado de 1.5 m: 12 tramos de avanzar(0.20, 1)
-sin girar nunca son 12 x 0.20 m = 2.4 m en linea recta, y eso pasa si el
-robot nunca detecta nada a menos de 0.35 m por delante -- por ejemplo, si
-mira hacia un pasillo o hacia la diagonal del recinto en vez de a una pared.
+Antes de ejecutarlo: al menos 3 m despejados en la direccion en que mire el
+robot al arrancar. La cuenta: 12 tramos de avanzar(0.20, 1) sin girar nunca
+son 12 x 0.20 m = 2.4 m en linea recta, y eso pasa si el robot nunca detecta
+nada a menos de 0.35 m por delante -- por ejemplo, si mira hacia un pasillo o
+hacia la diagonal del recinto en vez de a una pared.
+
+🔴 Y 2.4 m de recorrido NO significa «2.5 m de sitio». Los 10 cm que sobrarian
+   son MENOS que el propio robot, que mide 19 cm de largo: la cuenta hay que
+   hacerla desde el MORRO, no desde el centro. Con 3 m quedan ~40 cm de margen
+   de verdad, que es lo que hace falta para el chasis mas la frenada del
+   collision_monitor (~10 cm medidos a 0.25 m/s).
 
 La idea: `Robot` te da las ordenes basicas. Aqui construyes ENCIMA una clase
 con el comportamiento que tu quieres. Es como se organiza el codigo de un

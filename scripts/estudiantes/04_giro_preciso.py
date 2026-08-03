@@ -14,12 +14,27 @@ para marcar el rumbo.
 LA IDEA
 ═══════════════════════════════════════════════════════════════════════════════
 Girar «durante el tiempo justo» es un LAZO ABIERTO: mandas la orden y confias.
-En este robot, pidiendo 90 grados asi salen 86.6 / 86.2 / 87.7 — un deficit de
-unos 3 grados que NO depende de la bateria (se midio del 55 % al 100 %).
+Este robot tiene un deficit medido girando asi: 90 grados pedidos dieron
+86.6 / 86.2 / 87.7, y NO depende de la bateria (se midio del 55 % al 100 %).
 
-La salida barata seria multiplicar por 1.04. Funcionaria hoy, en este suelo, con
-este robot y esta bateria. `robot.girar()` hace otra cosa: MIDE el rumbo
-mientras gira y para cuando llega. Eso es un LAZO CERRADO.
+🔴 PERO ESOS TRES NUMEROS NO SON LOS DE ESTE PROGRAMA. Se midieron con el
+   servicio `move_timed` del driver, a 1.0 rad/s (evidencia 48). Este guion usa
+   `girar_por_tiempo()`, que es OTRO mecanismo —publica en /cmd_vel_raw a
+   20 Hz— y ademas va a 0.8 rad/s. Otro camino, otra velocidad, otro numero.
+   LO QUE VA A IMPRIMIR ESTE PROGRAMA NO ESTA MEDIDO: lo mides tu, ahora, con
+   el transportador. Anotalo.
+
+   📝 Y esa es la leccion de metodo de esta practica, ademas de la del lazo:
+      antes de atribuir un numero a una causa, comprueba que se midio CON esa
+      causa. Este mismo fichero lo hacia mal hasta la revision final.
+
+Lo que los 86.6/86.2/87.7 si demuestran es que el deficit del lazo abierto
+EXISTE en este robot y es de varios grados. Con eso basta para lo que enseña la
+practica.
+
+La salida barata seria multiplicar por una constante. Funcionaria hoy, en este
+suelo, con este robot y esta bateria. `robot.girar()` hace otra cosa: MIDE el
+rumbo mientras gira y para cuando llega. Eso es un LAZO CERRADO.
 
 Este programa hace los dos y te deja comparar.
 """
@@ -64,4 +79,6 @@ with Robot() as robot:
 #   2. Repite los dos tres veces. ¿Cual REPITE mejor? (no es lo mismo que acertar)
 #   3. Pon el robot sobre una alfombra y repite. ¿Cual aguanta el cambio?
 #   4. ¿Que necesita el lazo cerrado que el abierto no? (pista: un sensor)
-#   5. Cambia OBJETIVO a 360. Ojo: ¿por que no sale 0?
+#   5. Cambia OBJETIVO a 360. El robot da la vuelta entera y esto imprime ~0
+#      para el lazo abierto. ¿Por que sale ~0 si el robot SI giro?
+#      (pista: el comentario de `logrado_abierto` unas lineas mas arriba)

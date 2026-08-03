@@ -108,8 +108,10 @@ signo exactamente donde la magnitud pasa por cero.
 `clasificar()` **no decide el signo del giro**. Sirve para otra cosa: saber
 cuándo el robot lleva demasiado tiempo sin ver el borde (sección siguiente).
 
-⚠️ El margen de `clasificar()` (`MARGEN_HISTERESIS`) **no es histéresis de
+⚠️ El margen de `clasificar()` (`MARGEN_BORDE`) **no es histéresis de
 verdad**: la función no tiene estado, no recuerda la clasificación anterior.
+Se llamaba `MARGEN_HISTERESIS`, y ese nombre prometía un disparador de Schmitt
+que no existe: por eso se renombró.
 Solo ensancha la zona `'borde'` hacia dentro de los dos umbrales — da un colchón
 antes de declarar `'negro'` o `'claro'` en firme, pero una lectura oscilando
 justo en el borde de esa zona seguiría cambiando de clasificación en cada
@@ -155,9 +157,10 @@ Viven en `seguidor_config.json`, junto al script:
   "velocidad": 0.08,
   "umbral_negro": 400,
   "umbral_claro": 1000,
-  "margen_histeresis": 50,
+  "margen_borde": 50,
   "lado_borde": 1,
   "tiempo_perdido_max": 1.0,
+  "distancia_max_m": 6.0,
   "pid": {
     "kp": 0.5,
     "ki": 0.0,
@@ -171,9 +174,10 @@ Viven en `seguidor_config.json`, junto al script:
 |---|---|
 | `velocidad` | m/s hacia delante, constante mientras el PID corrige el giro |
 | `umbral_negro`, `umbral_claro` | los dos anclajes de la sección 2 |
-| `margen_histeresis` | ensancha la zona `'borde'` de `clasificar()` — ver la sección 4 |
+| `margen_borde` | ensancha la zona `'borde'` de `clasificar()` — ver la sección 4 |
 | `lado_borde` | convención de arranque: `+1` = línea a la izquierda del robot, suelo a la derecha |
 | `tiempo_perdido_max` | segundos en `'claro'` antes de invertir `lado_borde` |
+| `distancia_max_m` | 🔴 **tope de recorrido**: metros de camino tras los cuales el guion para solo y explica por qué. Sin él, el bucle es un `while True` y un robot mal alineado se va recto y en silencio |
 | `pid.kp`, `pid.ki`, `pid.kd` | las tres ganancias del PID de siempre |
 | `pid.limite` | tope de saturación de la salida del PID (rad/s) |
 
@@ -187,7 +191,7 @@ Si el fichero no existe, el script usa estos mismos valores por defecto.
 PERIODO = 0.1   # s -> 10 Hz
 ```
 
-Cada vuelta hace: `robot.color()` (13-21 ms medidos), el PID (aritmética, nada) y
+Cada vuelta hace: `robot.color()` (**20.6-20.8 ms** medidos, n=200), el PID (aritmética, nada) y
 `robot.mover()` (una publicación, nada). A 10 Hz, `color()` consume como mucho el
 21 % del período — cabe de sobra.
 

@@ -27,34 +27,57 @@ from atriz import Robot
 #    medida nueva: la practica pide cinta negra a proposito.
 UMBRAL_NEGRO = 400
 
-# Tope de seguridad: el bucle de abajo no tiene forma de saber si la cinta esta
-# puesta, torcida, o si el sensor esta mal alineado, y sin tope seguiria
-# avanzando en silencio. La cuenta, con lo medido en la Tarea 9:
-#   - cada tramo avanza ~2 cm nominales (10 cm/s durante 0.2 s) y tarda ~0.7 s
-#     de verdad (0.2 s moviendo + 0.5 s de parar() insistiendo en velocidad
-#     cero) — medido leyendo avanzar()/parar() en atriz.py.
+# Lo que avanza cada tramo. Estas dos son las que toca el ejercicio 2.
+VELOCIDAD = 0.10             # m/s
+DURACION_TRAMO = 0.2         # s
+AVANCE_POR_TRAMO = VELOCIDAD * DURACION_TRAMO      # m
+
+# 🔴 EL TOPE ES POR DISTANCIA, NO POR NUMERO DE TRAMOS, y esto es el arreglo de
+#    un defecto real. Antes habia un `MAX_TRAMOS = 60` fijo, calculado para
+#    0.10 m/s. Pero el ejercicio 2 manda subir la velocidad a 0.30 — y subir la
+#    velocidad NO cambiaba el tope, asi que los mismos 60 tramos pasaban de
+#    1.20 m a 60 x (0.30 x 0.2) = 3.60 m: TRES VECES Y MEDIA el metro que esta
+#    practica pide despejado. El tope existe precisamente para cuando la cinta
+#    no se detecta, o sea justo cuando el robot va a recorrerlo entero.
+#    Derivandolo de la distancia, el ejercicio 2 se protege solo: a 0.30 m/s
+#    salen 15 tramos, y el recorrido maximo sigue siendo el mismo.
+#
+# De donde sale la distancia:
+#   - esta practica pide 1 m despejado por delante.
 #   - el collision_monitor frena solo a ~9.9-10.7 cm de un obstaculo (medido a
-#     0.25 y 0.40 m/s, 2026-07-31); con el metro despejado que pide esta
-#     practica, eso deja ~90 cm de recorrido util ANTES de que el robot quede
-#     pegado a la pared. 🔴 A 0.10 m/s (la velocidad de esta practica) esa
-#     frenada NO esta medida: es una extrapolacion desde 0.25/0.40 m/s, no una
-#     medida nueva.
-#   - 90 cm / 2 cm por tramo = 45 tramos para agotar el espacio despejado. Se
-#     deja margen (lecturas que no caen justo en el borde de la cinta, tramos
-#     mas cortos de lo nominal) y se sube a 60 tramos (~42 s) — sin ese margen,
-#     un tope demasiado ajustado cortaria el intento incluso con la cinta bien
-#     puesta.
-MAX_TRAMOS = 60
+#     0.25 y 0.40 m/s, 2026-07-31), asi que del metro quedan ~90 cm utiles.
+#     🔴 A 0.10 m/s esa frenada NO esta medida: es una extrapolacion desde
+#     0.25/0.40 m/s. Va del lado seguro (mas lento = frena antes), pero es
+#     extrapolacion, no medida.
+DISTANCIA_MAX_M = 0.90
+
+# Tramos que caben en esa distancia. Se redondea hacia ABAJO, nunca hacia
+# arriba: el tope no puede prometer mas recorrido del que hay sitio.
+# El `1e-9` no es adorno: 0.90 / 0.02 da 44.999... en coma flotante, asi que un
+# `int()` a secas se comia un tramo entero (44 en vez de 45) sin que se notara.
+MAX_TRAMOS = int(DISTANCIA_MAX_M / AVANCE_POR_TRAMO + 1e-9)
+
+# ~0.7 s por tramo de verdad (0.2 s moviendo + 0.5 s de parar() insistiendo en
+# velocidad cero) — leido de avanzar()/parar() en atriz.py, no medido con
+# cronometro.
+SEGUNDOS_POR_TRAMO = DURACION_TRAMO + 0.5
 
 with Robot() as robot:
     if not robot.hay_color:
         print('\nEl sensor de color esta apagado. Lee la practica 5.')
         sys.exit(1)
 
-    print(f'Avanzando hasta encontrar negro (maximo {MAX_TRAMOS} tramos, '
-          f'~{MAX_TRAMOS * 0.7:.0f} s)...')
-    # No se usa avanzar(), que bloquea los segundos que le pidas: aqui hay que
-    # mirar el sensor MIENTRAS se avanza.
+    print(f'Avanzando a {VELOCIDAD} m/s hasta encontrar negro '
+          f'(maximo {MAX_TRAMOS} tramos = {MAX_TRAMOS * AVANCE_POR_TRAMO:.2f} m, '
+          f'~{MAX_TRAMOS * SEGUNDOS_POR_TRAMO:.0f} s)...')
+    # 🔴 `avanzar()` SI se usa, pero a trocitos. Es la idea de toda la practica:
+    #    `avanzar(0.10, 5)` bloquearia 5 segundos enteros, y durante ese rato
+    #    nadie mira el sensor — el robot cruzaria la cinta negra sin enterarse.
+    #    Troceando el avance en tramos de 0.2 s, entre tramo y tramo se lee el
+    #    color: eso es el lazo sentir-actuar. Lo que NO se usa es una sola
+    #    llamada larga a `avanzar()`.
+    #    (Si necesitaras leer el sensor SIN parar entre medias, la herramienta
+    #     es `robot.mover()`, que no bloquea; asi lo hace el seguidor de linea.)
     tramos = 0
     while True:
         _, _, _, claro = robot.color()
@@ -64,7 +87,8 @@ with Robot() as robot:
             break
         if tramos >= MAX_TRAMOS:
             robot.parar()
-            print(f'\nAVISO: {MAX_TRAMOS} tramos sin encontrar negro (ultima '
+            print(f'\nAVISO: {MAX_TRAMOS} tramos '
+                  f'({MAX_TRAMOS * AVANCE_POR_TRAMO:.2f} m) sin encontrar negro (ultima '
                   f'lectura: claro={claro}, umbral={UMBRAL_NEGRO}). Parando.\n'
                   f'       Revisa, en este orden:\n'
                   f'         1. ¿esta puesta la cinta negra y cruza el camino '
@@ -76,10 +100,25 @@ with Robot() as robot:
             sys.exit(1)
         if tramos % 10 == 0:
             print(f'  tramo {tramos}: claro={claro} (sigue buscando negro)')
-        robot.avanzar(0.10, 0.2)     # tramos cortos: 10 cm/s durante 0.2 s
+        # Tramos cortos, para poder leer el sensor entre uno y otro. Usa las
+        # constantes de arriba a proposito: el tope de distancia sale de las
+        # MISMAS dos, asi que subir la velocidad en el ejercicio 2 baja el
+        # numero de tramos y el recorrido maximo no se mueve.
+        robot.avanzar(VELOCIDAD, DURACION_TRAMO)
         tramos += 1
 
 # EJERCICIOS
 #   1. Baja el umbral a 200. ¿Se le pasa la linea?
-#   2. Sube la velocidad a 0.30. ¿Que le pasa a la distancia de parada?
+#   2. Sube VELOCIDAD a 0.30. ¿Que le pasa a la distancia de parada?
+#      Mira ademas lo que imprime al arrancar: MAX_TRAMOS baja de 45 a 15 solo.
+#      ¿Por que el tope esta escrito en METROS y no en numero de tramos?
+#      (pista: el tope existe para cuando la cinta NO se detecta, o sea justo
+#       cuando el robot va a recorrerlo entero. Con un tope fijo de 60 tramos,
+#       este ejercicio recorreria 3.60 m con 1 m despejado.)
 #   3. Haz que retroceda 20 cm despues de encontrar el negro.
+#      🔴 EL ROBOT VA HACIA ATRAS. Comprueba que hay sitio DETRAS de el: al
+#         menos 40 cm, contando que el robot mide 19 cm de largo. Detras no
+#         hay capa de seguridad — el poligono del collision_monitor mira hacia
+#         DELANTE, asi que frenara igual aunque te estes alejando de la pared
+#         (medido: 30 cm comandados hacia atras dieron 14 cm), pero de lo que
+#         tengas detras no te avisa nadie.

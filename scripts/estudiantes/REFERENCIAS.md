@@ -51,10 +51,23 @@ puede subir por encima de él.
 
 Avanza a `velocidad` m/s durante `segundos` y para. **Bloquea** hasta terminar.
 
-- `velocidad` negativa: retrocede.
+- `velocidad` negativa: retrocede. 🔴 **Es la VELOCIDAD la que hace ir hacia atrás,
+  no el tiempo.** El tiempo pasa por `abs()`, así que `avanzar(0.20, -3)` avanza
+  hacia **delante** 3 segundos: no retrocede ni «va menos tres segundos». El signo
+  va en el primer argumento.
+  ⚠️ Y hacia atrás **no hay capa de seguridad**: el polígono del `collision_monitor`
+  mira hacia delante. Frena igual aunque el robot se aleje del obstáculo (medido:
+  30 cm comandados hacia atrás dieron 14 cm), pero de lo que haya **detrás** no
+  avisa nadie.
 - Se recorta a `±0.40` m/s (`VEL_MAX`) y a `10.0` s (`TIEMPO_MAX`). Si pides más,
   el programa lo dice por pantalla y sigue con el valor recortado — no lanza
   ni se para en silencio.
+- 🔴 **`NaN` e infinito NO se recortan: lanzan `ErrorAtriz`.** Recortar un `NaN`
+  daría el valor **máximo** (`copysign(0.40, nan)` es 0.40), así que la función que
+  existe para «llevar a un valor seguro» convertía la entrada menos fiable de todas
+  en la velocidad máxima — y con el tope de tiempo, en 4 metros de recorrido. Si te
+  salta este error, mira de dónde sale ese valor: casi siempre es una división por
+  cero o una resta de lecturas que aún no habían llegado.
 - Republica la orden 10 veces por segundo. Es necesario: el driver tiene un
   watchdog que corta la velocidad a cero si no recibe una orden nueva en 0.3 s.
 
@@ -65,17 +78,51 @@ Gira `grados` sobre el propio eje. Positivo = izquierda, negativo = derecha
 la odometría mientras gira — no lo que se le pidió.
 
 ```python
-logrado = robot.girar(90)      # gira ~90° y devuelve, p. ej., 87.3
+logrado = robot.girar(90)      # gira ~90° y devuelve lo que midió la odometría
 ```
 
+🔴 Una versión anterior de esta línea ponía `# ... y devuelve, p. ej., 87.3`. **Ese
+número estaba inventado**: no salía de ninguna medida. Y encima enseñaba lo
+contrario de lo que enseña la práctica 4, porque 87.3 está justo en el rango del
+**lazo abierto** — o sea que sugería que el lazo cerrado no sirve de nada. Se ha
+quitado en vez de sustituirlo por otro número sin medir.
+
 Es un **lazo cerrado**: mide el rumbo real y para cuando llega, en vez de girar
-durante un tiempo fijo calculado con una fórmula. La razón: pidiendo 90° por
-tiempo, este robot da 86.6 / 86.2 / 87.7° (n=3, medido) — un déficit que no
-desaparece subiendo la batería. `girar()` mide y corrige eso solo.
+durante un tiempo fijo calculado con una fórmula. La razón: girando por tiempo,
+este robot tiene un déficit medido de varios grados — 90° pedidos dieron
+**86.6 / 86.2 / 87.7°** (n=3), y no desaparece subiendo la batería.
+
+⚠️ **Esos tres números son del servicio `move_timed` del driver a 1.0 rad/s**, no
+de `girar_por_tiempo()`, que publica en `/cmd_vel_raw` a 20 Hz y en la práctica 4
+va a 0.8 rad/s. Otro mecanismo, otra velocidad: **lo que da `girar_por_tiempo()` no
+está medido**. Lo que los tres números sí demuestran es que el déficit del lazo
+abierto existe y es de varios grados, que es la razón de cerrar el lazo.
+
+**Con qué precisión acierta `girar()` tampoco está medido con transportador.** Lo
+único afirmable es aritmética: el lazo comprueba el rumbo cada 0.05 s y en el
+último tramo de la rampa va a 0.20 rad/s, así que **solo la granularidad del bucle
+son 0.573°**, más lo que el robot siga rodando tras la orden de parar — que nadie ha
+medido.
 
 Se recorta a `±720°` (`GRADOS_MAX`). Tiene un tope de tiempo interno (proporcional
 al ángulo pedido) para no girar indefinidamente si el robot se queda atascado; si
 salta, avisa por pantalla con el ángulo que sí logró.
+
+🔴 **Y hay una segunda salida anticipada que conviene conocer: `/odom` mudo.** Si la
+odometría deja de actualizarse (el topic sigue existiendo, pero el `timestamp` no
+cambia en 5 lecturas seguidas, ~0.25 s), `girar()` **para el robot y devuelve el
+ángulo parcial que llevaba acumulado**, avisando por pantalla:
+
+```
+AVISO: /odom no se actualiza hace ~0.25 s. Odometría perdida o desconectada.
+```
+
+Así que **si `girar(90)` te devuelve 12, no está roto tu programa**: es esa rama.
+Sin ella el lazo se quedaba con la muestra congelada, `restante` no bajaba nunca y
+el robot giraba a 0.80 rad/s indefinidamente — para `girar(90)` con `/odom` muerto
+al segundo, **543° de más**. Si te pasa, lo que hay que mirar es el **ritmo** de
+`/odom`, no si el topic existe: las dos cosas son ciertas a la vez cuando el RVR
+se ha dormido.
 
 ### `robot.girar_por_tiempo(velocidad, segundos)`
 
@@ -141,6 +188,13 @@ este robot arrancó con el sensor de color activo. Compruébalo antes de fiarte 
 Metros hasta el objeto más cercano en un cono de ±10° por delante del robot,
 leído del LIDAR.
 
+⚠️ **«Por delante» aquí significa «el ángulo 0 de `/scan`», y eso NUNCA SE HA
+CONTRASTADO CON CINTA.** El URDF no mete ningún offset angular, y el `inverted` del
+LIDAR se verificó en **sentido de giro**, nunca en **offset de montaje**. Si el
+tambor está montado girado unos grados, este cono mira unos grados a un lado y
+**nada lo delataría**: seguiría devolviendo distancias perfectamente plausibles.
+Con ±10° hace falta un error grande para que importe, pero el dato no existe.
+
 ⚠️ Un solo barrido no ve bien un objeto fino: a 0.68 m el LIDAR tira un rayo cada
 1.7 cm, así que algo de 5 cm de ancho puede dar solo 2-3 puntos y desaparecer en
 algún barrido suelto. Para geometría fina hace falta acumular varios barridos, no
@@ -202,10 +256,23 @@ medida nueva:
 
 ## Errores
 
-Todo lo que puede fallar en un servicio o una espera lanza `ErrorAtriz`, con un
-mensaje que dice qué comprobar (por ejemplo, si el robot está encendido). Ningún
-método de `atriz.py` se queda esperando para siempre: cada espera tiene un
-tiempo límite.
+Todo lo que puede fallar en un servicio o una espera **y ser detectado** lanza
+`ErrorAtriz`, con un mensaje que dice qué comprobar (por ejemplo, si el robot está
+encendido). Ningún método de `atriz.py` se queda esperando para siempre: cada
+espera tiene un tiempo límite.
+
+🔴 **Con una excepción, y conviene saberla: `luces()`.** Es la única llamada de esta
+API **sin forma de detectar el fallo**. El servicio `SetLeds` del driver tiene la
+**respuesta vacía** — el fichero `SetLeds.srv` es `int32[] rgb_color` y nada debajo
+del separador —, así que el driver no tiene por dónde decir que no. `luces()` valida
+lo que sí puede validar aquí (que los tres canales sean enteros de 0 a 255, antes de
+convertir), pero si la petición sale bien y los faros no se encienden, **vuelve sin
+decir nada**.
+
+Y en este firmware eso no es teórico: hay comandos de LED que el RVR **acepta en
+silencio sin hacer nada**. La única comprobación que vale para `luces()` es **mirar
+el robot**. Esta sección decía antes «todo lo que puede fallar lanza `ErrorAtriz`»,
+sin más, y era falso justo aquí.
 
 ---
 
@@ -234,9 +301,15 @@ un polígono fijo, no sobre la dirección de movimiento.
 ### ¿Por qué `girar(90)` no da exactamente 90.0?
 
 Porque mide y para, no calcula y confía. El número que devuelve es el ángulo real
-medido con la odometría — normalmente unas décimas por encima o por debajo de lo
-pedido, según cómo responda el robot en ese momento (batería, suelo, deriva de la
-odometría).
+medido con la odometría.
+
+🔴 **Cuánto se desvía NO ESTÁ MEDIDO.** Esta respuesta decía «normalmente unas
+décimas», y esa cifra no salía de ningún sitio. La aritmética del propio lazo ya la
+desmiente: el lazo comprueba el rumbo cada 0.05 s y en el tramo final va a
+0.20 rad/s, así que **la granularidad sola son 0.573°** — y encima el robot sigue
+rodando algo tras la orden de parar, que nadie ha medido. «Unas décimas» era, como
+poco, optimista. El ejercicio 2 de la práctica 2 te manda comprobarlo con
+transportador: **ese número tuyo vale más que este párrafo.**
 
 ### ¿Cómo detengo el robot ahora mismo, en el código?
 

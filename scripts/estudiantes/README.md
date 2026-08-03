@@ -23,6 +23,11 @@ Todo lo que necesitas para el curso de 16 horas vive en esta carpeta.
 
 ## Inicio rápido
 
+🔴 **`01_avanzar.py` MUEVE EL ROBOT.** Antes de lanzarlo, deja **1.5 m despejados
+por delante** (el caso base recorre 60 cm; el ejercicio 3 de esa práctica llega a
+1.20 m), y despejados **a la altura del LIDAR: 15.5 cm del suelo**, no solo a ras
+de suelo — una caja baja no la ve ni el programa ni la capa de seguridad.
+
 ```bash
 cd ~/atriz_ws/src/Atriz_rvr/scripts/estudiantes
 python3 01_avanzar.py
@@ -31,3 +36,8 @@ python3 01_avanzar.py
 Si algo no responde como esperas, mira primero el punto 6 de
 `00_LEEME_PRIMERO.md`: casi siempre es uno de los cuatro comportamientos
 conocidos, no un robot averiado.
+
+🔴 Y lee el **punto 8** de `00_LEEME_PRIMERO.md` antes de fiarte de un número de
+esta documentación: **ningún guion de esta carpeta se ha ejecutado todavía contra
+el robot moviéndose**. Las distancias y los ángulos que verás escritos son
+aritmética, no medidas — las medidas las vas a tomar tú.

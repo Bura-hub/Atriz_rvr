@@ -37,6 +37,26 @@ suelo, con este robot y esta bateria. `robot.girar()` hace otra cosa: MIDE el
 rumbo mientras gira y para cuando llega. Eso es un LAZO CERRADO.
 
 Este programa hace los dos y te deja comparar.
+
+═══════════════════════════════════════════════════════════════════════════════
+LO QUE SALIO AL MEDIRLO DE VERDAD, Y NO ES LO QUE PARECE
+═══════════════════════════════════════════════════════════════════════════════
+Medido en este robot el 2026-08-03, pidiendo 90 grados varias veces:
+
+    lazo ABIERTO   n=4    rango 4.20 grados   error medio +0.23
+    lazo CERRADO   n=5    rango 0.94 grados   error medio +0.20
+
+🔴 LOS DOS ACIERTAN IGUAL DE BIEN EN PROMEDIO. Lo que cambia es que el cerrado
+   REPITE: dispersa 4.5 veces menos.
+
+Y esa es la leccion de verdad, mas fina que «el cerrado acierta mas»: un lazo
+cerrado no mejora la media, **reduce la varianza**. El abierto puede clavarlo
+una vez y fallarse 2.3 grados a la siguiente sin que cambies nada.
+
+📝 Antes de compensar la inercia, el cerrado se pasaba +4 grados SIEMPRE y
+   perdia esta comparacion. Ese sesgo era un fallo del lazo, no del metodo: el
+   robot sigue girando 0.35 s despues de que le mandes parar, y el lazo no lo
+   tenia en cuenta. Ahora si. Evidencias 58 y 61.
 """
 import math
 import time

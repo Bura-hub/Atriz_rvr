@@ -428,3 +428,65 @@ class Robot:
     def parar(self):
         """Para el robot: velocidad cero, repetida por si se pierde un mensaje."""
         self._mandar(0.0, 0.0, repeticiones=5)
+
+    def rumbo(self):
+        """El rumbo actual en grados, leido de /odom."""
+        q = self._ultimo('_odom', timeout=5.0, que='/odom').pose.pose.orientation
+        return math.degrees(yaw_de_cuaternion(q.x, q.y, q.z, q.w))
+
+    def girar(self, grados):
+        """Gira `grados` sobre el eje. Positivo = a la IZQUIERDA (REP-103).
+
+            robot.girar(90)      # un cuarto de vuelta a la izquierda
+            robot.girar(-90)     # a la derecha
+
+        Devuelve los grados que giro DE VERDAD, medidos en /odom.
+
+        ═══════════════════════════════════════════════════════════════════════
+        POR QUE ESTO ES UN LAZO CERRADO Y NO UNA CONSTANTE
+        ═══════════════════════════════════════════════════════════════════════
+        Pidiendole 90 grados por tiempo, este robot hace 86.6 / 86.2 / 87.7
+        (n=3, medido). La salida barata es multiplicar por 1.04 y seguir. Aqui
+        se mide el rumbo real y se para al llegar: la constante se equivoca en
+        cuanto cambie el suelo, la carga o el robot; el lazo, no.
+
+        🔴 Y se acumula el INCREMENTO de rumbo, nunca el yaw absoluto: `atan2`
+           devuelve -pi..pi, asi que una vuelta entera leida en absoluto vuelve
+           al punto de partida y `girar(360)` terminaria sin haberse movido.
+        """
+        grados, aviso = limitar(grados, GRADOS_MAX, 'giro', 'grados')
+        if aviso:
+            print(aviso)
+        objetivo = math.radians(grados)
+        if abs(objetivo) < math.radians(0.5):
+            return 0.0
+
+        sentido = 1.0 if objetivo >= 0.0 else -1.0
+        anterior = math.radians(self.rumbo())
+        acumulado = 0.0
+
+        # Tope de tiempo: lo que tardaria al ritmo mas lento de la rampa, con
+        # margen. Sin el, un robot atascado gira para siempre.
+        limite = time.monotonic() + abs(objetivo) / 0.20 + 5.0
+
+        while not alcanzado(acumulado, objetivo):
+            if time.monotonic() > limite:
+                print(f'AVISO: el giro se quedo en {math.degrees(acumulado):.1f} '
+                      f'de {grados:g} grados. Robot atascado o algo lo frena.')
+                break
+            self._mandar(0.0, sentido * velocidad_giro(objetivo - acumulado))
+            q = self._ultimo('_odom', timeout=2.0,
+                             que='/odom').pose.pose.orientation
+            actual = yaw_de_cuaternion(q.x, q.y, q.z, q.w)
+            acumulado = acumular(anterior, actual, acumulado)
+            anterior = actual
+
+        self.parar()
+        # El robot sigue rodando un poco tras el ultimo comando: se espera y se
+        # vuelve a medir, para devolver lo que paso de verdad y no lo que se
+        # habia mandado.
+        time.sleep(0.5)
+        q = self._ultimo('_odom', timeout=2.0, que='/odom').pose.pose.orientation
+        acumulado = acumular(anterior, yaw_de_cuaternion(q.x, q.y, q.z, q.w),
+                             acumulado)
+        return math.degrees(acumulado)

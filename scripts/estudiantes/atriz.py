@@ -130,6 +130,24 @@ def velocidad_giro(restante_rad):
     return 0.20
 
 
+def validar_canal_led(valor, nombre):
+    """Un canal de LED válido: entero, y de 0 a 255. Si no, lanza ErrorAtriz.
+
+    🔴 Valida el valor TAL COMO LLEGA, no su truncamiento. `int(True) == 1` y
+       `int(-0.5) == 0` son los dos ENTEROS validos: si se comprueba el rango
+       DESPUES de convertir a int, `luces(True, True, True)` pasa como
+       RGB (1,1,1) —practicamente apagado— sin avisar, porque en Python
+       `bool` es subclase de `int`. Es el mismo error de tipo que confunde
+       "encendido/apagado" con 0/1 en un curso de 16 h.
+    """
+    if isinstance(valor, bool) or not isinstance(valor, int):
+        raise ErrorAtriz(
+            f'{nombre}={valor!r}: tiene que ser un entero (int) de 0 a 255, '
+            f'no {type(valor).__name__}.')
+    if not 0 <= valor <= 255:
+        raise ErrorAtriz(f'{nombre}={valor}: cada canal va de 0 a 255.')
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # EL ROBOT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -530,11 +548,23 @@ class Robot:
 
         Normaliza por VERDE, que es el canal mas sensible: rojo sube R/G de 0.48
         a 2.74, azul sube B/G a 0.86.
+
+        🔴 Lanza ErrorAtriz si el driver contesta `success=False` — el RVR no
+           siempre responde (puerto serie o RVR dormido), y el driver deja los
+           cuatro canales en 0 en ese caso. Sin esta comprobacion, (0,0,0,0) es
+           INDISTINGUIBLE de una lectura real sobre negro: es el mismo fallo
+           que costo meses de /color publicando ceros sin que nadie lo notara.
         """
         if not self.hay_color:
-            print('AVISO: el sensor de color esta apagado; esto seran ceros.')
+            print('AVISO: el sensor de color esta apagado; los valores seran '
+                  'ruido de fondo (los canales oscilan entre 0 y 1, no ceros '
+                  'fijos), no una lectura de verdad.')
         r = self._llamar(self._cli_color, GetRGBCSensorValues.Request(),
                          timeout=5.0, que='/get_rgbc_sensor_values')
+        if not r.success:
+            raise ErrorAtriz(
+                f'/get_rgbc_sensor_values fallo de verdad, no es una lectura '
+                f'sobre negro: {r.message or "el driver no dio mas detalle"}.')
         return (r.red_channel_value, r.green_channel_value,
                 r.blue_channel_value, r.clear_channel_value)
 
@@ -572,10 +602,9 @@ class Robot:
     def luces(self, rojo, verde, azul):
         """Pone TODOS los faros del robot a un color (0-255 cada canal)."""
         for nombre, valor in (('rojo', rojo), ('verde', verde), ('azul', azul)):
-            if not 0 <= int(valor) <= 255:
-                raise ErrorAtriz(f'{nombre}={valor}: cada canal va de 0 a 255.')
+            validar_canal_led(valor, nombre)
         peticion = SetLeds.Request()
-        peticion.rgb_color = [int(rojo), int(verde), int(azul)]
+        peticion.rgb_color = [rojo, verde, azul]
         self._llamar(self._cli_luces, peticion, timeout=5.0, que='/set_leds')
 
     def parada_emergencia(self):

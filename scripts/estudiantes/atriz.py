@@ -212,8 +212,21 @@ class Robot:
         signal.signal(signal.SIGINT, self._al_ctrl_c)
 
         print('Conectando con el robot...')
-        self._encender_barrido()
-        self.hay_color = self._comprobar_color()
+        try:
+            self._encender_barrido()
+            self.hay_color = self._comprobar_color()
+        except Exception:
+            # 🔴 Si esto revienta, `/start_scan` puede haber tenido EXITO ya
+            #    (el motor del X2 esta a 11.8 Hz) y solo fallo esperar el
+            #    `/scan` de verdad. Una excepcion aqui sale de `__init__` ANTES
+            #    de que Python entre en el `with`: `__enter__` no se llama, y
+            #    por tanto `__exit__`/`cerrar()` TAMPOCO. Sin este try, el
+            #    barrido se queda girando para siempre — exactamente lo que
+            #    `cerrar()` dice evitar en su comentario, y que aqui SI pasaba.
+            #    Reproducido y verificado el 2026-08-02: ver la Ronda de
+            #    arreglo 2 en la evidencia de la tarea 2.
+            self.cerrar()
+            raise
         print('Robot listo.')
 
     # ── Puertas de entrada y salida ─────────────────────────────────────────
@@ -229,8 +242,17 @@ class Robot:
         if self._cerrado:
             return
         self._cerrado = True
+        # 🔴 DOS `try` separados, a proposito. Parar el robot y apagar el
+        #    barrido NO son un solo paso: si `_mandar()` revienta (por
+        #    ejemplo publicando sobre un contexto ya invalido), un unico
+        #    `try` habria dejado SIN EJECUTAR la llamada a `/stop_scan` de
+        #    abajo. El barrido se tiene que intentar apagar pase lo que pase
+        #    con la parada de velocidad.
         try:
             self._mandar(0.0, 0.0, repeticiones=5)
+        except Exception as e:                               # noqa: BLE001
+            print(f'AVISO al parar: {e}')
+        try:
             self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
                          timeout=5.0, que='/stop_scan')
         except Exception as e:                               # noqa: BLE001
@@ -245,12 +267,23 @@ class Robot:
             #    Sin este `join()`, `destroy_node()`/`rclpy.shutdown()` se
             #    ejecutaban en paralelo con ese hilo todavia tocando el nodo:
             #    SIGABRT intermitente (2 de cada 3 corridas medidas, sin este
-            #    join). El timeout es por si el hilo no llegara a soltar el
-            #    nodo — no debe colgar el cierre indefinidamente.
+            #    join).
             self._hilo.join(timeout=3.0)
+            # 🔴 Si el hilo NO se unio en 3 s, NO se sigue a destroy_node().
+            #    Seguir habria sido la MISMA secuencia sin sincronizar que
+            #    provocaba el SIGABRT — estrechar la carrera no es cerrarla.
+            #    Lo importante para la seguridad ya se intento arriba (cero
+            #    velocidad + /stop_scan), asi que se prefiere dejar el nodo
+            #    sin destruir (fuga de recursos DDS que el SO recupera al
+            #    terminar el proceso) antes que arriesgar el abort. 3 s es
+            #    generoso frente a lo medido (uniones reales de ~0.5 ms); si
+            #    esto se dispara, es señal de que algo va realmente mal.
             if self._hilo.is_alive():
-                print('AVISO: el hilo del ejecutor no se unio a tiempo; '
-                      'destroy_node() puede fallar.')
+                print('AVISO: el hilo del ejecutor no se unio en 3 s. '
+                      'NO se destruye el nodo para no reproducir la carrera '
+                      'que provocaba el SIGABRT (el robot ya recibio orden '
+                      'de parar y de apagar el barrido, por encima).')
+                return
             self._nodo.destroy_node()
             if rclpy.ok():
                 rclpy.shutdown()

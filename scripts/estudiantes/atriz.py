@@ -402,3 +402,29 @@ class Robot:
         for _ in range(repeticiones):
             self.mover(lineal, angular)
             time.sleep(1.0 / RITMO_HZ)
+
+    # ── Movimiento ──────────────────────────────────────────────────────────
+    def avanzar(self, velocidad, segundos):
+        """Avanza a `velocidad` m/s durante `segundos`. Negativo = hacia atras.
+
+            robot.avanzar(0.20, 3)     # 20 cm/s durante 3 segundos
+
+        Republica la orden a 10 Hz: el driver corta a los 0.3 s sin recibir
+        nada, asi que un `sleep` largo entre publicaciones deja al robot
+        parandose y arrancando.
+        """
+        velocidad, aviso = limitar(velocidad, self._vel_max, 'velocidad', 'm/s')
+        if aviso:
+            print(aviso)
+        segundos, aviso = limitar(abs(segundos), TIEMPO_MAX, 'tiempo', 's')
+        if aviso:
+            print(aviso)
+
+        limite = time.monotonic() + segundos
+        while time.monotonic() < limite:
+            self._mandar(velocidad, 0.0)
+        self.parar()
+
+    def parar(self):
+        """Para el robot: velocidad cero, repetida por si se pierde un mensaje."""
+        self._mandar(0.0, 0.0, repeticiones=5)

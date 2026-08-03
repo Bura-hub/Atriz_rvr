@@ -52,6 +52,19 @@ VEL_GIRO_MAX = 2.0    # rad/s — 99-102 % del comandado en las cuatro medidas
 TIEMPO_MAX = 10.0     # s por llamada — decisión de diseño, no una medida
 GRADOS_MAX = 720.0    # ° por llamada — ídem
 
+# 🔴 CUANTO SIGUE GIRANDO EL ROBOT DESPUES DE MANDARLE PARAR.
+#    Medido el 2026-08-03 con el robot en el suelo, n=9 a 90/180/360 grados:
+#    el lazo cerrado se pasaba **+4.01 grados CONSTANTES** — 4.05 a 90, 4.04 a
+#    180 y 3.96 a 360, o sea que NO depende del angulo. Un sobregiro constante
+#    en grados es un tiempo constante en segundos: 0.350 s a 0.20 rad/s, que es
+#    la velocidad final de la rampa. Es la INERCIA de deceleracion.
+#
+#    Por eso `girar()` para ANTES de llegar: compensa un retardo medido, que es
+#    lo que hace un controlador de verdad con un actuador que no frena en seco.
+#    No es una constante calibrada a ojo — es una medida, y se puede volver a
+#    medir. Evidencia 58.
+ANTICIPACION_GRADOS = 4.0
+
 # 🔴 El watchdog del driver corta a los 0.3 s sin `cmd_vel`. Un `sleep(3)` entre
 #    dos publicaciones deja al robot PARADO casi todo el tiempo, y el alumno ve
 #    un robot que «no obedece». Hay que republicar más rápido que eso.
@@ -652,7 +665,13 @@ class Robot:
         sin_cambio = 0
         MAX_SIN_CAMBIO = 5  # ~0.25 s a 20 Hz
 
-        while not alcanzado(acumulado, objetivo):
+        # Se apunta ANTES del objetivo: el robot recorre los ultimos grados
+        # por inercia, despues de que dejemos de mandar. Ver ANTICIPACION_GRADOS.
+        objetivo_lazo = objetivo - sentido * math.radians(ANTICIPACION_GRADOS)
+        if abs(objetivo_lazo) < math.radians(0.5):
+            objetivo_lazo = objetivo        # giros muy cortos: sin anticipar
+
+        while not alcanzado(acumulado, objetivo_lazo):
             if time.monotonic() > limite:
                 print(f'AVISO: el giro se quedo en {math.degrees(acumulado):.1f} '
                       f'de {grados:g} grados. Robot atascado o algo lo frena.')
@@ -697,7 +716,7 @@ class Robot:
             #    ⚠️ Y ojo con el limite real: /odom llega a 16.5 Hz, asi que por
             #       encima de eso quien fija el paso ya no es este bucle sino la
             #       odometria. Nada de esto esta medido sobre el robot.
-            self.mover(0.0, sentido * velocidad_giro(objetivo - acumulado))
+            self.mover(0.0, sentido * velocidad_giro(objetivo_lazo - acumulado))
             time.sleep(0.05)
 
             q = self._ultimo('_odom', timeout=2.0,

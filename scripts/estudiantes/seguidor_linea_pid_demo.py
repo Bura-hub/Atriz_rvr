@@ -86,7 +86,7 @@ VELOCIDAD = ajustes.get('velocidad', 0.08)                # m/s
 # este seguidor NO discrimina el azul de la linea negra.
 UMBRAL_NEGRO = ajustes.get('umbral_negro', 400)           # claro <= esto: sobre la linea
 UMBRAL_CLARO = ajustes.get('umbral_claro', 1000)          # claro >= esto: sobre el suelo
-MARGEN_HISTERESIS = ajustes.get('margen_histeresis', 50)  # evita parpadeo cerca de un umbral
+MARGEN_HISTERESIS = ajustes.get('margen_histeresis', 50)  # ensancha 'borde'; ver clasificar()
 LADO_INICIAL = ajustes.get('lado_borde', 1)               # +1: linea a la izquierda, suelo a la derecha
 TIEMPO_PERDIDO_MAX = ajustes.get('tiempo_perdido_max', 1.0)  # s en 'claro' antes de invertir la hipotesis
 PERIODO = 0.1                                              # s -> 10 Hz, y el watchdog
@@ -95,8 +95,18 @@ PERIODO = 0.1                                              # s -> 10 Hz, y el wa
 
 def clasificar(claro, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO,
                 margen=MARGEN_HISTERESIS):
-    """'negro' / 'borde' / 'claro', con histeresis para no parpadear cerca
-    de un umbral."""
+    """'negro' / 'borde' / 'claro'.
+
+    🔴 Ronda de arreglo 3: `margen` NO es histeresis de verdad -- esta
+    funcion no tiene estado ni recuerda la clasificacion anterior. Lo
+    unico que hace es ensanchar la zona 'borde' hacia dentro de los dos
+    umbrales. Una lectura oscilando justo en `umbral_negro + margen`
+    cambia de 'negro' a 'borde' en cada muestra, exactamente igual que
+    con un umbral simple sin margen -- solo que el punto de corte queda
+    mas lejos de `umbral_negro`. Histeresis de verdad (tipo disparador de
+    Schmitt) necesitaria usar un umbral distinto segun cual fue el
+    estado anterior, y esta funcion no lo hace.
+    """
     if claro <= umbral_negro + margen:
         return 'negro'
     if claro >= umbral_claro - margen:
@@ -116,7 +126,7 @@ def signo_correccion(claro, lado_borde, umbral_negro=UMBRAL_NEGRO, umbral_claro=
     lectura: por eso el signo depende del LADO, no del sensor.
 
     🔴 Ronda de arreglo 2: antes el signo salia de `clasificar()`, que
-    tiene SUS PROPIAS fronteras (con margen de histeresis, para decidir
+    tiene SUS PROPIAS fronteras (ensanchadas por `margen`, para decidir
     cuando estamos perdidos). Entre el centro y esa frontera el signo y la
     magnitud se contradecian -- realimentacion positiva, el robot se
     alejaba del borde en vez de volver. `clasificar()` sigue sirviendo

@@ -41,7 +41,7 @@ Este programa hace los dos y te deja comparar.
 import math
 import time
 
-from atriz import Robot
+from atriz import Robot, normalizar
 
 OBJETIVO = 90.0
 VELOCIDAD_GIRO = 0.8        # rad/s
@@ -56,13 +56,30 @@ with Robot() as robot:
     antes = robot.rumbo()
     robot.girar_por_tiempo(VELOCIDAD_GIRO, segundos)
     time.sleep(0.5)                  # el robot sigue rodando un poco
-    # 📝 Resta rumbos ABSOLUTOS a proposito, no un descuido: es correcta para
-    #    90 grados, pero para OBJETIVO=360 el rumbo vuelve al punto de partida
-    #    y esto da ~0 — eso es justo lo que destapa el ejercicio 5 de abajo.
-    #    La forma que no tiene este problema es acumular el INCREMENTO de
-    #    rumbo (mira `acumular()` en atriz.py), no restar dos absolutos.
-    logrado_abierto = robot.rumbo() - antes
-    print(f'      pedido {OBJETIVO:.0f}, /odom dice {logrado_abierto:.1f}')
+    despues = robot.rumbo()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # TRES FORMAS DE RESPONDER «¿CUANTO GIRE?», Y DOS ESTAN MAL
+    # ═══════════════════════════════════════════════════════════════════
+    # 🔴 Esto NO es un adorno: la primera forma FALLA de verdad, y falla
+    #    al azar. Depende de como estuviera orientado el robot cuando lo
+    #    encendiste, porque el yaw pone su cero en ese momento.
+    #
+    #    Medido el 2026-08-03 en este robot, pidiendo 90 grados:
+    #        una corrida dio  -272.3   otra dio  -269.6   otra dio  90.9
+    #    Las tres giraron lo mismo. Lo que cambia es el punto de partida.
+
+    ingenuo = despues - antes                 # 1. restar rumbos absolutos
+    corregido = math.degrees(                 # 2. lo mismo, normalizado
+        normalizar(math.radians(despues - antes)))
+
+    print(f'      pedido {OBJETIVO:.0f}')
+    print(f'        restando a secas   : {ingenuo:7.1f}   <- se rompe al cruzar +-180')
+    print(f'        restando normalizado: {corregido:7.1f}   <- ya vale para 90')
+    if abs(ingenuo - corregido) > 1.0:
+        print('        🔴 MIRA: las dos de arriba NO coinciden. El giro cruzo el')
+        print('           punto donde el rumbo salta de +180 a -180.')
+    logrado_abierto = corregido
     input('      Mide con el transportador y pulsa Enter...')
 
     # ── Lazo cerrado ────────────────────────────────────────────────────────

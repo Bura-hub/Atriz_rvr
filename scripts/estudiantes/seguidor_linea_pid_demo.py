@@ -78,6 +78,12 @@ ajustes = json.loads(CONFIG.read_text()) if CONFIG.exists() else {}
 VELOCIDAD = ajustes.get('velocidad', 0.08)                # m/s
 # claro (evidencia 37): negro=181, suelo real=1275. Margen razonado desde
 # esos dos anclajes -- ver el docstring de arriba.
+# 🔴 OJO: la misma tabla de evidencia 37 trae azul=396 (superficie azul,
+# no la linea) -- POR DEBAJO de UMBRAL_NEGRO=400. Con este margen, un
+# objeto azul bajo el sensor se clasifica como 'negro', indistinguible de
+# la linea real. No se cambia el umbral sin una medida nueva (evidencia
+# 37 no trae ruido repetido para afinar el margen), pero queda anotado:
+# este seguidor NO discrimina el azul de la linea negra.
 UMBRAL_NEGRO = ajustes.get('umbral_negro', 400)           # claro <= esto: sobre la linea
 UMBRAL_CLARO = ajustes.get('umbral_claro', 1000)          # claro >= esto: sobre el suelo
 MARGEN_HISTERESIS = ajustes.get('margen_histeresis', 50)  # evita parpadeo cerca de un umbral
@@ -98,26 +104,37 @@ def clasificar(claro, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO,
     return 'borde'
 
 
-def signo_correccion(estado, lado_borde):
+def signo_correccion(claro, lado_borde, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO):
     """+1 o -1: hacia donde girar para volver al borde.
 
-    Si estamos en 'claro' (nos pasamos hacia el suelo) hay que girar hacia
-    la linea; si estamos en 'negro' (nos pasamos hacia dentro de la linea)
-    hay que girar hacia el suelo -- son giros CONTRARIOS. Cual de los dos
-    es "izquierda" y cual "derecha" en el mundo lo fija `lado_borde`, no
-    esta lectura: por eso el signo depende del LADO, no del sensor.
+    Cambia de signo exactamente donde `claro` cruza el CENTRO (el punto
+    medio entre `umbral_negro` y `umbral_claro`) -- la MISMA frontera que
+    usa `magnitud_correccion()`. Si estamos pasados hacia el suelo hay que
+    girar hacia la linea; si estamos pasados hacia dentro de la linea hay
+    que girar hacia el suelo -- son giros CONTRARIOS. Cual de los dos es
+    "izquierda" y cual "derecha" en el mundo lo fija `lado_borde`, no esta
+    lectura: por eso el signo depende del LADO, no del sensor.
+
+    🔴 Ronda de arreglo 2: antes el signo salia de `clasificar()`, que
+    tiene SUS PROPIAS fronteras (con margen de histeresis, para decidir
+    cuando estamos perdidos). Entre el centro y esa frontera el signo y la
+    magnitud se contradecian -- realimentacion positiva, el robot se
+    alejaba del borde en vez de volver. `clasificar()` sigue sirviendo
+    para la logica de perdida/reenganche en `main()`, pero YA NO decide el
+    signo de la correccion continua.
     """
-    return lado_borde if estado == 'claro' else -lado_borde
+    centro = (umbral_negro + umbral_claro) / 2.0
+    return lado_borde if claro >= centro else -lado_borde
 
 
 def magnitud_correccion(claro, pid, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO):
     """El PID decide CUANTO corregir. Nunca hacia donde.
 
     El error que recibe es siempre >= 0: la distancia normalizada entre
-    `claro` y el punto medio de la histeresis. Cerca del borde el error es
-    chico (es donde queremos estar); muy dentro de la linea o muy en el
-    suelo, grande -- en los dos casos por igual, porque lo que importa
-    aqui es SOLO cuanto, no en que direccion.
+    `claro` y el mismo CENTRO que usa `signo_correccion()`. Cerca del
+    centro el error es chico (es donde queremos estar); muy dentro de la
+    linea o muy en el suelo, grande -- en los dos casos por igual, porque
+    lo que importa aqui es SOLO cuanto, no en que direccion.
     """
     centro = (umbral_negro + umbral_claro) / 2.0
     error = abs(claro - centro) / centro
@@ -126,10 +143,11 @@ def magnitud_correccion(claro, pid, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBR
 
 def decidir_giro(claro, lado_borde, pid, umbral_negro=UMBRAL_NEGRO, umbral_claro=UMBRAL_CLARO):
     """El giro que se manda al robot: magnitud del PID, signo del lado del
-    borde. Es la funcion que hace que esto pueda funcionar con un solo
+    borde -- las dos funciones miden desde el MISMO centro, para que el
+    giro sea continuo y cambie de signo justo donde la magnitud pasa por
+    cero. Es la funcion que hace que esto pueda funcionar con un solo
     sensor -- pruebala con el mismo `claro` y `lado_borde` contrario."""
-    estado = clasificar(claro, umbral_negro, umbral_claro)
-    signo = signo_correccion(estado, lado_borde)
+    signo = signo_correccion(claro, lado_borde, umbral_negro, umbral_claro)
     magnitud = magnitud_correccion(claro, pid, umbral_negro, umbral_claro)
     return signo * magnitud
 

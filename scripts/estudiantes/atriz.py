@@ -174,6 +174,21 @@ def limitar(valor, tope, nombre, unidad):
         f'({tope:g} {unidad}); se usa {recortado:g}.')
 
 
+def debe_apagar_barrido(lo_encendi):
+    """¿Hay que apagar el barrido del LIDAR al cerrar? Solo si lo encendimos.
+
+    🔴 Dejar las cosas como las encontramos. Si al conectar ya llegaba `/scan`,
+       es que otro lo tiene encendido —la navegacion, u otro programa— y
+       apagarlo al salir lo dejaria CIEGO sin avisar: sin `/scan` el
+       `collision_monitor` bloquea el movimiento (medido: 0.0 cm contra 9.9 del
+       control) y el robot parece averiado.
+
+    Es un principio general, no un parche: dos consumidores del mismo recurso no
+    deben pisarse, y el que llega segundo no manda sobre el primero.
+    """
+    return bool(lo_encendi)
+
+
 def normalizar(rad):
     """Lleva un ángulo al intervalo (−π, π]."""
     angulo = math.fmod(rad, 2.0 * math.pi)
@@ -400,8 +415,19 @@ class Robot:
             self._cerrando = False
 
     def _apagar_barrido(self):
-        """/stop_scan. Si no se llama, el X2 se queda girando a 11.8 Hz en vez
-        de 2.7, 24/7 y multiplicado por 16 robots."""
+        """/stop_scan, PERO solo si lo encendimos nosotros.
+
+        Si no se llama cuando toca, el X2 se queda girando a 11.8 Hz en vez de
+        2.7, 24/7 y multiplicado por 16 robots. Y si se llama cuando NO toca,
+        deja ciego a quien lo estuviera usando — la navegacion, por ejemplo.
+        Lo decide `debe_apagar_barrido()`, que tiene tests.
+
+        ⚠️ El `getattr` con defecto no es adorno: `cerrar()` puede correr desde
+           `atexit` o desde el manejador de señales ANTES de que `__init__` haya
+           llegado a fijar el atributo.
+        """
+        if not debe_apagar_barrido(getattr(self, '_barrido_era_mio', True)):
+            return
         self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
                      timeout=5.0, que='/stop_scan')
 
@@ -467,6 +493,18 @@ class Robot:
         24/7). Sin `/scan` el collision_monitor bloquea el movimiento: medido
         0.0 cm contra 9.9 del control. Desde fuera es identico a un robot roto.
         """
+        # ¿Lo tenia encendido otro? Se mira ANTES de encenderlo nosotros.
+        # Una espera corta basta: /scan va a ~10 Hz cuando esta activo.
+        self._barrido_era_mio = True
+        try:
+            self._ultimo('_scan', timeout=1.0, que='/scan')
+            self._barrido_era_mio = False
+            print('AVISO: el barrido del LIDAR ya estaba encendido (¿navegacion\n'
+                  '       en marcha?). NO lo apagare al cerrar, para no dejar\n'
+                  '       ciego a quien lo este usando.')
+        except ErrorAtriz:
+            pass                    # no llegaba nada: lo encendemos nosotros
+
         self._llamar(self._cli_iniciar, EmptySrv.Request(),
                      timeout=10.0, que='/start_scan')
         # Que el servicio conteste no prueba que lleguen barridos: se espera al

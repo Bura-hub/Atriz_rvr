@@ -129,68 +129,6 @@ def velocidad_giro(restante_rad):
     return 0.20
 
 
-def simular_girar(grados_pedidos, yaw_generador, freq_hz=20.0):
-    """Simula el lazo de girar() con odometría sintética, sin tocar el robot.
-
-    grados_pedidos: lo que se pide girar
-    yaw_generador: una función que toma (iteración, grados_restantes) y devuelve
-                   el yaw actual en radianes. Simula la respuesta del robot.
-    freq_hz: frecuencia de publicación simulada del lazo (por defecto 20 Hz)
-
-    Devuelve: (grados_acumulados, num_iteraciones, razon_termino)
-    """
-    objetivo = math.radians(grados_pedidos)
-    if abs(objetivo) < math.radians(0.5):
-        return 0.0, 0, 'objetivo_minimo'
-
-    sentido = 1.0 if objetivo >= 0.0 else -1.0
-    anterior = yaw_generador(0, grados_pedidos)  # yaw inicial
-    acumulado = 0.0
-
-    limite = abs(objetivo) / 0.20 + 5.0  # tope de tiempo (sin monotonic())
-    tiempo_transcurrido = 0.0
-    iteracion = 0
-    ultimo_timestamp = None
-    sin_cambio = 0
-    MAX_SIN_CAMBIO = 5
-
-    while not alcanzado(acumulado, objetivo):
-        if tiempo_transcurrido > limite:
-            return math.degrees(acumulado), iteracion, 'timeout'
-
-        # Simular lectura de /odom
-        actual = yaw_generador(iteracion, math.degrees(objetivo - acumulado))
-
-        # Detectar si la muestra cambió (simular timestamp)
-        # En la simulación, usamos el yaw mismo como proxy de timestamp
-        timestamp_actual = (round(actual * 1000000),)  # tupla para comparar
-        if timestamp_actual == ultimo_timestamp:
-            sin_cambio += 1
-            if sin_cambio >= MAX_SIN_CAMBIO:
-                return math.degrees(acumulado), iteracion, 'odom_congelado'
-        else:
-            sin_cambio = 0
-            ultimo_timestamp = timestamp_actual
-
-        acumulado = acumular(anterior, actual, acumulado)
-        anterior = actual
-
-        # Simular el sleep del lazo
-        tiempo_transcurrido += 1.0 / freq_hz
-        iteracion += 1
-
-        # Limite de iteraciones para evitar loop infinito en simulación
-        if iteracion > 10000:
-            return math.degrees(acumulado), iteracion, 'max_iteraciones'
-
-    # Simular el sleep final y re-medida
-    tiempo_transcurrido += 0.5
-    actual_final = yaw_generador(iteracion, 0.0)
-    acumulado = acumular(anterior, actual_final, acumulado)
-
-    return math.degrees(acumulado), iteracion, 'convergencia'
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # EL ROBOT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -555,7 +493,7 @@ class Robot:
                 sin_cambio += 1
                 if sin_cambio >= MAX_SIN_CAMBIO:
                     print(f'AVISO: /odom no se actualiza hace ~{MAX_SIN_CAMBIO * 0.05:.2f} s. '
-                          f'Odometría perdida o disconnectada.')
+                          f'Odometría perdida o desconectada.')
                     self.parar()
                     return math.degrees(acumulado)
             else:

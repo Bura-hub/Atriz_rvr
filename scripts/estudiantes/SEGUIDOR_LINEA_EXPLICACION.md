@@ -1,191 +1,239 @@
-# Seguidor de línea con un solo sensor de color (RVR)
+# Seguidor de línea con un solo sensor de color
 
-Este documento explica de forma completa el diseño, cálculo del error, control, recuperación y parámetros del seguidor de línea implementado en:
+Este documento explica el diseño, el cálculo del giro, y la recuperación del
+seguidor de línea implementado en:
 
 - `scripts/estudiantes/seguidor_linea_pid_demo.py`
 
-Incluye dos enfoques complementarios, adecuados para un solo sensor de color:
-- Seguimiento de borde (edge-following) con histéresis y recuperación robusta.
-- Cálculo de error normalizado apto para PID discreto (opcional/híbrido).
+Es un PID combinado con seguimiento de **borde** (edge-following), pensado para
+un robot que solo tiene **un** sensor de color mirando hacia abajo.
 
 ---
 
-## 1) Arquitectura y tópicos ROS
+## 1) Arquitectura
 
-- Publica: `geometry_msgs/Twist` en `/cmd_vel` (control del RVR).
-- Suscribe (versión edge-following): `atriz_rvr_msgs/Color` en `/color`.
-- Alternativa (versión servicio): llama servicio `/get_rgbc_sensor_values` para obtener `clear` (brillo).
-- Servicio de activación del sensor: `/enable_color` (`std_srvs/SetBool`).
+El script **no habla ROS directamente**: usa la biblioteca `atriz.py`, igual que
+el resto de las prácticas. Todo lo que necesita son dos llamadas:
 
----
+```python
+from atriz import Robot
 
-## 2) Señal de entrada y preprocesamiento
-
-Con un solo sensor RGB se sintetiza una “intensidad” (brillo) como media simple:
-
-```
-intensidad = (R + G + B) / 3
+with Robot() as robot:
+    _, _, _, claro = robot.color()   # lee el sensor
+    robot.mover(velocidad, giro)     # manda UNA orden y no bloquea
 ```
 
-Para robustez frente a ruido se usa un buffer corto (3 muestras) y se promedia. Luego se clasifica por **histéresis**:
+`robot.mover()` no republica: hay que llamarla en el propio bucle, más de tres
+veces por segundo (el watchdog del driver corta a los 0.3 s sin una orden nueva).
+El script lo hace con un `sleep` calculado para mantener 10 Hz — ver la sección 7.
 
-- `BLACK` si `intensidad ≤ (umbral_negro + margen_histeresis)`
-- `WHITE` si `intensidad ≥ (umbral_blanco − margen_histeresis)`
-- `MID` en caso contrario (zona de transición/borde)
-
-La histéresis evita el “rebote” cerca de los umbrales cuando cambian las condiciones de iluminación.
-
----
-
-## 3) Estrategia de control con un solo sensor: Edge-Following
-
-Con un solo sensor no es fiable estimar el “desalineamiento lateral” clásico. En su lugar, se sigue el **borde** de la línea:
-
-- Si el sensor ve `BLACK` o `MID` (estamos sobre la línea o en el borde):
-  - Avanzar a `vel_max`.
-  - Aplicar un giro constante “hacia el blanco” para mantenerse pegado al borde.
-  - El lado del borde que seguimos se guarda en `last_edge_dir` (derecha: +1, izquierda: −1).
-
-- Si el sensor ve `WHITE` (se salió):
-  - Ejecutar una **recuperación en dos fases** pensada para dos orugas y **sensor adelantado** respecto al centro:
-    1) Retroceso breve con giro **contrario** al último borde (trae el borde bajo el sensor).
-    2) Escaneo en sitio hacia el lado opuesto. Si no encuentra, alterna F1↔F2 (barrido amplio).
-
-Este método es muy efectivo con un solo sensor porque convierte la tarea en “mantenerse pegado al borde” en lugar de “centrarse” sobre la línea.
+🔴 **Necesita que el robot haya arrancado con `color_detection:=true`** (lo hace
+el profesor). Sin eso, `robot.hay_color` es `False` y el script avisa y sale antes
+de moverse.
 
 ---
 
-## 4) Cálculo del “error” y control PID discreto (opcional/híbrido)
+## 2) Señal de entrada
 
-Si se desea un control más fino, se puede calcular un **error normalizado** apto para PID:
+La señal es el canal **`claro`** de `robot.color()`, directamente, en su escala
+nativa — **no** una media `(R+G+B)/3` sobre 0-255. Dos medidas lo anclan
+(evidencia 37, `00_auditoria/evidencia_24_04/37_sensores_opticos.txt`):
 
-1. Definir `punto_medio = (umbral_negro + umbral_blanco) / 2`
-2. Error normalizado (en [-1, 1]):
+| Superficie | `claro` |
+|---|---|
+| Negro (la línea) | 181 |
+| Suelo real del laboratorio (sin cinta) | 1275 |
 
-```
-error = (intensidad − punto_medio) / max(punto_medio, 1)
-error = clamp(error, −1.0, 1.0)
+De ahí salen los dos umbrales del seguidor:
+
+```python
+UMBRAL_NEGRO = 400    # claro <= esto: sobre la línea
+UMBRAL_CLARO = 1000   # claro >= esto: sobre el suelo
 ```
 
-- `error < 0` → más oscuro que el punto medio (hacia el negro)
-- `error > 0` → más claro que el punto medio (hacia el blanco)
+`400` y `1000` **no son una tercera medida**: son un margen razonado desde esos
+dos anclajes — `400` deja más del doble de holgura sobre el `181` medido, y
+`1000` deja un 22 % por debajo del `1275` medido. No hay en la evidencia lecturas
+repetidas del mismo punto que permitan calcular el ruido real del sensor, así que
+el margen exacto (por qué 400 y no 350 o 450) queda **NO VERIFICADO** — los dos
+anclajes sí lo están.
 
-### PID discreto implementado (clase `DiscretePID`)
+⚠️ **Limitación conocida:** la misma evidencia trae `azul = 396` (una superficie
+azul, no la línea) — por **debajo** de `UMBRAL_NEGRO = 400`. Con este umbral, un
+objeto azul bajo el sensor se clasifica igual que la línea negra: este seguidor
+**no distingue el azul del negro**. No se cambia el umbral sin una medida nueva.
 
-- Proporcional: `P = Kp * error`
-- Integral (método del trapecio):
+---
+
+## 3) Por qué borde y no centro
+
+Un solo sensor mirando hacia abajo **no puede saber hacia qué lado se ha
+desviado** el robot: el sensor solo entrega un número (`claro`), y ese número
+sale igual de alto tanto si el robot deriva a la izquierda de la línea como si
+deriva a la derecha — en los dos casos deja de ver negro y empieza a ver suelo
+claro.
+
+Por eso este seguidor **no intenta centrarse** sobre la línea. En su lugar sigue
+siempre **el mismo borde**, como quien camina apoyando la mano en una pared: el
+robot arranca con el sensor justo sobre el límite negro/claro (línea a un lado,
+suelo al otro) y corrige para mantenerse ahí.
+
+---
+
+## 4) Cómo se decide el giro: magnitud y signo, por separado
+
+El **PID** (la clase `PID`, sin cambios respecto a lo que se estudia en teoría)
+decide **cuánto** corregir. **Nunca** decide hacia qué lado: eso lo fija un
+estado que se arrastra entre vueltas del bucle, `lado_borde` (+1 o -1), no una
+lectura instantánea del sensor.
+
+Cuatro funciones puras hacen el trabajo (fuera de la clase `PID`, así que se
+pueden probar sin conectar a ningún robot):
+
+```python
+clasificar(claro, ...)              # 'negro' / 'borde' / 'claro'
+signo_correccion(claro, lado_borde, ...)   # +1 / -1 — NUNCA sale del PID
+magnitud_correccion(claro, pid, ...)       # el PID, siempre >= 0
+decidir_giro(claro, lado_borde, pid, ...)  # signo * magnitud
+```
+
+**El signo y la magnitud miden desde el mismo punto**: el centro entre
+`UMBRAL_NEGRO` y `UMBRAL_CLARO` (700 con los valores por defecto). Eso es a
+propósito y es importante: si signo y magnitud usaran fronteras distintas, hay
+una banda intermedia donde el signo dice un lado y la magnitud ya está creciendo
+hacia el otro — realimentación positiva, el robot se aleja del borde en vez de
+volver. Con las dos midiendo desde el centro, el giro es continuo y cambia de
+signo exactamente donde la magnitud pasa por cero.
+
+`clasificar()` **no decide el signo del giro**. Sirve para otra cosa: saber
+cuándo el robot lleva demasiado tiempo sin ver el borde (sección siguiente).
+
+⚠️ El margen de `clasificar()` (`MARGEN_HISTERESIS`) **no es histéresis de
+verdad**: la función no tiene estado, no recuerda la clasificación anterior.
+Solo ensancha la zona `'borde'` hacia dentro de los dos umbrales — da un colchón
+antes de declarar `'negro'` o `'claro'` en firme, pero una lectura oscilando
+justo en el borde de esa zona seguiría cambiando de clasificación en cada
+muestra, igual que con un umbral simple.
+
+---
+
+## 5) Recuperación al perder el borde
+
+Este es el punto en el que este documento **ya no describe lo mismo que hacía la
+versión anterior del script**: la recuperación se simplificó.
+
+Mientras el sensor sigue viendo `'negro'` o `'borde'`, el giro normal (sección 4)
+ya corrige lo bastante: cuanto más lejos del centro, más fuerte corrige el PID,
+en las tres clasificaciones por igual. No hace falta una maniobra aparte para
+«nos pasamos un poco hacia el suelo».
+
+Solo hay una recuperación explícita, y es para el caso de estar **realmente
+perdidos**: si el sensor lleva más de `tiempo_perdido_max` segundos seguidos
+viendo `'claro'` (por defecto, 1.0 s), se asume que la hipótesis de hacia dónde
+está la línea era la equivocada, y se **invierte `lado_borde`** para probar la
+contraria. El robot sigue avanzando hacia delante mientras tanto, corrigiendo
+cada vez más fuerte — no hay una fase de retroceso ni de escaneo en el sitio.
+
+No se reprodujo tampoco ningún filtrado por buffer sobre las lecturas: el canal
+`claro` no se ha caracterizado por ruido (mismo hueco de evidencia que el margen
+de la sección 2), así que añadir un filtro sin saber si hace falta habría sido
+inventar una calibración.
+
+**Esto es una simplificación deliberada, y no está verificada sobre el robot**
+más allá de las pruebas automáticas de las funciones puras. Si al moverlo el
+robot se pierde de forma persistente, o `tiempo_perdido_max` resulta
+insuficiente, es el primer sitio donde mirar.
+
+---
+
+## 6) Parámetros
+
+Viven en `seguidor_config.json`, junto al script:
+
+```json
+{
+  "velocidad": 0.08,
+  "umbral_negro": 400,
+  "umbral_claro": 1000,
+  "margen_histeresis": 50,
+  "lado_borde": 1,
+  "tiempo_perdido_max": 1.0,
+  "pid": {
+    "kp": 0.5,
+    "ki": 0.0,
+    "kd": 0.3,
+    "limite": 1.5
+  }
+}
+```
+
+| Parámetro | Qué hace |
+|---|---|
+| `velocidad` | m/s hacia delante, constante mientras el PID corrige el giro |
+| `umbral_negro`, `umbral_claro` | los dos anclajes de la sección 2 |
+| `margen_histeresis` | ensancha la zona `'borde'` de `clasificar()` — ver la sección 4 |
+| `lado_borde` | convención de arranque: `+1` = línea a la izquierda del robot, suelo a la derecha |
+| `tiempo_perdido_max` | segundos en `'claro'` antes de invertir `lado_borde` |
+| `pid.kp`, `pid.ki`, `pid.kd` | las tres ganancias del PID de siempre |
+| `pid.limite` | tope de saturación de la salida del PID (rad/s) |
+
+Si el fichero no existe, el script usa estos mismos valores por defecto.
+
+---
+
+## 7) El ritmo del bucle
+
+```python
+PERIODO = 0.1   # s -> 10 Hz
+```
+
+Cada vuelta hace: `robot.color()` (13-21 ms medidos), el PID (aritmética, nada) y
+`robot.mover()` (una publicación, nada). A 10 Hz, `color()` consume como mucho el
+21 % del período — cabe de sobra.
+
+⚠️ Si `PERIODO` supera 0.3 s, el hueco entre dos llamadas a `mover()` es mayor que
+el timeout del watchdog del driver: el robot arranca al recibir la orden, el
+watchdog lo para a los 0.3 s, y queda quieto el resto del período. Eso es «ir a
+tirones» — es el ejercicio 4 del script.
+
+---
+
+## 8) Flujo del bucle, tal como está hoy
 
 ```
-error_avg = 0.5 * (error + error_prev)
-integral += error_avg * dt
-integral = clamp(integral, integral_min, integral_max)
-I = Ki * integral
+mientras True:
+    leer claro con robot.color()
+    clasificar(claro)                        -> 'negro' / 'borde' / 'claro'
+    si 'claro' sostenido > tiempo_perdido_max:
+        invertir lado_borde
+    giro = decidir_giro(claro, lado_borde, pid)
+    robot.mover(velocidad, giro)
+    dormir lo que falte del período
 ```
 
-- Derivada (diferencia finita):
-
-```
-derivative = (error − error_prev) / dt
-D = Kd * derivative
-```
-
-- Manejo del tiempo:
-  - `dt_min` para evitar dividir por números muy pequeños.
-  - `dt_max` para evitar acumulaciones si hubo pausas largas (se resetea integral/derivada si `dt > dt_max`).
-
-- Salida: `u = P + I + D`, saturada a `±vel_ang_max`.
-
-El script “demo” actual usa edge-following por robustez, pero puedes mezclarlo (ej.: usar `u` como giro cuando `state == MID`).
+No hay una fase de recuperación con retroceso ni escaneo en el sitio: la única
+rama especial es el contador de tiempo perdido.
 
 ---
 
-## 5) Recuperación y consideraciones mecánicas
+## 9) Errores comunes
 
-- El **sensor está adelantado** respecto al centro: cuando ve blanco, probablemente el centro ya pasó el borde. Por eso:
-  - Fase 1: retrocede ligeramente y gira contrario → vuelve a traer el borde bajo el sensor.
-  - Fase 2: escanea al lado opuesto.
-  - Alterna si no encuentra en tiempos configurables (`recovery_reverse_time`, `recovery_scan_time`).
-
-- El robot tiene **dos orugas**: pivota bien en sitio. El escaneo en sitio es fiable para reenganchar el borde.
-
----
-
-## 6) Parámetros principales (rosparam o constantes)
-
-- Velocidades:
-  - `vel_max` (m/s), `vel_min` (m/s), `vel_ang_max` (rad/s)
-- Histéresis y umbrales:
-  - `umbral_negro`, `umbral_blanco`, `hysteresis_margin`
-- Filtrado:
-  - `tamano_buffer` (3 recomendado para reacción rápida)
-- Recuperación:
-  - `recovery_reverse_time` (s), `recovery_scan_time` (s)
-  - `recovery_linear` (m/s, típico negativo para retroceder), `recovery_angular` (rad/s)
-- PID (si usas el cálculo de error):
-  - `kp`, `ki`, `kd`, `integral_min`, `integral_max`, `dt_min`, `dt_max`
-
-Sugerencias de tuning:
-- Aumenta `hysteresis_margin` si hay parpadeo entre BLACK/WHITE.
-- Reduce `tamano_buffer` para mayor rapidez; súbelo si hay mucho ruido.
-- Si zigzaguea mucho: baja `omega` (giro en borde) o `vel_max`.
-- Si tarda al recuperar: sube `recovery_angular` o las duraciones.
+- **«Se sale en las curvas»**: baja `velocidad`, o sube el límite del PID
+  (`pid.limite`) para que pueda corregir más fuerte.
+- **«Oscila demasiado»**: baja `pid.kp`, o revisa si `pid.kd` está en 0
+  (ejercicio 1 del script).
+- **«No reengancha tras perderse»**: baja `tiempo_perdido_max`, o revisa que
+  `lado_borde` inicial sea el que corresponde a cómo colocaste el robot.
+- **El robot confunde un objeto azul con la línea**: es una limitación conocida
+  (sección 2), no un fallo del script.
 
 ---
 
-## 7) Movimiento constante y suavizado
+## 10) Referencias prácticas
 
-Para evitar “pasos” o microparadas:
-- Publicar `Twist` a alta frecuencia (60–120 Hz).
-- Mantener una velocidad lineal constante mientras el giro corrige.
-- Suavizar el `angular.z` con un filtro exponencial si el sensor tiene latencia.
-
----
-
-## 8) Inicialización del sensor
-
-Activación recomendada al iniciar el nodo:
-- Llamar a `/enable_color` (`SetBool`) con `True` para encender el sensor.
-- Verificar servicio de lectura: suscriptor a `/color` o `ServiceProxy` persistente a `/get_rgbc_sensor_values`.
-
----
-
-## 9) Flujo simplificado del bucle
-
-1) Leer intensidad (promedio filtrado o valor `clear`).
-2) Clasificar: `BLACK`, `MID`, `WHITE`.
-3) Si `BLACK`/`MID`: avanzar y girar hacia el blanco (seguir el borde).
-4) Si `WHITE`: recuperación F1 (retroceso+contrario) → F2 (escaneo) → alternar hasta reenganchar.
-5) Publicar `Twist` continuamente.
-
----
-
-## 10) Errores comunes y soluciones
-
-- “Se sale en curvas”: baja `vel_max` o sube ligeramente `omega`/`vel_ang_max`.
-- “Oscila demasiado”: baja `omega` o añade suavizado en `angular.z`.
-- “No recupera”: aumenta `recovery_angular` y tiempos de `recovery_*`.
-- “Parpadeo BLACK/WHITE”: sube `hysteresis_margin` y/o `tamano_buffer`.
-
----
-
-## 11) Extensiones
-
-- Usar `DiscretePID` solo en `MID` (zona de borde) para un giro más fino y edge-following para `BLACK/WHITE`.
-- Ajuste dinámico de `vel_max` según curvatura (|error| alto → reduce v).
-- Calibración automática de umbrales tomando muestras de `negro` y `blanco` antes de empezar.
-
----
-
-## 12) Referencias prácticas
-
-- Script de ejemplo: `scripts/estudiantes/seguidor_linea_pid_demo.py`
-- Mensajes:
-  - `/cmd_vel` → `geometry_msgs/Twist`
-  - `/color` → `atriz_rvr_msgs/Color`
-- Servicios:
-  - `/enable_color` → `std_srvs/SetBool`
-  - `/get_rgbc_sensor_values` → `atriz_rvr_msgs/GetRGBCSensorValues`
-
----
-
-Con este esquema, un solo sensor es suficiente para seguir la línea de forma robusta en escenarios reales: se mantiene pegado al **borde** con histéresis y, si se pierde, el robot aprovecha sus orugas y la posición adelantada del sensor para reenganchar la línea rápidamente.
+- Script: `scripts/estudiantes/seguidor_linea_pid_demo.py`
+- Parámetros: `scripts/estudiantes/seguidor_config.json`
+- Lo que usa de la biblioteca del laboratorio: `robot.color()` y
+  `robot.mover()` — ver `REFERENCIAS.md` para su firma completa.
+- La evidencia de los umbrales: `00_auditoria/evidencia_24_04/37_sensores_opticos.txt`
+  (repositorio `atriz_migracion`, privado — citado por nombre, no enlazado).

@@ -25,6 +25,7 @@ import threading
 import time
 
 import rclpy
+from atriz_rvr_msgs.srv import GetRGBCSensorValues, SetLeds
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import GetParameters
@@ -195,6 +196,9 @@ class Robot:
         self._cli_parar_barrido = self._nodo.create_client(EmptySrv, '/stop_scan')
         self._cli_param = self._nodo.create_client(
             GetParameters, '/rvr_driver/get_parameters')
+        self._cli_color = self._nodo.create_client(
+            GetRGBCSensorValues, '/get_rgbc_sensor_values')
+        self._cli_luces = self._nodo.create_client(SetLeds, '/set_leds')
 
         # 🔴 EJECUTOR PROPIO Y PERSISTENTE, en un hilo de fondo.
         #    `rclpy.spin_once(nodo)` en bucle engancha y desengancha el nodo del
@@ -513,3 +517,78 @@ class Robot:
         acumulado = acumular(anterior, yaw_de_cuaternion(q.x, q.y, q.z, q.w),
                              acumulado)
         return math.degrees(acumulado)
+
+    # ── Sensores ────────────────────────────────────────────────────────────
+    def color(self):
+        """El color que ve el robot: (rojo, verde, azul, claro).
+
+        📝 Sale del servicio /get_rgbc_sensor_values y no del topic /color, y
+           por una razon medida: el mensaje `Color` NO trae el canal `claro`, y
+           `claro` es el que discrimina de verdad — 12.6x entre blanco y negro,
+           contra un RGB que apenas se mueve. El servicio cuesta 13-20 ms, asi
+           que cabe de sobra en un lazo de control a 10 Hz.
+
+        Normaliza por VERDE, que es el canal mas sensible: rojo sube R/G de 0.48
+        a 2.74, azul sube B/G a 0.86.
+        """
+        if not self.hay_color:
+            print('AVISO: el sensor de color esta apagado; esto seran ceros.')
+        r = self._llamar(self._cli_color, GetRGBCSensorValues.Request(),
+                         timeout=5.0, que='/get_rgbc_sensor_values')
+        return (r.red_channel_value, r.green_channel_value,
+                r.blue_channel_value, r.clear_channel_value)
+
+    def distancia_frontal(self):
+        """Metros hasta lo mas cercano que hay DELANTE, en un cono de +-10 grados.
+
+        ⚠️ Un solo barrido no ve un objeto fino: a 0.68 m el X2 tira un rayo
+           cada 1.7 cm, asi que algo de 5 cm da 2-3 puntos y puede desaparecer.
+           Para geometria fina hay que acumular varios barridos.
+        """
+        barrido = self._ultimo('_scan', timeout=5.0, que='/scan')
+        cono = math.radians(10.0)
+        cerca = math.inf
+        for i, distancia in enumerate(barrido.ranges):
+            angulo = barrido.angle_min + i * barrido.angle_increment
+            if abs(normalizar(angulo)) > cono:
+                continue
+            if barrido.range_min < distancia < barrido.range_max:
+                cerca = min(cerca, distancia)
+        if not math.isfinite(cerca):
+            raise ErrorAtriz('no hay ningun punto valido delante del robot.')
+        return cerca
+
+    def bateria(self):
+        """Voltios de la bateria del RVR.
+
+        🔴 Voltios y no porcentaje: el porcentaje dijo 100 % con la bateria a
+           8.29 V, a 1.29 V del umbral de «baja» del propio firmware (7.0 V;
+           critica 6.5). Es una estimacion gruesa.
+        """
+        return float(self._ultimo('_bateria', timeout=35.0,
+                                  que='/battery_state').voltage)
+
+    # ── Luces y parada ──────────────────────────────────────────────────────
+    def luces(self, rojo, verde, azul):
+        """Pone TODOS los faros del robot a un color (0-255 cada canal)."""
+        for nombre, valor in (('rojo', rojo), ('verde', verde), ('azul', azul)):
+            if not 0 <= int(valor) <= 255:
+                raise ErrorAtriz(f'{nombre}={valor}: cada canal va de 0 a 255.')
+        peticion = SetLeds.Request()
+        peticion.rgb_color = [int(rojo), int(verde), int(azul)]
+        self._llamar(self._cli_luces, peticion, timeout=5.0, que='/set_leds')
+
+    def parada_emergencia(self):
+        """Parada de emergencia: el driver descarta TODO comando hasta liberarla.
+
+        🔴 NO se libera sola, ni aqui ni al cerrar. Liberar es un acto explicito
+           del profesor:  ros2 service call /release_emergency_stop std_srvs/srv/Empty
+           Ese fue el cuarto fallo de este boton: al SOLTARLA, no al pulsarla,
+           el robot arrancaba solo.
+        """
+        for _ in range(3):
+            self._pub_parada.publish(Empty())
+            time.sleep(0.05)
+        print('PARADA DE EMERGENCIA enviada. El robot no obedecera hasta que\n'
+              'alguien la libere:  ros2 service call /release_emergency_stop '
+              'std_srvs/srv/Empty')

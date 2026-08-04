@@ -27,11 +27,15 @@ find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  # ── Mensajes (6) ───────────────────────────────────────────────────────────
+  # ── Mensajes (8) ───────────────────────────────────────────────────────────
+  # 📝 El rótulo decía «(6)» con SIETE ficheros en la lista desde antes de este
+  #    cambio. Se corrige al añadir el octavo: un contador que no cuadra es lo
+  #    que hace que la siguiente persona dude de la lista entera.
   "msg/Color.msg"
   "msg/ControlState.msg"
   "msg/DegreesTwist.msg"
   "msg/Encoder.msg"
+  "msg/EstadoRobot.msg"
   "msg/InfraredMessage.msg"
   "msg/MotorStatus.msg"
   "msg/SystemInfo.msg"

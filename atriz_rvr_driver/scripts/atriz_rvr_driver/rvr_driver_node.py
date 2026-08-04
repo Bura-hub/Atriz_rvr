@@ -99,8 +99,8 @@ from std_srvs.srv import Empty as EmptySrv
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
-from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, MotorStatus,
-                                SystemInfo)
+from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoRobot,
+                                MotorStatus, SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
     SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
@@ -312,6 +312,35 @@ class RvrDriverNode(Node):
         self._n_recuperaciones = 0
         self._bateria_pct: float | None = None
 
+        # ── Estado de `/estado_robot` (AÑADIDO 2026-08-04) ────────────────────
+        # ⚠️ NO VERIFICADO: escrito sin robot delante. Ver NOTAS_ESTADO_ROBOT.md.
+        #
+        # 🔴 `_t_muestra_real` y `_n_muestras` son un ESPEJO de `_t_ultima_muestra`
+        #    que SOLO tocan los handlers del SDK, y esa distinción es el corazón
+        #    de `reanudaciones_fallidas`.
+        #
+        #    `_t_ultima_muestra` lo reinician también `_conectar_rvr` y
+        #    `_recuperar_streaming` —a propósito, para que el vigilante no vuelva
+        #    a disparar mientras la recuperación está en curso—, así que ese campo
+        #    dice «hace poco que pasó algo», no «hace poco que llegó un dato». Si
+        #    el contador de reanudaciones se apoyara en él, una reanudación con el
+        #    RVR APAGADO parecería un éxito: es exactamente el fallo medido el
+        #    2026-08-02 (8 «streaming reanudado» en 30 s con /odom a cero), y
+        #    reproducirlo dentro del campo escrito para detectarlo sería el chiste
+        #    completo.
+        #
+        #    Estos dos solo avanzan cuando el RVR entrega una muestra de verdad.
+        self._t_muestra_real: float | None = None
+        self._n_muestras = 0
+        #: Foto de `_n_muestras` en el instante del último intento de reanudar.
+        #: Si `_n_muestras` la supera, llegó un dato DESPUÉS del intento.
+        self._muestras_al_reanudar = 0
+        #: Intentos de reanudar SEGUIDOS que no devolvieron ni una muestra.
+        self._reanudaciones_fallidas = 0
+        #: Contador monótono de publicaciones de `/estado_robot`. Es la señal de
+        #: vida del NODO: un topic que existe no prueba que haya nadie detrás.
+        self._latido = 0
+
         # ── Origen del yaw ───────────────────────────────────────────────────
         # 🔴 `reset_yaw()` NO PONE A CERO EL YAW. Medido el 2026-07-31: el driver
         # lo llama al arrancar y el cuaternión seguía dando -74.6° en reposo.
@@ -433,6 +462,34 @@ class RvrDriverNode(Node):
         #    rosbridge, empareja con este publicador sin problema.
         self.pub_motores = self.create_publisher(
             MotorStatus, 'motor_status',
+            QoSProfile(
+                depth=1,
+                reliability=QoSReliabilityPolicy.RELIABLE,
+                durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            ),
+        )
+
+        # ── Estado del nodo y del enlace (AÑADIDO 2026-08-04) ────────────────
+        # ⚠️ NO VERIFICADO: no ha corrido nunca contra un robot.
+        #
+        # La señal de vida barata para el muro del profesor: 16 robots vigilados
+        # con ~0,5 kB/s en total, contra los 1,7 Mbit/s que cuesta mirar `/odom`.
+        # Ver `EstadoRobot.msg` para el porqué de cada campo.
+        #
+        # QoS: EL MISMO que `/battery_state` y `/motor_status` —RELIABLE +
+        # TRANSIENT_LOCAL, depth 1—, y no se replantea aquí: ya se eligió a
+        # conciencia y por la misma razón que vale para este topic. Es un ESTADO,
+        # no un flujo: al conectarse, la web tiene que recibir el último valor sin
+        # esperar un segundo, y perder un mensaje de estado no es como perder un
+        # `/odom` (ese se sustituye solo 60 ms después; este no).
+        #
+        # 📝 TRANSIENT_LOCAL en el PUBLICADOR sí añade garantía. Es en el
+        #    SUSCRIPTOR donde no añade nada y solo restringe — la confusión que
+        #    costó la parada de emergencia (manual, cap. 15.1). El suscriptor
+        #    VOLATILE de rosbridge, que es por donde va a leerlo la web, empareja
+        #    con este publicador sin problema.
+        self.pub_estado = self.create_publisher(
+            EstadoRobot, 'estado_robot',
             QoSProfile(
                 depth=1,
                 reliability=QoSReliabilityPolicy.RELIABLE,
@@ -602,6 +659,22 @@ class RvrDriverNode(Node):
         #    Republicar es GRATIS: no toca el puerto serie, solo reenvía lo que ya
         #    está en memoria. El SONDEO sigue a 30 s, que es lo que sí cuesta.
         self.create_timer(1.0, self._publicar_motores, callback_group=g_salud)
+
+        # ── El latido de `/estado_robot` (AÑADIDO 2026-08-04) ────────────────
+        # ⚠️ NO VERIFICADO contra un robot.
+        #
+        # Mismo grupo `g_salud` y mismo ritmo que `_publicar_motores`, y no por
+        # simetría: este temporizador tiene que poder correr AUNQUE la telemetría
+        # y `cmd_vel` estén ocupados, porque su trabajo es justamente decir que el
+        # nodo sigue vivo. En el grupo de la telemetría, un atasco allí congelaría
+        # el latido y el muro pintaría de rojo un robot que solo va lento.
+        #
+        # 🔴 NO SE CONDICIONA A `silence_timeout > 0` ni a `keepalive_period > 0`,
+        #    al contrario que los dos de arriba. Desactivar el detector de
+        #    silencio es lo que se hace para REPRODUCIR el fallo a propósito, y es
+        #    precisamente entonces cuando más falta hace poder ver qué pasa desde
+        #    fuera. El latido no le habla al RVR: no puede molestar a nada.
+        self.create_timer(1.0, self._publicar_estado, callback_group=g_salud)
 
         self.get_logger().info(
             f'rvr_driver arrancando · puerto={self._puerto} baud={self._baud} '
@@ -1022,8 +1095,33 @@ class RvrDriverNode(Node):
             if not self._streaming_activo:
                 return
             silencio = self._ahora_s() - self._t_ultima_muestra
+            # ── AÑADIDO 2026-08-04 · el reseteo de `reanudaciones_fallidas` ───
+            # ⚠️ NO VERIFICADO contra un robot.
+            #
+            # 🔴 EL ÉXITO ES QUE LLEGUE UN DATO, NO QUE LA LLAMADA VUELVA. Por eso
+            #    se compara `_n_muestras` —que solo tocan los handlers— contra la
+            #    foto que se hizo al lanzar el último intento, y NO se mira si
+            #    `_recuperar_streaming` terminó sin excepción: con el RVR apagado,
+            #    `wake`+`stop`+`start` **no lanzan**, y por eso el log escribió
+            #    «streaming reanudado» 8 veces en 30 s con /odom a cero
+            #    (2026-08-02, evidencia 52). Ese es el fallo que este contador
+            #    existe para hacer visible; darlo por bueno aquí sería
+            #    reproducirlo dentro de su propio detector.
+            #
+            # Va ANTES del `return` de abajo a propósito: el camino normal —el
+            # robot va bien y hay silencio de sobra— es justamente el que tiene
+            # que poner el contador a cero.
+            if self._n_muestras > self._muestras_al_reanudar:
+                self._reanudaciones_fallidas = 0
         if silencio < self._timeout_silencio:
             return
+
+        # AÑADIDO 2026-08-04 · se cuenta el intento y se fotografía el número de
+        # muestras. Si dentro de un rato `_n_muestras` no ha subido de aquí, este
+        # intento no sirvió de nada y el contador lo dirá.
+        with self._lock:
+            self._reanudaciones_fallidas += 1
+            self._muestras_al_reanudar = self._n_muestras
 
         self._n_recuperaciones += 1
         self.get_logger().warn(
@@ -1523,6 +1621,9 @@ class RvrDriverNode(Node):
         # enviara color parecería mudo.
         with self._lock:
             self._t_ultima_muestra = self._ahora_s()
+            # AÑADIDO 2026-08-04 · espejo para `/estado_robot`. Ver `__init__`.
+            self._t_muestra_real = self._t_ultima_muestra
+            self._n_muestras += 1
         c = datos['ColorDetection']
         msg = Color()
         msg.rgb_color = [int(c['R']), int(c['G']), int(c['B'])]
@@ -1565,6 +1666,9 @@ class RvrDriverNode(Node):
         """
         with self._lock:
             self._t_ultima_muestra = self._ahora_s()
+            # AÑADIDO 2026-08-04 · espejo para `/estado_robot`. Ver `__init__`.
+            self._t_muestra_real = self._t_ultima_muestra
+            self._n_muestras += 1
         m = Illuminance()
         m.header.stamp = self.get_clock().now().to_msg()
         m.header.frame_id = self._body_frame
@@ -1581,6 +1685,9 @@ class RvrDriverNode(Node):
         """
         with self._lock:
             self._t_ultima_muestra = self._ahora_s()
+            # AÑADIDO 2026-08-04 · espejo para `/estado_robot`. Ver `__init__`.
+            self._t_muestra_real = self._t_ultima_muestra
+            self._n_muestras += 1
         e = datos['Encoders']
         m = Encoder()
         # 🔴 LAS CLAVES SON `LeftTicks`/`RightTicks`, NO `Left`/`Right`. La tabla
@@ -1749,6 +1856,76 @@ class RvrDriverNode(Node):
         m.header.frame_id = self._body_frame
         self.pub_motores.publish(m)
 
+    def _publicar_estado(self) -> None:
+        """Publica `/estado_robot`. Timer de rclpy a 1 Hz, grupo `g_salud`.
+
+        ⚠️ **NO VERIFICADO**: escrito el 2026-08-04 sin robot delante. Compila y
+           nada más. El procedimiento para comprobarlo está en
+           `NOTAS_ESTADO_ROBOT.md`, en la raíz del repositorio.
+
+        🔴 ESTE MÉTODO NO PUEDE LANZAR NUNCA, y el `try` de abajo no es celo: el
+           2026-07-31 una `AttributeError` dentro de un manejador de telemetría
+           dejó `/odom` e `/imu` a CERO **sin una sola línea en el log**, con los
+           topics existiendo y `/scan` funcionando. Que una señal de vida se
+           lleve por delante la telemetría sería el peor intercambio posible, así
+           que todo va envuelto y cualquier fallo sale por `error()`.
+
+        📝 El latido avanza **al final** y solo si la publicación salió bien: si
+           avanzara antes, un fallo permanente al publicar daría un contador que
+           sube sin que nadie reciba nada. Aquí eso da igual —quien no recibe no
+           ve el número— pero la regla del proyecto es contar EFECTOS, no
+           intentos, y no se hace la excepción.
+        """
+        try:
+            ahora = self._ahora_s()
+            with self._lock:
+                t_real = self._t_muestra_real
+                fallidas = self._reanudaciones_fallidas
+                activo = self._streaming_activo
+
+            m = EstadoRobot()
+            m.header.stamp = self.get_clock().now().to_msg()
+            # `body_frame` por coherencia con `/motor_status`, que es el mensaje
+            # hermano. 📝 De este mensaje **nada es espacial**: el header está por
+            # la MARCA DE TIEMPO, que es lo que permite a la web saber si lo que
+            # tiene en pantalla es de hace un segundo o de hace un minuto.
+            m.header.frame_id = self._body_frame
+
+            # -1.0 = «no se sabe», nunca «cero». Es la convención de este
+            # proyecto y la misma que usan las `antiguedad_*_s` de MotorStatus.
+            m.antiguedad_muestra_s = (
+                -1.0 if t_real is None else float(ahora - t_real))
+
+            # Umbral: el mismo `silence_timeout` que usa el vigilante, para que
+            # las dos señales no puedan contradecirse.
+            #
+            # ⚠️ Con el vigilante DESACTIVADO (`silence_timeout:=0`, que es como
+            #    se reproduce el fallo del RVR dormido a propósito) se usa el
+            #    valor por defecto en vez de cero: un umbral de 0 s daría
+            #    `rvr_responde=false` permanentemente sobre un robot perfecto.
+            umbral = (self._timeout_silencio if self._timeout_silencio > 0
+                      else TIMEOUT_SILENCIO_S)
+            # `activo` importa: antes de que el streaming arranque no ha llegado
+            # nada todavía, y decir que el RVR responde sería inventárselo.
+            m.rvr_responde = bool(
+                activo and t_real is not None and (ahora - t_real) < umbral)
+
+            # Se lee sin el lock, igual que hacen `_cb_cmd_vel` y
+            # `_srv_control_state`: es un bool y en CPython leerlo es atómico.
+            # Coger el lock aquí no añadiría nada y sí acoplaría este callback al
+            # hilo de asyncio.
+            m.parada_emergencia = bool(self._parada_emergencia)
+
+            m.reanudaciones_fallidas = int(fallidas)
+            m.latido = int(self._latido)
+            self.pub_estado.publish(m)
+            self._latido += 1
+        except Exception:                                       # noqa: BLE001
+            # Nunca se propaga: un latido roto no puede tumbar el nodo, y
+            # callarlo sería el fallo silencioso de siempre.
+            self.get_logger().error(
+                f'fallo publicando /estado_robot:\n{traceback.format_exc()}')
+
     def _quiza_publicar(self, componente: str) -> None:
         """Publica /odom e /imu cuando han llegado los cinco componentes."""
         with self._lock:
@@ -1759,6 +1936,11 @@ class RvrDriverNode(Node):
             # no arreglaría nada. Son dos fallos distintos y no hay que
             # confundirlos.
             self._t_ultima_muestra = self._ahora_s()
+            # AÑADIDO 2026-08-04 · el espejo que SOLO tocan los handlers. No
+            # cuesta un reloj más: reusa el valor de la línea de arriba. Ver el
+            # bloque `_t_muestra_real` de `__init__`.
+            self._t_muestra_real = self._t_ultima_muestra
+            self._n_muestras += 1
             self._recibidos.add(componente)
             if not COMPONENTES_ODOM <= self._recibidos:
                 return

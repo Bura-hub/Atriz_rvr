@@ -317,8 +317,12 @@ def generate_launch_description() -> LaunchDescription:
     #      sigue funcionando. Si tocas estas listas, pasalo.
 
     #: Lo que la web LEE. Contrato en ARQUITECTURA.md.
+    #: 📝 `/estado_robot` (AÑADIDO 2026-08-04, ⚠️ NO VERIFICADO) va SOLO aquí y
+    #:    NUNCA en ESCRIBIR: la web lo lee, no lo escribe. Es la señal de vida
+    #:    barata —~0,03 kB/s por robot contra los 13,05 de `/odom`— que permite al
+    #:    muro del profesor vigilar 16 robots sin pagar 1,7 Mbit/s de telemetría.
     LEER = ['/odom', '/imu', '/scan', '/battery_state', '/motor_status',
-            '/encoders', '/color', '/map', '/tf', '/tf_static',
+            '/encoders', '/color', '/estado_robot', '/map', '/tf', '/tf_static',
             '/collision_monitor_state', '/amcl_pose']
 
     #: Lo que la web MANDA. 🔴 `cmd_vel_raw`, NUNCA `cmd_vel`: `/cmd_vel` es la

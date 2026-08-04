@@ -341,6 +341,38 @@ class RvrDriverNode(Node):
         #: vida del NODO: un topic que existe no prueba que haya nadie detrás.
         self._latido = 0
 
+        # 🔴 CUÁNDO SE COMPLETÓ EL ÚLTIMO `/odom`, Y POR QUÉ HACE FALTA UN TERCER
+        #    RELOJ. Encontrado el 2026-08-04 desde el robot, revisando esta misma
+        #    rama antes de fusionarla.
+        #
+        #    `_t_muestra_real` avanza en `_quiza_publicar` ANTES del `return` que
+        #    se toma cuando aún no han llegado los cinco componentes — y eso es
+        #    correcto: lo que vigila es que el RVR siga ENVIANDO. Pero deja un
+        #    TERCER estado que no detecta nadie, ni el vigilante de silencio ni
+        #    `rvr_responde`:
+        #
+        #      llegan 4 de los 5 componentes  ->  el latido avanza,
+        #                                         `rvr_responde` dice true,
+        #                                         y `/odom` está a 0 Hz
+        #
+        #    Desde el muro del profesor ese robot se pinta VERDE con la odometría
+        #    muerta. Y no es hipotético: es el estado que no se pudo descartar el
+        #    2026-08-04 —los cinco topics del stream a cero, el RVR contestando a
+        #    consultas y el vigilante callado—, y se cerró apagando el robot, así
+        #    que nunca se supo si faltaban todos los componentes o solo uno.
+        #
+        #    ⚠️ NO vale mirar `_recibidos` a 1 Hz: `_quiza_publicar` lo VACÍA en
+        #    cada ciclo y los componentes llegan asíncronos a 16,5 Hz, así que en
+        #    un instante cualquiera está medio lleno **con el robot sano**. Un
+        #    `odom_completo` muestreado así diría «incompleto» casi siempre. Lo
+        #    que hay que medir es CUÁNTO HACE que se completó uno, no si lo está
+        #    ahora mismo.
+        #
+        #    El discriminante que esto le da a la web es limpio:
+        #      antigüedad_muestra ~0  ·  antigüedad_odom CRECE  -> faltan componentes
+        #      las dos crecen                                   -> el RVR calló
+        self._t_odom_completo: float | None = None
+
         # ── Origen del yaw ───────────────────────────────────────────────────
         # 🔴 `reset_yaw()` NO PONE A CERO EL YAW. Medido el 2026-07-31: el driver
         # lo llama al arrancar y el cuaternión seguía dando -74.6° en reposo.
@@ -1880,6 +1912,7 @@ class RvrDriverNode(Node):
             ahora = self._ahora_s()
             with self._lock:
                 t_real = self._t_muestra_real
+                t_odom = self._t_odom_completo
                 fallidas = self._reanudaciones_fallidas
                 activo = self._streaming_activo
 
@@ -1895,6 +1928,8 @@ class RvrDriverNode(Node):
             # proyecto y la misma que usan las `antiguedad_*_s` de MotorStatus.
             m.antiguedad_muestra_s = (
                 -1.0 if t_real is None else float(ahora - t_real))
+            m.antiguedad_odom_s = (
+                -1.0 if t_odom is None else float(ahora - t_odom))
 
             # Umbral: el mismo `silence_timeout` que usa el vigilante, para que
             # las dos señales no puedan contradecirse.
@@ -1945,6 +1980,10 @@ class RvrDriverNode(Node):
             if not COMPONENTES_ODOM <= self._recibidos:
                 return
             self._recibidos.clear()
+            # AÑADIDO 2026-08-04 · AQUÍ, después del return, y esa es toda la
+            # gracia: solo avanza cuando un /odom se completa de verdad. Ver el
+            # bloque `_t_odom_completo` de `__init__`.
+            self._t_odom_completo = self._t_ultima_muestra
             ahora = self.get_clock().now().to_msg()
             self._odom.header.stamp = ahora
             self._imu.header.stamp = ahora

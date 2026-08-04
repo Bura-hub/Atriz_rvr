@@ -102,4 +102,27 @@ float32 antiguedad_muestra_s
 # ⚠️ Los umbrales 1-2 / >2 son una LECTURA RAZONADA de esa medida, no un umbral
 #    calibrado: nadie ha cronometrado cuántos intentos tarda una siesta real en
 #    recuperarse. Trátalos como orientación hasta que se midan.
+# Cuanto hace que se completo un /odom de verdad. -1.0 = ninguno desde que
+# arranco el nodo.
+#
+# 🔴 EXISTE PORQUE `antiguedad_muestra_s` NO LO CUBRE, y es un tercer estado.
+# El driver arma /odom con CINCO componentes asincronos; el reloj de
+# `antiguedad_muestra_s` avanza con CADA componente, a proposito (lo que vigila
+# es que el RVR siga enviando). Asi que si llegan 4 de 5:
+#
+#     el latido avanza · rvr_responde dice true · /odom esta a 0 Hz
+#
+# ...y no lo detecta nadie: ni el vigilante de silencio ni rvr_responde. Desde
+# el muro del profesor ese robot se pinta VERDE con la odometria muerta.
+#
+# El discriminante:
+#     antiguedad_muestra ~0  ·  antiguedad_odom CRECE  -> faltan componentes
+#     las dos crecen                                   -> el RVR callo
+#
+# ⚠️ NO se podia resolver con un `odom_completo: bool`: el conjunto de
+# componentes se VACIA en cada ciclo y llegan asincronos a 16,5 Hz, asi que en
+# un instante cualquiera esta medio lleno CON EL ROBOT SANO. Hay que medir
+# cuanto hace que se completo uno, no si lo esta ahora.
+float32 antiguedad_odom_s
+
 uint32 reanudaciones_fallidas

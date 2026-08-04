@@ -18,7 +18,7 @@ ritmo, ningún QoS existente, ni la lógica de reconexión más allá de contarl
 
 | Fichero | Qué se le hizo |
 |---|---|
-| `atriz_rvr_msgs/msg/EstadoRobot.msg` | **nuevo** |
+| `atriz_rvr_msgs/msg/EstadoRobot.msg` | **nuevo** · 6 campos (el sexto, `antiguedad_odom_s`, añadido el 2026-08-04 tras la revisión desde el robot: ver §3 bis) |
 | `atriz_rvr_msgs/CMakeLists.txt` | una línea en `rosidl_generate_interfaces` (y el rótulo `(6)`→`(8)`, que ya estaba mal antes: había siete ficheros) |
 | `atriz_rvr_driver/scripts/atriz_rvr_driver/rvr_driver_node.py` | import, estado, publicador, temporizador de 1 Hz, `_publicar_estado()`, el contador dentro de `_vigilar_silencio`, y el espejo de muestras en los cuatro handlers |
 | `atriz_rvr_bringup/launch/robot.launch.py` | `/estado_robot` en `topics_sub_glob` (la lista `LEER`) |
@@ -136,6 +136,39 @@ leyó**, así que no cuesta una lectura más a 16 Hz.
 
 ---
 
+## 3 bis · 🔴 EL TERCER ESTADO, encontrado desde el robot antes de fusionar (2026-08-04)
+
+Los espejos de arriba avanzan en `_quiza_publicar` **antes** del `return` que se toma cuando aún no
+han llegado los cinco componentes de `/odom`. Eso es **correcto** —lo que vigilan es que el RVR siga
+enviando, y no hay que confundir «faltan componentes» con «el enlace calló», que son dos fallos
+distintos—, pero deja un estado que **no detecta nadie**:
+
+| estado | latido | `rvr_responde` | `/odom` | |
+|---|---|---|---|---|
+| todo bien | avanza | `true` | publica | |
+| la Pi va y el RVR no | avanza | `false` | 0 Hz | ✅ cubierto |
+| **llegan 4 de los 5 componentes** | **avanza** | **`true`** | **0 Hz** | 🔴 **nadie avisa** |
+
+Desde el muro del profesor ese robot **se pinta verde con la odometría muerta**. Y no es
+hipotético: es el estado que **no se pudo descartar el 2026-08-04** —los cinco topics del stream a
+cero, el RVR contestando a consultas y el vigilante callado—. Se cerró apagando el robot, así que
+nunca se supo si faltaban todos los componentes o solo uno.
+
+**Se cierra con `float32 antiguedad_odom_s`**, un tercer reloj que se pone **después** del `return`,
+o sea que solo avanza cuando un `/odom` se completa de verdad. El discriminante que le da a la web:
+
+```
+antigüedad_muestra ~0   ·  antigüedad_odom CRECE   ->  faltan componentes
+las dos crecen                                     ->  el RVR calló
+```
+
+⚠️ **No valía un `odom_completo: bool`**, y conviene saber por qué: `_recibidos` **se vacía en cada
+ciclo** y los componentes llegan asíncronos a 16,5 Hz, así que en un instante cualquiera está medio
+lleno **con el robot sano**. Muestreado a 1 Hz diría «incompleto» casi siempre. **Lo que hay que
+medir es cuánto hace que se completó uno, no si lo está ahora.**
+
+---
+
 ## 4 · Lo que SÍ se ha comprobado (sin robot)
 
 ```
@@ -224,6 +257,22 @@ the type for the passed topic», con el topic publicando perfectamente.
 📝 `ros2 topic hz /estado_robot` **sí vale** (debería dar ~1.0), pero **no canalices su salida**
 (`| tail`): Python pasa a buffer de bloque y sale vacío, que se lee como «no mide». Usa
 `stdbuf -oL` o míralo en la terminal.
+
+### Paso 3 bis · 🔴 El tercer estado: `/odom` muerto con el enlace vivo
+
+Es el que da sentido a `antiguedad_odom_s`, y **se puede provocar sin tocar el hardware**: basta con
+que un componente de `/odom` deje de llegar. Con el robot sano las dos antigüedades tienen que ir
+pegadas a ~0,06 s:
+
+```bash
+ros2 topic echo /estado_robot --once | grep -E "antiguedad_(muestra|odom)_s"
+```
+
+Y si algún día `/odom` se para con el robot aparentemente sano, **esto es lo primero que hay que
+mirar**: si `antiguedad_muestra_s` sigue en ~0 y `antiguedad_odom_s` crece, faltan componentes y
+reiniciar el streaming **no va a arreglar nada** — es otro fallo.
+
+⚠️ **NO VERIFICADO**: nadie ha provocado la ausencia de un solo componente.
 
 ### Paso 4 · La parada de emergencia
 

@@ -18,7 +18,7 @@ ritmo, ningún QoS existente, ni la lógica de reconexión más allá de contarl
 
 | Fichero | Qué se le hizo |
 |---|---|
-| `atriz_rvr_msgs/msg/EstadoRobot.msg` | **nuevo** · 6 campos (el sexto, `antiguedad_odom_s`, añadido el 2026-08-04 tras la revisión desde el robot: ver §3 bis) |
+| `atriz_rvr_msgs/msg/EstadoRobot.msg` | **nuevo** · `header` + **6 campos de datos** (el sexto, `antiguedad_odom_s`, añadido el 2026-08-04 tras la revisión desde el robot: ver §3 bis). Un validador anterior contó «6» incluyendo el `header`: hoy serían 7 |
 | `atriz_rvr_msgs/CMakeLists.txt` | una línea en `rosidl_generate_interfaces` (y el rótulo `(6)`→`(8)`, que ya estaba mal antes: había siete ficheros) |
 | `atriz_rvr_driver/scripts/atriz_rvr_driver/rvr_driver_node.py` | import, estado, publicador, temporizador de 1 Hz, `_publicar_estado()`, el contador dentro de `_vigilar_silencio`, y el espejo de muestras en los cuatro handlers |
 | `atriz_rvr_bringup/launch/robot.launch.py` | `/estado_robot` en `topics_sub_glob` (la lista `LEER`) |

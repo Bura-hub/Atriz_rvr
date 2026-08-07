@@ -58,6 +58,10 @@ setup(
             # pulsa la parada de emergencia. Va aquí y no en el bringup porque
             # este paquete es Python; el bringup es ament_cmake.
             'cancelar_nav2 = atriz_rvr_driver.cancelar_nav2:main',
+            # Lo arranca robot.launch.py. Gobierna atriz-slam y atriz-nav y
+            # publica /estado_navegacion. Va APARTE del driver para aislar el
+            # privilegio: es el unico que llama a systemctl.
+            'supervisor_navegacion = atriz_rvr_driver.supervisor_navegacion:main',
         ],
     },
 )

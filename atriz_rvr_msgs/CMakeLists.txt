@@ -35,6 +35,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ControlState.msg"
   "msg/DegreesTwist.msg"
   "msg/Encoder.msg"
+  "msg/EstadoNavegacion.msg"
   "msg/EstadoRobot.msg"
   "msg/InfraredMessage.msg"
   "msg/MotorStatus.msg"

@@ -348,7 +348,8 @@ def generate_launch_description() -> LaunchDescription:
     #:    barata —~0,03 kB/s por robot contra los 13,05 de `/odom`— que permite al
     #:    muro del profesor vigilar 16 robots sin pagar 1,7 Mbit/s de telemetría.
     LEER = ['/odom', '/imu', '/scan', '/battery_state', '/motor_status',
-            '/encoders', '/color', '/estado_robot', '/map', '/tf', '/tf_static',
+            '/encoders', '/color', '/estado_robot', '/estado_navegacion',
+            '/map', '/tf', '/tf_static',
             '/collision_monitor_state', '/amcl_pose']
 
     #: Lo que la web MANDA. 🔴 `cmd_vel_raw`, NUNCA `cmd_vel`: `/cmd_vel` es la
@@ -377,7 +378,12 @@ def generate_launch_description() -> LaunchDescription:
                  '/set_pos_and_yaw',
                  '/set_led_rgb', '/set_multiple_leds', '/set_leds',
                  '/trigger_led_event',
-                 '/enable_color', '/get_rgbc_sensor_values']
+                 '/enable_color', '/get_rgbc_sensor_values',
+                 #: 🔴 Los botones de SLAM y Nav2. Los sirve `supervisor_navegacion`,
+                 #:    NO el driver. `success=true` significa PETICION ACEPTADA,
+                 #:    jamas «arrancado»: quien dice si funciona es
+                 #:    `/estado_navegacion`, que va en LEER.
+                 '/pedir_slam', '/pedir_nav']
 
     def _glob(lista):
         """rosbridge quiere una CADENA con una lista, no una lista."""
@@ -416,8 +422,36 @@ def generate_launch_description() -> LaunchDescription:
         }],
     )
 
+    # ── El supervisor de SLAM y Nav2 ─────────────────────────────────────────
+    # 🔴 VA APARTE DEL DRIVER, Y NO ES ELEGANCIA: es el unico proceso que llama a
+    #    `systemctl start|stop`, o sea el unico que necesita la regla de polkit.
+    #    Metido en el driver, esa capacidad se la quedaria el proceso que YA
+    #    tiene el puerto serie, los motores y la parada de emergencia.
+    #
+    # 📝 Se arranca AQUI, con el driver, y no desde las unidades de SLAM/Nav2:
+    #    tiene que estar vivo PRECISAMENTE CUANDO ESTAN APAGADAS, para poder
+    #    decir «apagado». Un supervisor que solo existe cuando existe lo
+    #    supervisado no supervisa nada.
+    #
+    # ⚠️ Hoy `atriz-slam.service` NO existe y la regla de polkit NO esta puesta.
+    #    El nodo lo dice con todas las letras en `/estado_navegacion` en vez de
+    #    fingir: estado DESCONOCIDO con el motivo. Verificado el 2026-08-07.
+    supervisor = Node(
+        package='atriz_rvr_driver', executable='supervisor_navegacion',
+        name='supervisor_navegacion', namespace=ns, output='screen',
+        parameters=[{
+            'unidad_slam': 'atriz-slam.service',
+            'unidad_nav': 'atriz-nav.service',
+            # El mismo defecto que usa `atriz-nav.sh`, para que los dos miren el
+            # mismo sitio. Si no coinciden, el supervisor diria «hay mapa» y la
+            # unidad fallaria por no encontrarlo.
+            'mapa': PathJoinSubstitution([bringup, 'maps', 'aula.yaml']),
+        }],
+    )
+
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
         arg_inclinacion, arg_color, arg_color_inact, arg_color_max, arg_rosbridge,
-        rvr, desc, lidar, monitor, gestor_seguridad, puente, introspeccion,
+        rvr, desc, lidar, monitor, gestor_seguridad, supervisor, puente,
+        introspeccion,
     ])

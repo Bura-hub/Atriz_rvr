@@ -2958,12 +2958,31 @@ if __name__ == '__main__':
 #   DIFERIDOS A PROPÓSITO, con su razón:
 #     · `configure_streaming` / `start_streaming`  pueden romper la telemetría del
 #           propio driver: `_registrar_sensores` ya configura el streaming, y
-#           reconfigurarlo en caliente deja `/odom` mudo (es el mismo mecanismo por
-#           el que `enable_color_detection` no funciona una vez configurado).
-#     · `enable_color` (SetBool)  🔴 MEDIDO: NO PUEDE FUNCIONAR como servicio. Con
-#           el streaming ya configurado, `enable_color_detection` no hace nada —
-#           481 mensajes de /color, todos ceros, durante la llamada. Sustituido por
-#           el parámetro de launch `color_detection`, que se aplica ANTES.
+#           reconfigurarlo en caliente deja `/odom` mudo.
+#           📝 Aquí se añadía «es el mismo mecanismo por el que
+#              `enable_color_detection` no funciona una vez configurado». **Eso
+#              era falso** (ver abajo) y se retira: la razón de diferir estos dos
+#              sigue en pie por sí sola, pero no se apoya en aquello.
+#
+#   🔴 Y AQUÍ ESTABA `enable_color`, EN ESTA LISTA, DESDE EL 2026-07-31:
+#
+#        «`enable_color` (SetBool) 🔴 MEDIDO: NO PUEDE FUNCIONAR como servicio.»
+#
+#      **Está implementado desde el 2026-08-06**, tres pantallas más arriba en
+#      este mismo fichero, y verificado: `/color` no-cero 0 → 53 → 0 y canal claro
+#      1 → 1320 → 0 (evidencias 76 y 77).
+#
+#      Se deja escrito el error en vez de borrarlo, porque el daño que hizo es la
+#      parte útil: **ese comentario es el que hizo decir a quien construía la web
+#      que el botón de color no podía existir**, y bloqueó la función seis días.
+#      La afirmación nunca estuvo medida —el servicio bajo prueba se apagaba a sí
+#      mismo dentro de la misma llamada— y sobrevivió a tres revisiones de código
+#      porque cada lectura la confirmaba.
+#
+#      📌 Y sobrevivió UN DÍA MÁS a su propia refutación: se corrigieron los tres
+#         sitios evidentes y este, en la lista de «lo que no se implementa», siguió
+#         vivo hasta que lo encontró el Claude del PC. **Una trampa documentada
+#         también caduca, y hay que ir a buscarla donde no se la espera.**
 #     · `cmd_degrees` (DegreesTwist)  `/cmd_vel` en rad/s es el estándar de ROS
 #           (REP-103) y es lo que habla Nav2. Un segundo topic de entrada con otras
 #           unidades es una fuente de errores, no una comodidad.

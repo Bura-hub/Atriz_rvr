@@ -104,8 +104,47 @@ amcl:
     max_particles: 1500
     pf_err: 0.05
     pf_z: 0.99
-    recovery_alpha_slow: 0.001
-    recovery_alpha_fast: 0.1
+    # ── 🔴 LA RECUPERACIÓN DE «ROBOT SECUESTRADO», DESACTIVADA ────────────────
+    # Estaban en 0.001 y 0.1, copiados del ejemplo de Nav2, y eran **los dos
+    # únicos parámetros de este fichero sin una razón escrita al lado**. Eso ya
+    # era una señal.
+    #
+    # QUÉ HACEN: cuando la verosimilitud a CORTO plazo cae por debajo de la de
+    # LARGO plazo, AMCL **inyecta partículas al azar por todo el mapa** y puede
+    # abandonar su hipótesis y saltar a otra.
+    #
+    # 🔴 POR QUÉ SE APAGAN. Medido el 2026-08-07 (evidencia 81): en un recorrido
+    #    de 70 cm por el cuarto —3,80 × 4,20 m, casi rectangular— el marco
+    #    `map -> odom` acabó rotado **+98,46°**. En una sala así el barrido casa
+    #    casi igual girado un cuarto de vuelta, y este mecanismo es exactamente
+    #    lo que permite el salto.
+    #    Consecuencia real: Nav2 declaró el objetivo CUMPLIDO con el robot a
+    #    10 cm de él y mirando a otro sitio. La cinta dio 70 cm; AMCL creía 78.
+    #
+    # 📌 Y AQUÍ NO HACEN FALTA: este robot **nunca aparece en un sitio
+    #    desconocido**. Arranca donde lo dejaron, y `set_initial_pose: true` ya
+    #    le dice dónde está. El caso que cubren no existe en este laboratorio.
+    #
+    # ⚠️ LO QUE SE PIERDE, y hay que saberlo: si alguien COGE el robot y lo mueve
+    #    a mano con la navegación encendida, AMCL ya no se recuperará solo. Habrá
+    #    que volver a decirle dónde está (`/initialpose`) o parar y arrancar la
+    #    navegación. Es un intercambio consciente: se cambia una recuperación que
+    #    nadie ha visto funcionar por no saltar de hipótesis en una sala
+    #    simétrica, que sí se ha medido.
+    #
+    # ✅ VERIFICADO, y es reproducible (evidencia 82, dos tandas seguidas):
+    #        yaw MÁXIMO de `map -> odom`   +98,46°  ->  2,57°  y  2,43°
+    #    El salto desapareció. Era la recuperación.
+    #
+    # 📌 Y ESTO NO ERA TODO EL PROBLEMA — importa para no darlo por cerrado de
+    #    más. Con el salto ya arreglado, la evidencia 83 midió por trilateración
+    #    que AMCL seguía equivocándose **45 cm en POSICIÓN**: mantenía su
+    #    hipótesis, pero la hipótesis era mala. La causa de AQUELLO era otra: el
+    #    MAPA. Remapeado el cuarto, el mismo recorrido dio **8,9 cm** de error y
+    #    la corrección `map -> odom` bajó de 0,424 m a 0,028 (evidencia 84).
+    #    Dos fallos distintos con el mismo síntoma aparente.
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
 
     # ── Cuándo actualizar ─────────────────────────────────────────────────────
     # 0.15 m y 0.15 rad, contra los 0.25/0.20 del ejemplo. Escalado al robot: con

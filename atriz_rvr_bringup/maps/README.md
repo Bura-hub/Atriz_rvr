@@ -1,14 +1,54 @@
 # Mapas del aula
 
-`atriz-nav.service` busca aquí **`aula.yaml`**, y **falla alto si no está**: AMCL lo necesita y
-`localizacion.launch.py` no tiene valor por defecto para el argumento `mapa`. Arrancar sin él
-daría una navegación ciega que parece viva.
+## 🔴🔴 LO PRIMERO: UN MAPA QUE NO ES DEL SITIO HACE QUE NAV2 MIENTA
 
-El mapa vive **con el paquete** a propósito: así lo reparten `provision.sh` y la imagen dorada, y
-los 16 robots comparten el mismo `map`. Ese marco compartido es el argumento entero para usar
-AMCL en vez de SLAM — no la CPU, que en AMCL es **mayor** (8.8 % contra 4.8 %).
+Medido el 2026-08-07 (evidencias 83 y 84). Mismo cuarto, mismo robot, mismo recorrido de 80 cm,
+mismos parámetros de AMCL. **Lo único distinto: el mapa.**
+
+```
+                          mapa rancio     mapa fresco
+  error de AMCL              45,0 cm    →     8,9 cm
+  corrección map → odom       0,424 m   →     0,028 m
+  distancia real al objetivo  41,3 cm   →     6,1 cm
+  tolerancia de Nav2             10 cm           10 cm
+  lo que dijo Nav2            ✅ ÉXITO      ✅ ÉXITO     ← 🔴 LAS DOS VECES
+```
+
+🔴 **El síntoma es que no hay síntoma.** Nav2 declara el objetivo cumplido, `/estado_navegacion`
+dice `FUNCIONANDO`, no aparece un error en ningún log, y el robot está **a medio metro** de donde
+cree estar. No hay nada en el sistema que lo detecte: **lo destapó una cinta métrica**.
+
+📌 **Consecuencia operativa: mapear es parte de MONTAR EL AULA, no una tarea de una sola vez.**
+Si se mueven las mesas, se mapea otra vez. Un mapa de la semana pasada con los muebles cambiados
+reproduce el fallo entero.
+
+⚠️ Y **lo que se arregló remapeando NO fue todo**: hubo dos fallos distintos con el mismo síntoma
+aparente. El otro —el marco `map → odom` rotando 98°— era la recuperación de «robot secuestrado»
+de AMCL, y se cerró apagando `recovery_alpha_slow/fast` (evidencia 82, ver
+`config/localizacion_amcl.yaml`). Arreglar uno dejaba el otro en pie.
+
+## Dónde vive cada mapa, que son DOS sitios y no es un descuido
+
+| Sitio | Qué es | Quién lo pone |
+|---|---|---|
+| **este directorio** (`aula.yaml`) | el mapa **de la flota**, igual en los 16 | va con el paquete: lo reparten `provision.sh` y la imagen dorada |
+| **`~/mapas/`** (`ATRIZ_DIR_MAPAS`) | lo que **SLAM produce** en este robot | `atriz-slam.service`, al mapear |
+
+Y **quien decide cuál se usa es `ATRIZ_MAPA` de `/etc/default/atriz`**, no la convención de
+nombres. Puede apuntar a cualquiera de los dos.
+
+🔴 **La imagen dorada sale SIN mapa y sin `ATRIZ_MAPA`, a propósito**
+(`fase_6_preparar_imagen_dorada.sh`): clonar el mapa del robot de referencia repartiría a los 16
+un mapa que en 15 de ellos ni siquiera es del mismo sitio, y con el modo de fallo silencioso de
+arriba.
+
+El mapa compartido es, además, **el argumento entero para usar AMCL en vez de SLAM** — no la CPU,
+que en AMCL es **mayor** (8,8 % contra 4,8 %). Un `map` común es lo que permite que la web diga
+«ve a la mesa 3» y signifique lo mismo para los 16 robots.
 
 ## Cómo se genera
+
+Desde la web (botón de SLAM) o a mano:
 
 ```bash
 ros2 launch atriz_rvr_bringup slam.launch.py     # y pasear el robot por el aula
@@ -23,7 +63,34 @@ entre el `map_update_interval` de slam_toolbox y el `save_map_timeout` del map_s
 en el sitio vuelve a ver lo mismo desde el mismo punto: cero información nueva. Hay que
 **desplazarlo**, y no bastan 40 cm — `slam_toolbox` cuenta desde el último nodo del grafo.
 
+⚠️ **El `.yaml` no basta: tiene que existir su `.pgm`**, y se resuelve **relativo al directorio
+del yaml**. Copiar solo el `.yaml` a otro sitio hace fallar a `map_server` **después** de arrancar
+la unidad, lo que consume reintentos igual que no tener mapa.
+
+### 📌 Y un orden que importa, si vas a medir la precisión
+
+Al validar la navegación contra cinta métrica, **coloca y marca el robot ANTES de mapear**:
+
+1. pon el robot donde quieras el origen y **no lo muevas**
+2. arranca SLAM **ahí** → el origen del mapa es ese punto
+3. pasea, y **devuelve el robot al origen**
+4. marca `A` en el suelo (las cuatro esquinas del chasis, y cruza las diagonales)
+5. marca `B` a ~1 m, perpendicular a como mira, **sobre la línea que pasa por `A`**
+
+Al revés, el origen del mapa y la marca del suelo son puntos distintos y las medidas no comparan
+lo que crees. Costó una tanda entera el 2026-08-07.
+
+🔴 **Y hacen falta DOS distancias, no una.** Medir solo la diagonal `A→P` deja al robot en
+cualquier punto de una circunferencia: en la evidencia 83 la odometría y AMCL coincidían en
+distancia (2 cm) mientras estaban **a 45 cm la una de la otra**. La segunda distancia (`B→P`) es
+la que discrimina. Herramienta:
+`atriz_migracion/00_auditoria/evidencia/mediciones_banco/comparar_con_cinta.py`.
+
 ## Estado
 
-⏳ **El mapa del aula NO existe todavía** (2026-08-03). Las medidas de esa fecha se tomaron en
-casa, no en el laboratorio.
+⏳ **El mapa del aula NO existe todavía** (2026-08-07). Todo lo medido hasta hoy se hizo en casa.
+`aula.yaml` se creará el día que se monte el laboratorio, y **es un requisito de puesta en
+marcha**, no una mejora.
+
+✅ Lo que sí está verificado, sobre un mapa fresco de un cuarto de 3,80 × 4,20 m: Nav2 acepta el
+objetivo, navega, y **para a 6,1 cm de él** con una tolerancia de 10. n=1.

@@ -156,6 +156,27 @@ def generate_launch_description() -> LaunchDescription:
                     'batería: por eso no está activo por defecto.',
     )
 
+    # 🔴 ESTOS DOS ESTABAN DECLARADOS EN EL NODO Y NO AQUI, y eso los hacia
+    #    INALCANZABLES: `ros2 launch ... color_apagado_max_s:=20.0` se aceptaba
+    #    EN SILENCIO y arrancaba con el valor por defecto. Se descubrio al
+    #    comprobar el parametro EFECTIVO en vez de fiarse de la linea de
+    #    comandos -- pedidos 20.0 y 0.0, el driver tenia 900.0 y 120.0.
+    #    Sin esto, ajustarlos en el aula obliga a editar ficheros: exactamente
+    #    lo que pedian que no hiciera falta.
+    arg_color_inact = DeclareLaunchArgument(
+        'color_apagado_inactividad_s', default_value='120.0',
+        description='Segundos sin que nadie use el sensor de color antes de '
+                    'apagarle la luz sola. Cuenta suscriptores de /color Y '
+                    'llamadas a get_rgbc_sensor_values. 0 lo desactiva.',
+    )
+    arg_color_max = DeclareLaunchArgument(
+        'color_apagado_max_s', default_value='900.0',
+        description='Tope duro: segundos desde que se encendio la luz del '
+                    'sensor, pase lo que pase. Existe porque rosbridge comparte '
+                    'UNA suscripcion entre todos sus clientes, asi que una '
+                    'pestana olvidada la mantendria encendida. 0 lo desactiva.',
+    )
+
     # 🔴 Por defecto TRUE: la seguridad no se activa, se desactiva a propósito.
     arg_seguridad = DeclareLaunchArgument(
         'collision_monitor', default_value='true',
@@ -210,6 +231,11 @@ def generate_launch_description() -> LaunchDescription:
                 LaunchConfiguration('publicar_inclinacion'), value_type=bool),
             'color_detection': ParameterValue(
                 LaunchConfiguration('color_detection'), value_type=bool),
+            'color_apagado_inactividad_s': ParameterValue(
+                LaunchConfiguration('color_apagado_inactividad_s'),
+                value_type=float),
+            'color_apagado_max_s': ParameterValue(
+                LaunchConfiguration('color_apagado_max_s'), value_type=float),
         }],
     )
 
@@ -392,6 +418,6 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         arg_lidar, arg_ns, arg_puerto, arg_keepalive, arg_silencio, arg_seguridad,
-        arg_inclinacion, arg_color, arg_rosbridge,
+        arg_inclinacion, arg_color, arg_color_inact, arg_color_max, arg_rosbridge,
         rvr, desc, lidar, monitor, gestor_seguridad, puente, introspeccion,
     ])

@@ -97,8 +97,14 @@ class Supervisor(Node):
 
         self.declare_parameter('unidad_slam', 'atriz-slam.service')
         self.declare_parameter('unidad_nav', 'atriz-nav.service')
+        # 🔴 EL MISMO SITIO QUE `atriz-nav.sh`, Y POR LA MISMA VIA.
+        #    El script hace `MAPA="${ATRIZ_MAPA:-$HOME/atriz_ws/src/.../aula.yaml}"`.
+        #    Si aqui se mirara otro sitio, este nodo diria «hay mapa» y la unidad
+        #    fallaria por no encontrarlo — o al reves, que es peor: el boton
+        #    deshabilitado sobre un mapa que si esta. Paso el 2026-08-07: el
+        #    launch imponia la ruta INSTALADA y el script usa la FUENTE.
         self.declare_parameter(
-            'mapa', os.path.expanduser(
+            'mapa', os.environ.get('ATRIZ_MAPA') or os.path.expanduser(
                 '~/atriz_ws/src/Atriz_rvr/atriz_rvr_bringup/maps/aula.yaml'))
         p = self.get_parameter
         self._u_slam = p('unidad_slam').value
@@ -222,36 +228,32 @@ class Supervisor(Node):
         """
         if encender:
             # ── Los rechazos, ANTES de tocar systemd ─────────────────────────
-            # Cada uno evita un estado del que la web no puede salir sola.
+            # 🔴 SE DEVUELVEN **TODOS** LOS MOTIVOS, no el primero que salte.
+            #    Con «no hay mapa» a secas, quien tuviera ADEMAS SLAM corriendo
+            #    iría a hacer un mapa, volvería, y se estrellaría contra la
+            #    exclusión: dos viajes para un problema que se podía contar de
+            #    una vez. Detectado el 2026-08-07 probando /pedir_nav.
+            motivos = []
             if self._systemd(unidad).get('LoadState') == 'not-found':
-                resp.success = False
-                resp.message = (f'{unidad} no está instalada en este robot. '
-                                f'No es un fallo pasajero: falta el fichero.')
-                return resp
+                motivos.append(f'{unidad} no está instalada en este robot '
+                               f'(falta el fichero; no es un fallo pasajero)')
             if self._latcheado(unidad):
-                resp.success = False
-                resp.message = (
-                    f'{unidad} está bloqueada por reintentos agotados. Hace '
+                motivos.append(
+                    f'{unidad} está bloqueada por reintentos agotados: hace '
                     f'falta «sudo systemctl reset-failed {unidad}» DESDE EL '
-                    f'ROBOT: no se puede desde la web.')
-                return resp
-            if cual == 'nav' and not self._hay_mapa():
-                resp.success = False
-                resp.message = (
-                    f'no hay mapa legible en {self._mapa}. Genera uno con SLAM '
-                    f'y guárdalo antes de navegar.')
-                return resp
-            if cual == 'nav' and self._vivo(COMM_SLAM):
-                resp.success = False
-                resp.message = ('slam_toolbox está corriendo. SLAM y AMCL '
-                                'publican los dos map->odom: son excluyentes. '
-                                'Para SLAM primero.')
-                return resp
+                    f'ROBOT, no se puede desde la web')
+            if cual == 'nav':
+                if not self._hay_mapa():
+                    motivos.append(f'no hay mapa legible en {self._mapa}')
+                if self._vivo(COMM_SLAM):
+                    motivos.append('slam_toolbox está corriendo: SLAM y AMCL '
+                                   'publican los dos map->odom y son excluyentes')
             if cual == 'slam' and self._vivo(COMM_AMCL):
+                motivos.append('la navegación está levantada (AMCL): SLAM y '
+                               'AMCL son excluyentes')
+            if motivos:
                 resp.success = False
-                resp.message = ('la navegación está levantada (AMCL). SLAM y '
-                                'AMCL son excluyentes. Para la navegación '
-                                'primero.')
+                resp.message = ' · '.join(motivos)
                 return resp
 
         # 🔴 `--no-block` SIEMPRE. Medido: sin él, `systemctl start` bloquea

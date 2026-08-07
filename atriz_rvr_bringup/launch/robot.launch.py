@@ -442,10 +442,15 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[{
             'unidad_slam': 'atriz-slam.service',
             'unidad_nav': 'atriz-nav.service',
-            # El mismo defecto que usa `atriz-nav.sh`, para que los dos miren el
-            # mismo sitio. Si no coinciden, el supervisor diria «hay mapa» y la
-            # unidad fallaria por no encontrarlo.
-            'mapa': PathJoinSubstitution([bringup, 'maps', 'aula.yaml']),
+            # 🔴 NO SE PASA `mapa` AQUI, Y NO ES UN OLVIDO.
+            #    `PathJoinSubstitution([bringup, ...])` resuelve al directorio
+            #    INSTALADO (install/.../share/...), mientras que `atriz-nav.sh`
+            #    busca en el directorio FUENTE (src/Atriz_rvr/...). Son rutas
+            #    DISTINTAS, y ponerlo aqui hacia justo lo que este comentario
+            #    decia evitar: el supervisor mirando un sitio y la unidad otro.
+            #    Detectado el 2026-08-07 al probar /pedir_nav.
+            #    El defecto del nodo ya coincide con el del script; para cambiar
+            #    los dos a la vez se usa ATRIZ_MAPA, que el nodo tambien lee.
         }],
     )
 

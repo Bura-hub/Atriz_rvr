@@ -339,10 +339,19 @@ def generate_launch_description() -> LaunchDescription:
     #:    (0,0,0) y rechaza el resto, asi que exponerlo es seguro. Sin el, la web
     #:    no puede resetear entre sesiones.
     #: 📝 `start_scan`/`stop_scan` son del nodo del YDLIDAR, no del driver.
+    #: 🔴 `enable_color` + `get_rgbc_sensor_values` son la SESION DE MEDICION de
+    #:    color: sin el LED encendido no hay lectura, y el LED solo lo enciende
+    #:    `enable_color`. Van juntos o no sirve ninguno de los dos. Anadidos el
+    #:    2026-08-06, cuando se midio que el encendido en caliente SI funciona
+    #:    (`mediciones_banco/probar_color_stream_caliente.py`: claro 1 -> 1321).
+    #: ⚠️ `enable_color(true)` deja un LED blanco encendido bajo el chasis y gasta
+    #:    bateria. La web tiene que ofrecer el boton de PARAR igual de visible que
+    #:    el de arrancar.
     SERVICIOS = ['/start_scan', '/stop_scan', '/release_emergency_stop',
                  '/set_pos_and_yaw',
                  '/set_led_rgb', '/set_multiple_leds', '/set_leds',
-                 '/trigger_led_event']
+                 '/trigger_led_event',
+                 '/enable_color', '/get_rgbc_sensor_values']
 
     def _glob(lista):
         """rosbridge quiere una CADENA con una lista, no una lista."""

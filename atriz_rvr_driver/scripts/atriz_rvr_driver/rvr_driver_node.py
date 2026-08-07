@@ -95,7 +95,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import BatteryState, Illuminance, Imu
 from std_msgs.msg import Empty
-from std_srvs.srv import Empty as EmptySrv
+from std_srvs.srv import Empty as EmptySrv, SetBool
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
@@ -622,6 +622,7 @@ class RvrDriverNode(Node):
             (SetMultipleLEDs, 'set_multiple_leds', self._srv_leds_multiples),
             (SetLeds, 'set_leds', self._srv_leds_todos),
             (GetRGBCSensorValues, 'get_rgbc_sensor_values', self._srv_rgbc),
+            (SetBool, 'enable_color', self._srv_enable_color),
             (GetEncoders, 'get_encoders', self._srv_encoders),
             (GetSystemInfo, 'get_system_info', self._srv_system_info),
             (GetControlState, 'get_control_state', self._srv_control_state),
@@ -1214,24 +1215,27 @@ class RvrDriverNode(Node):
             self._recuperando = False
 
     async def _registrar_sensores(self) -> None:
-        # ── 🔴 EL SENSOR DE COLOR VA ANTES DEL STREAMING ─────────────────────
-        # Medido el 2026-07-31: **con el streaming de `color_detection` ya
-        # configurado, `enable_color_detection` NO HACE NADA**. Se comprobó
-        # llamándolo desde un servicio y mirando `/color` a la vez: 481 mensajes,
-        # todos [0, 0, 0], durante toda la llamada.
+        # ── EL SENSOR DE COLOR ───────────────────────────────────────────────
+        # El parámetro solo decide el estado INICIAL. Encender y apagar en
+        # caliente funciona: lo hace el servicio `enable_color`.
         #
-        # Consecuencia que estuvo escondida desde el principio: **`/color` llevaba
-        # publicando [0,0,0] siempre**. El topic existía, los mensajes llegaban a
-        # 16 Hz, y el sensor estaba a oscuras. Un fallo silencioso más.
+        # 🔴 CORREGIDO EL 2026-08-06. Aquí decía, desde el 2026-07-31, que «con
+        #    el streaming ya configurado, `enable_color_detection` NO HACE NADA
+        #    — 481 mensajes de /color, todos ceros». **Es falso, y la medida que
+        #    lo sostenía no probaba eso**: el servicio bajo prueba se apagaba a
+        #    sí mismo dentro de la misma llamada, así que casi todos aquellos
+        #    mensajes eran posteriores al `enable(False)`.
+        #    Remedido con el streaming corriendo a 250 ms: no-cero 0/24 → 24/24,
+        #    canal claro 1 → 1321, y vuelta a 1 al apagar. Ver
+        #    `mediciones_banco/probar_color_stream_caliente.py`.
         #
-        # Y el sensor SIN su luz no da nada: medido en banco, canal claro **4 con
-        # la luz apagada contra 741 con ella encendida** — 185 veces
-        # (`mediciones_banco/medir_sensor_color.py`).
+        # 📝 Lo que sí sigue siendo cierto: el sensor SIN su luz no da nada, y
+        #    `/color` publica [0,0,0] mientras esté apagado — no calla. Un topic
+        #    que habla no significa un sensor que mide.
         #
-        # ⚠️ Por eso va como PARÁMETRO y por defecto APAGADO: encenderlo deja un
-        #    LED blanco encendido bajo el chasis mientras el driver viva, y eso
-        #    gasta batería en un laboratorio de 16 robots. Quien quiera el color
-        #    lo pide.
+        # ⚠️ Por defecto APAGADO, y no por cautela: encenderlo deja un LED blanco
+        #    bajo el chasis mientras siga encendido, y eso gasta batería en un
+        #    laboratorio de 16 robots. Quien quiera el color lo pide.
         if self._color_detection:
             await self._rvr.enable_color_detection(is_enabled=True)
             self.get_logger().info(
@@ -1240,7 +1244,8 @@ class RvrDriverNode(Node):
         else:
             self.get_logger().warn(
                 '/color publicará [0, 0, 0]: el sensor de color está APAGADO. '
-                'Actívalo con color_detection:=true — enciende un LED blanco bajo '
+                'Actívalo EN CALIENTE con el servicio enable_color(true), o al '
+                'arrancar con color_detection:=true — enciende un LED blanco bajo '
                 'el chasis y gasta batería. (/ambient_light NO depende de esto: '
                 'es otro sensor, en otro sitio, y funciona igual.)')
 
@@ -2204,20 +2209,80 @@ class RvrDriverNode(Node):
     # Servicios: lecturas
     # ─────────────────────────────────────────────────────────────────────────
 
+    async def _encender_color(self, encender: bool) -> None:
+        """El `enable` y su espera, juntos. La espera NO es decorativa.
+
+        🔴 Sin el `sleep`, un cliente que lea justo después de que el servicio
+           vuelva pilla la muestra ANTERIOR —oscuridad— y se lleva un
+           `success=True` sobre valores falsos. Es exactamente el fallo de la
+           primera versión de `get_rgbc_sensor_values` (2026-07-31), que hacía
+           `enable(True) → leer → enable(False)` y devolvía negro con éxito.
+
+        📝 Los 0,1 s salen de ROS 1 (`Atriz_rvr_node.py:341`), donde este ciclo
+           funcionó durante toda la vida del laboratorio. Medido el 2026-08-06:
+           con esa espera, la primera muestra del stream ya viene iluminada.
+        """
+        await self._rvr.enable_color_detection(is_enabled=encender)
+        await asyncio.sleep(0.1)
+
+    def _srv_enable_color(self, req, resp):
+        """Enciende o apaga la luz del sensor de color, EN CALIENTE.
+
+        Es el botón «sesión de medición» de la web: `data=true` enciende el LED
+        y `/color` empieza a dar valores reales; `data=false` lo apaga.
+
+        ✅ MEDIDO EL 2026-08-06, con el streaming ya arrancado a 250 ms
+        (`mediciones_banco/probar_color_stream_caliente.py`):
+
+            muestras no-cero de /color:  0/24 → 24/24 → 24/24 → 0/24
+            canal claro por consulta:    1 → 1321 → 1322 → 1     (1321×)
+            RGB reales sobre suelo claro: (255, 223, 209)
+
+        Dos rutas independientes se mueven a la vez y vuelven a la línea base al
+        apagar, y el usuario vio el LED blanco encenderse bajo el chasis.
+
+        🔴 ESTO REFUTA lo que este fichero afirmó desde el 2026-07-31 —«con el
+           streaming ya configurado, `enable_color_detection` NO HACE NADA, 481
+           mensajes todos ceros»—. Aquella medida no probaba eso: el servicio
+           bajo prueba **se apagaba a sí mismo** dentro de la misma llamada, y
+           los 481 mensajes (~38 s a 12,7 Hz) son casi todos POSTERIORES al
+           `enable(False)`. Una medida que no distingue las dos hipótesis no
+           refuta ninguna. La corrección la trajo el usuario, que recordaba el
+           ciclo funcionando en ROS 1 — y el código de ROS 1 lo respaldaba
+           (servicio `enable_color`, `Atriz_rvr_node.py:331-344` y `:1636`).
+
+        ⚠️ Deja un LED blanco encendido bajo el chasis y gasta batería. Quien lo
+           encienda, que lo apague. `_apagar_rvr()` lo apaga siempre al cerrar,
+           mire o no el parámetro, precisamente por esto.
+        """
+        encender = bool(req.data)
+        ok, _, msg = self._pedir(self._encender_color(encender), 'enable_color')
+        if ok:
+            # 🔴 Se actualiza para que `_srv_rgbc` no siga avisando de oscuridad
+            #    cuando el sensor ya está encendido: un aviso que miente entrena
+            #    al alumno a ignorar los avisos.
+            self._color_detection = encender
+            self.get_logger().info(
+                f'sensor de color {"ENCENDIDO" if encender else "apagado"} '
+                f'por servicio')
+        resp.success = ok
+        resp.message = msg or (
+            'sensor de color encendido: /color ya da valores reales'
+            if encender else 'sensor de color apagado')
+        return resp
+
     def _srv_rgbc(self, _req, resp):
         """Sensor de color, en crudo.
 
-        🔴 NO enciende ni apaga la luz, y no es un olvido: **con el streaming de
-           `color_detection` activo, `enable_color_detection` no hace efecto**.
-           Medido el 2026-07-31 llamando a este servicio y mirando `/color` a la
-           vez: 481 mensajes, todos [0,0,0], durante toda la llamada.
+        🔴 NO enciende ni apaga la luz, **y ahora es a propósito**: para eso
+           está `enable_color` (`std_srvs/SetBool`). Encender y apagar dentro de
+           esta misma llamada es lo que hacía la primera versión, y devolvía
+           oscuridad con `success=True`.
 
-           La primera versión sí lo hacía y devolvía oscuridad con `success=True`,
-           que es lo peor de los dos mundos.
-
-        ⚠️ Si el sensor está apagado —lo está por defecto— esto devuelve valores
-           de oscuridad (~1, 0, 1, 0 medidos) y lo dice en `message`. Para que dé
-           algo hay que arrancar con `color_detection:=true`.
+        ⚠️ Si el sensor está apagado —lo está al arrancar— esto devuelve valores
+           de oscuridad (~1, 0, 1, 1 medidos) y lo dice en `message`. Para que dé
+           algo, `enable_color(true)` en caliente o `color_detection:=true` al
+           arrancar.
         """
         ok, datos, msg = self._pedir(self._rvr.get_rgbc_sensor_values(), 'get_rgbc')
         if not ok or not isinstance(datos, dict):
@@ -2230,7 +2295,7 @@ class RvrDriverNode(Node):
         resp.success = True
         resp.message = ('' if self._color_detection else
                         'el sensor de color está APAGADO: estos valores son '
-                        'oscuridad. Arranca con color_detection:=true')
+                        'oscuridad. Enciéndelo con enable_color(true)')
         return resp
 
     def _srv_encoders(self, _req, resp):

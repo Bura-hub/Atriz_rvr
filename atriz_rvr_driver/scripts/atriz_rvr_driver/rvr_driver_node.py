@@ -84,6 +84,10 @@ import concurrent.futures
 import math
 import sys
 import threading
+# 🔴 Reloj MONÓTONO, no el de ROS (`_ahora_s`, que es el del sistema). Los sellos
+#    del apagado de la luz del color deciden una acción física, y un salto de NTP
+#    no debe decidirla. El resto del nodo usa `_ahora_s` y se queda como está.
+import time as _time
 import traceback
 
 import rclpy
@@ -241,6 +245,31 @@ class RvrDriverNode(Node):
         # 🔴 Enciende el LED blanco del sensor de color. Ver `_registrar_sensores`.
         self.declare_parameter('color_detection', False)
 
+        # ── Apagado automático de la luz del sensor de color ─────────────────
+        # 🔴 POR QUÉ EXISTE, y no es comodidad. La luz se puede encender desde el
+        #    navegador (`enable_color`), y **el navegador no puede prometer que
+        #    la apagará**: una pestaña cerrada de golpe, un portátil que se
+        #    cierra o un corte de WiFi no ejecutan ninguna limpieza, y el cliente
+        #    reconecta sin memoria de haber encendido nada. La garantía tiene que
+        #    vivir donde algo sobrevive a todo eso: aquí.
+        #
+        # 🔴 «SIN ACTIVIDAD» CUENTA LAS DOS VÍAS, y esto NO es un detalle:
+        #    `atriz.py:903` lee el color POR SERVICIO, no por el topic. Contando
+        #    solo suscriptores de `/color`, un alumno haciendo la práctica 5 vería
+        #    apagarse la luz a mitad — el apagado de seguridad rompiendo el caso
+        #    legítimo. Cuenta suscriptores **o** llamadas a `get_rgbc_sensor_values`.
+        #
+        # ⚠️ Y hace falta ADEMÁS un tope duro: rosbridge abre **una sola
+        #    suscripción ROS** para todos sus clientes WebSocket, así que el
+        #    contador no distingue una pestaña de ocho y **una pestaña olvidada
+        #    mantiene la luz encendida indefinidamente** — justo el caso que esto
+        #    viene a cubrir. Lo que ocurra antes manda.
+        #
+        # 📌 Los dos son parámetros y no constantes: si en el aula resultan
+        #    cortos, cambiarlos no debe exigir recompilar. 0 = desactivado.
+        self.declare_parameter('color_apagado_inactividad_s', 120.0)
+        self.declare_parameter('color_apagado_max_s', 900.0)
+
         p = self.get_parameter
         self._puerto = p('serial_port').value
         self._baud = int(p('baud').value)
@@ -255,6 +284,16 @@ class RvrDriverNode(Node):
         self._timeout_silencio = float(p('silence_timeout').value)
         self._publicar_inclinacion = bool(p('publicar_inclinacion').value)
         self._color_detection = bool(p('color_detection').value)
+        self._color_inactividad = float(p('color_apagado_inactividad_s').value)
+        self._color_max = float(p('color_apagado_max_s').value)
+
+        #: ¿La luz la encendió el SERVICIO, o venía del parámetro de arranque?
+        #: 🔴 Solo se apaga sola la que encendió el servicio. Quien arranca con
+        #:    `color_detection:=true` lo ha pedido a propósito y no se le toca el
+        #:    montaje — misma regla que `_luz_color_mia` en `atriz.py`.
+        self._color_por_servicio = False
+        self._color_t_enable = 0.0
+        self._color_t_actividad = 0.0
 
         if self._intervalo_ms < 60:
             self.get_logger().warn(
@@ -708,6 +747,16 @@ class RvrDriverNode(Node):
         #    precisamente entonces cuando más falta hace poder ver qué pasa desde
         #    fuera. El latido no le habla al RVR: no puede molestar a nada.
         self.create_timer(1.0, self._publicar_estado, callback_group=g_salud)
+
+        # El apagado automático de la luz del color. Mismo grupo y mismo ritmo:
+        # solo compara números y, cuando toca, encola un comando sin esperarlo.
+        if self._color_inactividad > 0 or self._color_max > 0:
+            self.create_timer(1.0, self._vigilar_luz_color, callback_group=g_salud)
+        else:
+            self.get_logger().warn(
+                'apagado automático de la luz del color DESACTIVADO: si un '
+                'cliente la enciende y desaparece, se queda encendida hasta que '
+                'alguien la apague o muera el driver.')
 
         self.get_logger().info(
             f'rvr_driver arrancando · puerto={self._puerto} baud={self._baud} '
@@ -1893,6 +1942,61 @@ class RvrDriverNode(Node):
         m.header.frame_id = self._body_frame
         self.pub_motores.publish(m)
 
+    def _vigilar_luz_color(self) -> None:
+        """Apaga la luz del sensor si nadie la está usando. 1 Hz.
+
+        Solo toca la luz que encendió **el servicio**: la del parámetro de
+        arranque la puso alguien a propósito y no se le apaga por debajo.
+
+        Dos condiciones, y manda **la que ocurra antes**:
+
+          inactividad  nadie suscrito a `/color` **y** ninguna llamada a
+                       `get_rgbc_sensor_values` en `color_apagado_inactividad_s`
+          tope duro    `color_apagado_max_s` desde que se encendió, pase lo que
+                       pase — porque rosbridge comparte UNA suscripción entre
+                       todos sus clientes y una pestaña olvidada mantendría el
+                       contador a 1 para siempre
+
+        🔴 Se apaga con `_enviar`, no con `_pedir`: esto corre en un temporizador
+           y bloquear aquí esperando al RVR congelaría el grupo `g_salud`, que es
+           el que lleva el latido y el detector de silencio. `_enviar` no espera
+           pero **sí registra el fallo**, que es lo que lo distingue de tirar el
+           resultado a la basura.
+
+        📝 Y el efecto es comprobable desde fuera sin creerse nada: `/color`
+           vuelve a `[0,0,0]` y `color_activo` de `/estado_robot` pasa a `false`.
+        """
+        if not self._color_por_servicio or self._rvr is None:
+            return
+
+        ahora = _time.monotonic()
+        # Alguien mirando el topic cuenta como actividad, igual que una consulta.
+        if self.pub_color is not None and self.pub_color.get_subscription_count() > 0:
+            self._color_t_actividad = ahora
+
+        motivo = None
+        if self._color_inactividad > 0 and \
+                ahora - self._color_t_actividad >= self._color_inactividad:
+            motivo = (f'nadie la usa desde hace '
+                      f'{ahora - self._color_t_actividad:.0f} s')
+        elif self._color_max > 0 and ahora - self._color_t_enable >= self._color_max:
+            motivo = (f'lleva {ahora - self._color_t_enable:.0f} s encendida '
+                      f'(tope {self._color_max:g} s)')
+        if motivo is None:
+            return
+
+        # Se marca ANTES de encolar. Si se marcara después, el siguiente tic
+        # (1 s) volvería a entrar y encolaría un segundo apagado sobre el mismo
+        # puerto serie: el temporizador dispararía en bucle hasta que el primero
+        # llegara. Marcar primero cierra la ventana.
+        self._color_por_servicio = False
+        self._color_detection = False
+        self._enviar(self._rvr.enable_color_detection(is_enabled=False),
+                     'apagado automático de la luz del color')
+        self.get_logger().info(
+            f'luz del sensor de color APAGADA sola: {motivo}. '
+            f'Vuelve a encenderla con enable_color(true).')
+
     def _publicar_estado(self) -> None:
         """Publica `/estado_robot`. Timer de rclpy a 1 Hz, grupo `g_salud`.
 
@@ -1955,6 +2059,13 @@ class RvrDriverNode(Node):
             # Coger el lock aquí no añadiría nada y sí acoplaría este callback al
             # hilo de asyncio.
             m.parada_emergencia = bool(self._parada_emergencia)
+
+            # 🔴 LA LUZ DEL SENSOR DE COLOR, y este campo existe por una razón
+            #    concreta: **se apaga sola** (`_vigilar_luz_color`). Un cliente
+            #    que recuerde «yo la encendí» pintaría el botón encendido sobre
+            #    un sensor a oscuras. Con el apagado automático, el estado hay que
+            #    LEERLO, no recordarlo — y por eso no vale un flag en el navegador.
+            m.color_activo = bool(self._color_detection)
 
             m.reanudaciones_fallidas = int(fallidas)
             m.latido = int(self._latido)
@@ -2258,6 +2369,10 @@ class RvrDriverNode(Node):
         encender = bool(req.data)
         ok, _, msg = self._pedir(self._encender_color(encender), 'enable_color')
         if ok:
+            ahora = _time.monotonic()
+            self._color_por_servicio = encender
+            self._color_t_enable = ahora
+            self._color_t_actividad = ahora
             # 🔴 Se actualiza para que `_srv_rgbc` no siga avisando de oscuridad
             #    cuando el sensor ya está encendido: un aviso que miente entrena
             #    al alumno a ignorar los avisos.
@@ -2284,6 +2399,10 @@ class RvrDriverNode(Node):
            algo, `enable_color(true)` en caliente o `color_detection:=true` al
            arrancar.
         """
+        # 🔴 Esto cuenta como ACTIVIDAD, y de ello depende que el apagado
+        #    automático no le corte la práctica a un alumno: `atriz.py` lee el
+        #    color por aquí, no por el topic `/color`.
+        self._color_t_actividad = _time.monotonic()
         ok, datos, msg = self._pedir(self._rvr.get_rgbc_sensor_values(), 'get_rgbc')
         if not ok or not isinstance(datos, dict):
             resp.success, resp.message = False, msg or f'respuesta inesperada: {datos!r}'

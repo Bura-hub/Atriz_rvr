@@ -126,3 +126,22 @@ float32 antiguedad_muestra_s
 float32 antiguedad_odom_s
 
 uint32 reanudaciones_fallidas
+
+# ── ¿Está encendida la LUZ del sensor de color? ──────────────────────────────
+# Sin esa luz, `/color` publica [0,0,0] y `get_rgbc_sensor_values` devuelve
+# oscuridad. Se enciende con el servicio `enable_color`.
+#
+# 🔴 EXISTE PORQUE LA LUZ SE APAGA SOLA, y eso hace que el estado NO se pueda
+#    recordar. El driver la apaga por inactividad y por tope duro
+#    (`color_apagado_inactividad_s`, `color_apagado_max_s`), así que un cliente
+#    que guarde «yo la encendí» acabaría pintando el botón encendido sobre un
+#    sensor a oscuras. Con este campo, la web LEE el estado en vez de deducirlo.
+#
+# ⚠️ Y no vale mirar si `/color` trae ceros: publica igual con la luz apagada
+#    —no calla, al revés que el driver de ROS 1— y una superficie negra de verdad
+#    también da valores muy bajos. El topic dice qué se ve; este campo, si hay luz
+#    para verlo.
+#
+# 📝 true también cuando se arrancó con `color_detection:=true`. En ese caso NO
+#    se apaga sola: la puso alguien a propósito.
+bool color_activo

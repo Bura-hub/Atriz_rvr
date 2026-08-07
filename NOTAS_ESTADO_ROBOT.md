@@ -109,6 +109,40 @@ hasta que se midan.
 
 ---
 
+### `bool color_activo` — ¿hay luz en el sensor de color?  (2026-08-06)
+
+Sin esa luz, `/color` publica `[0,0,0]` y `get_rgbc_sensor_values` devuelve oscuridad. Se enciende
+con el servicio `enable_color` (`std_srvs/SetBool`).
+
+🔴 **EXISTE PORQUE LA LUZ SE APAGA SOLA, y eso hace que el estado NO se pueda recordar.** El driver
+la apaga por inactividad (120 s sin que nadie la use) y por tope duro (900 s desde el enable), los
+dos como argumentos del launch. Un cliente que guarde «yo la encendí» acabaría pintando el botón
+encendido sobre un sensor a oscuras — el patrón que este mensaje entero existe para evitar.
+
+Y la razón de que el navegador no pueda hacerse cargo: **no puede prometer que la apagará**. Una
+pestaña cerrada de golpe no ejecuta ninguna limpieza, una recarga pierde el flag (y es el caso más
+común en clase), y tras un corte de WiFi el cliente reconecta **sin memoria de haber encendido
+nada**. Cortesía en el navegador, garantía en el robot.
+
+⚠️ **Y no vale mirar si `/color` trae ceros.** Publica igual con la luz apagada —no calla, al revés
+que el driver de ROS 1, que tenía una compuerta `if not color_enabled: return`— y una superficie
+**negra de verdad** también da valores muy bajos. El topic dice qué se ve; este campo, si hay luz
+para verlo.
+
+📝 `true` también cuando se arrancó con `color_detection:=true`. En ese caso **no** se apaga sola:
+la puso alguien a propósito, igual que `_luz_color_mia` en `atriz.py`.
+
+✅ **VERIFICADO en los dos sentidos**, y contra el sensor y no contra sí mismo:
+
+```
+enable_color(true)   color_activo False -> True   ·  claro 1 -> 1321
+sin actividad        color_activo True -> False a los 126 s  ·  claro -> 1
+tope duro (20 s)     claro 1321 -> 0 a los 23.9 s, leyendo cada 3 s sin que lo salvara
+con actividad        sigue encendida a los 160 s (servicio) y 150 s (topic)
+```
+
+Es, junto con `parada_emergencia` y `latido`, uno de los tres campos comprobados de verdad.
+
 ## 3 · La decisión de diseño que hay que revisar con ojo
 
 **El contador se pone a cero cuando LLEGA UNA MUESTRA, no cuando la reanudación «tiene éxito».**

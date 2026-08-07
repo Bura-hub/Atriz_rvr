@@ -34,7 +34,11 @@ ros2 launch atriz_rvr_bringup nav2.launch.py         # navegar
 
 Argumentos de `robot.launch.py`: `lidar`, `collision_monitor`, `color_detection` (def. **false**,
 enciende un LED bajo el chasis), `publicar_inclinacion` (def. **false**), `keepalive_period`,
-`silence_timeout`.
+`silence_timeout`, `color_apagado_inactividad_s` (def. **120.0**) y `color_apagado_max_s`
+(def. **900.0**).
+
+📝 Los dos últimos apagan solos la luz del sensor de color si nadie la usa o si lleva demasiado
+encendida — la web no puede prometer que la apagará. `0` los desactiva.
 
 ### 🔴 Al arrancar el robot NO CONDUCE, y no está roto
 

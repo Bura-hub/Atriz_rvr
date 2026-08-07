@@ -328,15 +328,29 @@ class Supervisor(Node):
             estado = EstadoNavegacion.FUNCIONANDO
             self._t_pedido[cual] = None
             transcurrido = -1.0
+        elif t_ped is not None and transcurrido < TOPE_ARRANQUE_S:
+            # 🔴 ARRANCANDO VA ANTES QUE CIEGO, y el orden importa.
+            #    Al revés —como estaba— un arranque perfectamente normal pasaba
+            #    por CIEGO durante ~1 s: los nodos ya existen y `/scan` todavía
+            #    no ha llegado. Medido el 2026-08-07 arrancando Nav2 de verdad:
+            #        0,7 s  CIEGO  «encendido pero SIN barrido»
+            #        1,4 s  ARRANCANDO
+            #        3,4 s  FUNCIONANDO
+            #    La web habría pintado una alarma naranja en mitad de un
+            #    arranque sano, y el alumno habría ido a buscar una avería que
+            #    no existe. CIEGO significa «está levantado y NO puede
+            #    funcionar», no «todavía está subiendo».
+            estado = EstadoNavegacion.ARRANCANDO
         elif estado_sd in ('active', 'activating') and vivo and not self._hay_scan():
             # 🔴 El estado que `is-active` esconde: encendido y sin barrido. El
             #    collision_monitor bloquea el movimiento y el robot PARECE
             #    averiado (medido: 0,0 cm contra 9,9).
+            #    Aquí ya se sabe que NO está arrancando: o nunca se pidió, o el
+            #    plazo se agotó. Es un ciego de verdad — típicamente alguien
+            #    llamó a `/stop_scan` con la navegación en marcha.
             estado = EstadoNavegacion.CIEGO
             detalle = ('encendido pero SIN barrido: no puede funcionar. '
                        'Enciéndelo con /start_scan')
-        elif t_ped is not None and transcurrido < TOPE_ARRANQUE_S:
-            estado = EstadoNavegacion.ARRANCANDO
         elif t_ped is not None:
             estado = EstadoNavegacion.FALLO
             detalle = (f'no llegó a funcionar en {TOPE_ARRANQUE_S:.0f} s '

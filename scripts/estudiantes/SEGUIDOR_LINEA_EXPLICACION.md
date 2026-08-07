@@ -27,9 +27,9 @@ with Robot() as robot:
 veces por segundo (el watchdog del driver corta a los 0.3 s sin una orden nueva).
 El script lo hace con un `sleep` calculado para mantener 10 Hz — ver la sección 7.
 
-🔴 **Necesita que el robot haya arrancado con `color_detection:=true`** (lo hace
-el profesor). Sin eso, `robot.hay_color` es `False` y el script avisa y sale antes
-de moverse.
+El script **enciende él solo la luz del sensor** (`robot.sensor_color(True)`) antes
+de moverse, y `cerrar()` la apaga al terminar. Sin esa luz no hay línea que
+seguir: el canal `claro` se queda en 1.
 
 ---
 

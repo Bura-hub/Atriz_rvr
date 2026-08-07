@@ -3,8 +3,8 @@
 
     python3 11_sensor_avanzado.py
 
-🔴 NECESITA EL ARRANQUE CON color_detection:=true. Lee la cabecera de la
-   practica 5.
+Enciende el solo la luz del sensor de color (robot.sensor_color(True)) y la
+apaga al terminar. No hace falta ningun arranque especial.
 
 Antes de ejecutarlo: 1 metro despejado por delante, y una franja de cinta negra
 cruzando el camino del robot.
@@ -63,9 +63,9 @@ MAX_TRAMOS = int(DISTANCIA_MAX_M / AVANCE_POR_TRAMO + 1e-9)
 SEGUNDOS_POR_TRAMO = DURACION_TRAMO + 0.5
 
 with Robot() as robot:
-    if not robot.hay_color:
-        print('\nEl sensor de color esta apagado. Lee la practica 5.')
-        sys.exit(1)
+    # La luz del sensor, lo primero: sin ella todo lectura es oscuridad, y la
+    # oscuridad se confunde con el negro que este programa busca.
+    robot.sensor_color(True)
 
     print(f'Avanzando a {VELOCIDAD} m/s hasta encontrar negro '
           f'(maximo {MAX_TRAMOS} tramos = {MAX_TRAMOS * AVANCE_POR_TRAMO:.2f} m, '
@@ -93,8 +93,8 @@ with Robot() as robot:
                   f'       Revisa, en este orden:\n'
                   f'         1. ¿esta puesta la cinta negra y cruza el camino '
                   f'del robot?\n'
-                  f'         2. ¿el robot arranco con color_detection:=true? '
-                  f'(si no, claro nunca baja de verdad)\n'
+                  f'         2. ¿se encendio la luz del sensor? (mira si hay un LED '
+                  f'blanco bajo el robot; sin el, claro nunca sube)\n'
                   f'         3. ¿el sensor mira al suelo, o el robot quedo '
                   f'atascado contra algo antes de llegar?')
             sys.exit(1)

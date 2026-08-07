@@ -36,7 +36,7 @@ from rclpy.qos import (QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy)
 from rclpy.signals import SignalHandlerOptions
 from sensor_msgs.msg import BatteryState, LaserScan
 from std_msgs.msg import Empty
-from std_srvs.srv import Empty as EmptySrv
+from std_srvs.srv import Empty as EmptySrv, SetBool
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONSTANTES — cada una tiene una medida detrás. No se cambian sin otra.
@@ -327,6 +327,11 @@ class Robot:
         self._cli_color = self._nodo.create_client(
             GetRGBCSensorValues, '/get_rgbc_sensor_values')
         self._cli_luces = self._nodo.create_client(SetLeds, '/set_leds')
+        self._cli_luz_color = self._nodo.create_client(SetBool, '/enable_color')
+        #: ¿La luz del sensor la encendio ESTE programa? Solo entonces la apaga
+        #: al cerrar: si el robot arranco con `color_detection:=true`, apagarla
+        #: seria romperle el montaje a quien lo dejo asi a proposito.
+        self._luz_color_mia = False
 
         # 🔴 EJECUTOR PROPIO Y PERSISTENTE, en un hilo de fondo.
         #    `rclpy.spin_once(nodo)` en bucle engancha y desengancha el nodo del
@@ -409,7 +414,7 @@ class Robot:
         try:
             secuencia_de_cierre(
                 parar=lambda: self._mandar(0.0, 0.0, repeticiones=5),
-                apagar_barrido=self._apagar_barrido,
+                apagar_barrido=self._apagar_barrido_y_luz,
                 desmontar=self._desmontar)
         finally:
             self._cerrando = False
@@ -430,6 +435,31 @@ class Robot:
             return
         self._llamar(self._cli_parar_barrido, EmptySrv.Request(),
                      timeout=5.0, que='/stop_scan')
+
+    def _apagar_barrido_y_luz(self):
+        """El paso 2 del cierre: el barrido del LIDAR **y** la luz del color.
+
+        🔴 El barrido va PRIMERO y en su propio `try`: apagarlo siempre es la
+           promesa de esta biblioteca, y un fallo apagando el LED no puede
+           llevarsela por delante. Es la misma razon por la que
+           `secuencia_de_cierre` encadena `finally`.
+
+        ⚠️ Y va aqui, no antes de `parar()`: parar el robot manda sobre apagar
+           una luz. Si `/enable_color` tardara, el robot ya esta quieto.
+
+        📝 Solo apaga lo que encendio este programa. El driver la apaga tambien
+           al cerrarse (`_apagar_rvr`), pero eso no cubre al alumno que termina
+           su guion y deja el driver vivo — que es el caso normal.
+        """
+        try:
+            self._apagar_barrido()
+        finally:
+            if getattr(self, '_luz_color_mia', False):
+                try:
+                    self.sensor_color(False)
+                except BaseException as e:                   # noqa: BLE001
+                    print(f'AVISO: la luz del sensor de color se queda '
+                          f'ENCENDIDA y gastara bateria: {e!r}')
 
     def _desmontar(self):
         """Suelta el ejecutor, el hilo y el nodo. Va SIEMPRE el ultimo: lo que
@@ -511,13 +541,41 @@ class Robot:
         # EFECTO, que es un /scan de verdad.
         self._ultimo('_scan', timeout=8.0, que='/scan')
 
-    def _comprobar_color(self):
-        """¿Se arranco el robot con el sensor de color encendido?
+    def sensor_color(self, encender=True):
+        """Enciende o apaga LA LUZ del sensor de color. Sin luz no hay lectura.
 
-        🔴 No se puede encender bajo demanda: con el streaming ya montado,
-           `enable_color_detection` NO HACE NADA (481 mensajes, todos ceros). Se
-           decide en el arranque, y el servicio systemd usa el defecto: false.
-           Sin esta comprobacion, `color()` devuelve negro y parece un dato.
+        Es la «sesion de medicion»: se enciende, se mide lo que haga falta, y se
+        apaga. `cerrar()` la apaga sola si la encendiste tu.
+
+            with Robot() as robot:
+                robot.sensor_color(True)
+                r, g, b, claro = robot.color()
+
+        ⚠️ Enciende un LED BLANCO bajo el chasis y gasta bateria mientras siga
+           encendido. Apagalo cuando termines de medir.
+
+        📝 Medido el 2026-08-06: canal claro **1 apagado contra 1320 encendido**,
+           y vuelve a 1 al apagar. Hasta esa fecha esta biblioteca decia que
+           habia que pedirselo al profesor y reiniciar el robot; era falso.
+        """
+        peticion = SetBool.Request()
+        peticion.data = bool(encender)
+        r = self._llamar(self._cli_luz_color, peticion, timeout=5.0,
+                         que='/enable_color')
+        if not r.success:
+            raise ErrorAtriz(
+                f'no se pudo {"encender" if encender else "apagar"} la luz del '
+                f'sensor de color: {r.message}')
+        self.hay_color = bool(encender)
+        self._luz_color_mia = bool(encender)
+        return self.hay_color
+
+    def _comprobar_color(self):
+        """¿Arranco el robot con la luz del sensor de color encendida?
+
+        📝 Ya NO es una sentencia: desde el 2026-08-06 se enciende cuando quieras
+           con `sensor_color(True)`. Esto solo dice como esta AHORA, para que
+           `color()` pueda avisar en vez de devolver oscuridad que parece dato.
         """
         peticion = GetParameters.Request()
         peticion.names = ['color_detection']
@@ -530,12 +588,8 @@ class Robot:
                   'color() puede devolver ceros.')
             return False
         if not activo:
-            print('AVISO: el sensor de color esta APAGADO en este robot.\n'
-                  '       color() devolvera ceros. Para usarlo, el robot tiene\n'
-                  '       que arrancar asi (lo hace el profesor):\n'
-                  '         sudo systemctl stop atriz-robot\n'
-                  '         ros2 launch atriz_rvr_bringup robot.launch.py '
-                  'color_detection:=true')
+            print('AVISO: la luz del sensor de color esta apagada.\n'
+                  '       Enciendela antes de medir:  robot.sensor_color(True)')
         return activo
 
     # ── Fontaneria ──────────────────────────────────────────────────────────
@@ -842,9 +896,10 @@ class Robot:
            que costo meses de /color publicando ceros sin que nadie lo notara.
         """
         if not self.hay_color:
-            print('AVISO: el sensor de color esta apagado; los valores seran '
+            print('AVISO: la luz del sensor esta apagada; los valores seran '
                   'ruido de fondo (los canales oscilan entre 0 y 1, no ceros '
-                  'fijos), no una lectura de verdad.')
+                  'fijos), no una lectura de verdad.\n'
+                  '       Enciendela con:  robot.sensor_color(True)')
         r = self._llamar(self._cli_color, GetRGBCSensorValues.Request(),
                          timeout=5.0, que='/get_rgbc_sensor_values')
         if not r.success:

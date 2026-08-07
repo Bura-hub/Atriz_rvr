@@ -192,19 +192,24 @@ dos errores.
 
 ## Práctica 05 — El sensor de color
 
-🔴 **Necesita un arranque especial del robot, que hace el profesor:**
-```bash
-sudo systemctl stop atriz-robot
-ros2 launch atriz_rvr_bringup robot.launch.py color_detection:=true
-```
-El sensor de color lleva su propia luz debajo del robot, y sin ella no ve nada
-(el canal `claro` pasa de 741 con la luz encendida a 4 apagada — 185 veces menos).
-Esa luz se enciende antes de configurar el sensor y **no se puede encender
-después**, así que se decide en el arranque. El arranque normal la deja apagada a
-propósito, porque es un LED blanco encendido todo el rato bajo el chasis.
+**No necesita nada especial.** El programa enciende la luz del sensor él solo:
 
-Si el robot arrancó normal, `robot.hay_color` sale `False` y el script te lo dice
-y sale — no te devuelve ceros haciéndolos pasar por «negro».
+```python
+robot.sensor_color(True)
+```
+
+El sensor de color lleva su propia luz debajo del robot, y sin ella no ve nada:
+el canal `claro` pasa de **~1320 con la luz encendida a 1 apagada**. El robot
+arranca con esa luz apagada a propósito —es un LED blanco bajo el chasis y gasta
+batería—, así que la enciendes cuando vas a medir. `cerrar()` la apaga sola.
+
+Si se te olvida encenderla, `robot.hay_color` sale `False`, el script te avisa y
+te dice cómo encenderla — no te devuelve oscuridad haciéndola pasar por «negro».
+
+📝 **Hasta el 2026-08-06 esto pedía que el profesor reiniciara el robot.** Se dio
+por medido durante seis días que la luz no se podía encender en caliente, y era
+falso. Ver el `CHANGELOG` de esa fecha: es un buen ejemplo de cómo una medición
+mal diseñada bloquea algo que siempre funcionó.
 
 **Qué se aprende:** `robot.color()` devuelve `(rojo, verde, azul, claro)`. El
 canal que de verdad discrimina es `claro`: va de ~181 sobre negro a ~2288 sobre
@@ -256,8 +261,7 @@ frontal en cada uno, y gira 90° cuando algo queda a menos de 0.35 m.
 
 ## Práctica 11 — Reaccionar a lo que ve: parar sobre negro
 
-🔴 **Necesita el mismo arranque especial que la práctica 05**
-(`color_detection:=true`).
+Enciende la luz del sensor él solo, igual que la práctica 05.
 
 **Qué se aprende:** leer el sensor **mientras** se avanza, en vez de bloquear con
 `avanzar()`. El umbral (`UMBRAL_NEGRO = 400`) no está a mitad de camino entre
@@ -302,8 +306,7 @@ protege solo.
 
 ## Proyecto final — Seguidor de línea (`seguidor_linea_pid_demo.py`)
 
-🔴 **Necesita el arranque con `color_detection:=true`**, igual que las prácticas
-05 y 11.
+Enciende la luz del sensor él solo, igual que las prácticas 05 y 11.
 
 **Qué se aprende:** un PID de verdad, combinado con seguimiento de **borde** en
 vez de intentar centrarse sobre la línea — la explicación completa está en

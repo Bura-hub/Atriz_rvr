@@ -171,11 +171,23 @@ Devuelve `(rojo, verde, azul, claro)`.
   `success=False`). Es a propósito: sin esta comprobación, una lectura fallida
   y una lectura real sobre negro serían indistinguibles — los dos casos dan
   ceros.
-- Si el robot arrancó **sin** el sensor de color activo (`robot.hay_color` es
-  `False`), avisa por pantalla y los cuatro canales son ruido de fondo (oscilan
-  entre 0 y 1), no una lectura real. El sensor de color se activa **en el
-  arranque del robot**, no bajo demanda: si no está activo, hay que pedirle al
-  profesor que reinicie el robot con `color_detection:=true`.
+- Si la luz del sensor está apagada (`robot.hay_color` es `False`), avisa por
+  pantalla y los cuatro canales son ruido de fondo (oscilan entre 0 y 1), no una
+  lectura real. **Enciéndela con `robot.sensor_color(True)`.**
+
+### `robot.sensor_color(encender=True)`
+
+Enciende o apaga **la luz** del sensor de color. Sin luz no hay lectura: el canal
+`claro` va de **1 apagada a ~1320 encendida**.
+
+```python
+with Robot() as robot:
+    robot.sensor_color(True)
+    r, g, b, claro = robot.color()
+```
+
+⚠️ Enciende un LED blanco bajo el chasis y gasta batería. `cerrar()` lo apaga
+solo si lo encendiste tú; si el robot ya venía con la luz puesta, no la toca.
 
 ### `robot.hay_color`
 

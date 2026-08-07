@@ -3,7 +3,7 @@
 
     python3 seguidor_linea_pid_demo.py
 
-🔴 NECESITA EL ARRANQUE CON color_detection:=true. Lee la practica 5.
+Enciende el solo la luz del sensor de color y la apaga al terminar.
 
 🔴 ANTES DE EJECUTARLO — ESPACIO: una pista con linea negra sobre suelo
    claro, y sitio para al menos 6 METROS DE RECORRIDO, que es el tope que
@@ -191,9 +191,8 @@ def decidir_giro(claro, lado_borde, pid, umbral_negro=UMBRAL_NEGRO, umbral_claro
 
 def main():
     with Robot() as robot:
-        if not robot.hay_color:
-            print('\nEl sensor de color esta apagado. Lee la practica 5.')
-            sys.exit(1)
+        # La luz del sensor, lo primero: sin ella no hay linea que seguir.
+        robot.sensor_color(True)
 
         pid = PID(**ajustes.get('pid', {}))
         lado_borde = LADO_INICIAL
@@ -217,7 +216,7 @@ def main():
                       f'       Si no, revisa en este orden:\n'
                       f'         1. ¿el sensor arranco JUSTO sobre el borde de la '
                       f'linea, con el negro al lado que dice `lado_borde`?\n'
-                      f'         2. ¿el robot arranco con color_detection:=true?\n'
+                      f'         2. ¿se encendio la luz del sensor? (LED blanco bajo el robot)\n'
                       f'         3. ¿la pista tiene curvas mas cerradas de lo que '
                       f'este PID puede seguir a {VELOCIDAD} m/s?')
                 sys.exit(1)

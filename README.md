@@ -3,7 +3,7 @@
 > # 🔴 ESTE README DESCRIBE EL SISTEMA VIEJO (ROS 1 / Noetic)
 >
 > Estás en la rama **`ros2`**, y casi todo lo que hay debajo de este aviso está **obsoleto**:
-> habla de `catkin`, de `/cmd_degrees` y de 5 servicios cuando el driver tiene **18**.
+> habla de `catkin`, de `/cmd_degrees` y de 5 servicios cuando el driver tiene **19**.
 > Se conserva porque documenta el sistema Noetic, que sigue siendo la ruta de vuelta atrás.
 >
 > **Lo que vale hoy está en el bloque de aquí abajo**, y el detalle completo —con el porqué de
@@ -53,7 +53,7 @@ atriz-escaneo on | off | estado
 |---|---|---|---|
 | `/odom` | `nav_msgs/Odometry` | **BEST_EFFORT** | 16.5 Hz · `odom → base_footprint` |
 | `/imu` | `sensor_msgs/Imu` | **BEST_EFFORT** | 16.5 Hz |
-| `/color` | `atriz_rvr_msgs/Color` | **BEST_EFFORT** | `[0,0,0]` salvo `color_detection:=true` |
+| `/color` | `atriz_rvr_msgs/Color` | **BEST_EFFORT** | `[0,0,0]` hasta encender la luz: servicio `/enable_color` (`std_srvs/SetBool`) o `color_detection:=true` al arrancar |
 | `/battery_state` | `sensor_msgs/BatteryState` | | cada 30 s · `percentage` es **0–1**, no % |
 | `/scan` | `sensor_msgs/LaserScan` | **BEST_EFFORT** | 10.1 Hz · 0 si el barrido está apagado |
 | `/cmd_vel` | `geometry_msgs/Twist` | | 🔴 **NO publiques aquí**: salta la seguridad |
@@ -62,7 +62,7 @@ atriz-escaneo on | off | estado
 🔴 **`/odom`, `/imu`, `/color` y `/scan` son BEST_EFFORT.** Un suscriptor con el RELIABLE por
 defecto de `rclpy` **no recibe nada**, sin error ni aviso. Y `ros2 topic hz` no puede medirlos.
 
-### Los 18 servicios
+### Los 19 servicios
 
 ```
 release_emergency_stop     set_led_rgb              set_multiple_leds
@@ -71,13 +71,18 @@ get_system_info            get_control_state        trigger_led_event
 send_infrared_message      set_ir_mode              set_ir_evading
 set_drive_parameters       set_pos_and_yaw          move_timed
 raw_motors                 move_to_pose             move_to_pos_and_yaw
+enable_color
 ```
+
+📝 **`enable_color`** (`std_srvs/SetBool`) enciende y apaga **la luz** del sensor de color, en
+caliente. Sin ella `/color` publica `[0,0,0]` y `get_rgbc_sensor_values` devuelve oscuridad.
+⚠️ Deja un LED blanco encendido bajo el chasis: quien lo encienda, que lo apague.
 
 ⚠️ Los de **movimiento** (`move_timed`, `raw_motors`, `move_to_*`) hablan al RVR por el puerto
 serie: **se saltan el `collision_monitor` y el watchdog**. Sí respetan la parada de emergencia.
 Y `raw_motors` **no tiene corte automático**.
 
-📝 `ros2 service list` **no es autoritativo** — omitió 1 de los 18. Usa un cliente.
+📝 `ros2 service list` **no es autoritativo** — omitió 1 de los 19. Usa un cliente.
 
 ### Parada de emergencia
 

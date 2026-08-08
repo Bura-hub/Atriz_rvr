@@ -6,6 +6,20 @@
 Cuatro lados y cuatro giros de 90 grados.
 
 Antes de ejecutarlo: necesitas un cuadrado libre de ~1.5 m de lado.
+
+🔴🔴 Y AQUI EL ESPACIO NO ES SOLO POR COMODIDAD: DEFORMA LA FIGURA.
+   La capa de seguridad frena el robot al 40 % cuando algo entra en su poligono
+   de precaucion, que es de 60 cm de largo x **40 de ANCHO** -- o sea que
+   **cualquier cosa a menos de ~9 cm de un COSTADO** lo frena, aunque el robot
+   se este alejando de ella.
+
+   Un cuadrado dibujado pegado a una pared sale con **el lado paralelo a la
+   pared mas corto que los otros tres**, y sin un solo mensaje que lo explique.
+   Medido el 2026-08-08 sobre la practica 1: 26.4 cm contra 59.5 en la pasada
+   siguiente, sin tocar nada (evidencia 85).
+
+   📌 Haz el cuadrado en MEDIO del espacio, no en una esquina. Si el tuyo sale
+      torcido, esa es la primera sospecha -- antes que los giros.
 """
 from atriz import Robot
 

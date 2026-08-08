@@ -17,6 +17,25 @@ programa ni la capa de seguridad. «Despejado a ras de suelo» no basta.
 
 ⚠️ Y hacia atras la capa de seguridad NO te protege: su poligono mira hacia
    DELANTE. Detras del robot no hay nada vigilando.
+
+🔴🔴 `avanzar(0.20, 3)` NO SIGNIFICA 60 cm. SIGNIFICA «3 SEGUNDOS».
+   Si hay algo cerca, la capa de seguridad frena el robot al 40 % y recorreras
+   MUCHO MENOS, sin ningun mensaje. Medido el 2026-08-08 con esta misma
+   practica, dos pasadas seguidas sin tocar nada:
+
+       26.4 cm   <- con algo cerca
+       59.5 cm   <- despejado
+
+   El poligono de precaucion es de 60 cm de largo x **40 de ANCHO**, centrado en
+   el robot. Como el robot mide 21.7 de ancho, **cualquier cosa a menos de ~9 cm
+   de un COSTADO** lo frena: una pata de silla, un zocalo, tu propio pie.
+
+   📌 Si vas a medir con cinta -- y el ejercicio 1 te lo pide -- **despeja
+      tambien los lados**, no solo el frente. Si no, mediras la capa de
+      seguridad en vez de tu programa.
+   📝 No es un fallo: es el `collision_monitor` haciendo su trabajo. Pero
+      conviene saber que existe antes de creer que tu cuenta esta mal.
+      Evidencia 85.
 """
 from atriz import Robot
 

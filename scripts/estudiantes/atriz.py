@@ -72,16 +72,29 @@ RITMO_HZ = 10.0
 
 # 🔴 Cuánto silencio de /odom aborta un giro en lazo cerrado.
 #
-# El valor sale de una MEDIDA, no de una suposición: `/odom` va a 16.54 Hz con
-# σ 2.5 ms y su **peor hueco en 60 s son 81 ms** (2026-08-08, `medir_ritmo_ros2`).
-# 1.0 s son ~16 mensajes perdidos y **12 veces el peor hueco**.
+# El valor sale de MEDIDAS, y hay que mirar DOS regímenes — que es la corrección
+# que este comentario recibió el mismo día que se escribió:
+#
+#   régimen permanente   σ 2.0-2.5 ms · peor hueco **78-81 ms**   (n=3, 60 s cada una)
+#   recién reiniciado    σ  16-19 ms  · peor hueco **326 ms**     (20 s tras el arranque)
+#
+# 🔴 La primera versión de esta constante decía «1.0 s son 12 veces el peor
+#    hueco». **Eso era cierto SOLO en régimen permanente.** Contra el transitorio
+#    de arranque, 1.0 s dejaba 3x — exactamente el margen que este mismo bloque
+#    declaraba insuficiente tres líneas más abajo. Se midió al reiniciar el
+#    driver para desplegar otro cambio, y no se buscaba.
+#
+# ✅ **2.0 s: 6x sobre el peor transitorio medido y 25x sobre el permanente.**
+#    Y el coste de subirlo es una asimetría que juega a favor: un falso aborto
+#    deja al alumno con el robot a 5 grados y sin explicación; un aborto un
+#    segundo más tarde sobre una odometría de verdad muerta no cuesta nada.
 #
 # 🔴 La versión anterior contaba VUELTAS DEL BUCLE —5, «~0.25 s a 20 Hz»— y por
 #    eso abortaba giros con la odometría perfecta: 3× de margen sobre el jitter
 #    y una suposición sobre el ritmo del bucle que el propio fichero admitía no
 #    haber medido. Un `girar(90)` se quedaba en 5.5° **saliendo con código 0**.
 #    Evidencia 85.
-SILENCIO_ODOM_S = 1.0
+SILENCIO_ODOM_S = 2.0
 
 
 def odom_rancia(ahora, t_ultima_muestra, umbral_s=SILENCIO_ODOM_S):

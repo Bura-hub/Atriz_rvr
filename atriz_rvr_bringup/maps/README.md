@@ -6,12 +6,12 @@ Medido el 2026-08-07 (evidencias 83 y 84). Mismo cuarto, mismo robot, mismo reco
 mismos parámetros de AMCL. **Lo único distinto: el mapa.**
 
 ```
-                          mapa rancio     mapa fresco
-  error de AMCL              45,0 cm    →     8,9 cm
-  corrección map → odom       0,424 m   →     0,028 m
-  distancia real al objetivo  41,3 cm   →     6,1 cm
-  tolerancia de Nav2             10 cm           10 cm
-  lo que dijo Nav2            ✅ ÉXITO      ✅ ÉXITO     ← 🔴 LAS DOS VECES
+                          mapa rancio    tanda 1    tanda 2
+  error de AMCL              45,0 cm      8,9 cm    15,2 cm
+  corrección map → odom       0,424 m     0,028 m    0,021 m
+  distancia real al objetivo  41,3 cm      6,1 cm    11,8 cm
+  ¿dentro de los 10 cm?        🔴 NO       ✅ SÍ      🔴 NO
+  lo que dijo Nav2            ✅ ÉXITO    ✅ ÉXITO   ✅ ÉXITO   ← 🔴 LAS TRES
 ```
 
 🔴 **El síntoma es que no hay síntoma.** Nav2 declara el objetivo cumplido, `/estado_navegacion`
@@ -93,4 +93,9 @@ la que discrimina. Herramienta:
 marcha**, no una mejora.
 
 ✅ Lo que sí está verificado, sobre un mapa fresco de un cuarto de 3,80 × 4,20 m: Nav2 acepta el
-objetivo, navega, y **para a 6,1 cm de él** con una tolerancia de 10. n=1.
+objetivo, navega, y **para a 6,1 y 11,8 cm de él** en dos tandas (n=2). La tolerancia configurada
+son 10 cm, así que **una tanda cayó dentro y la otra fuera**.
+
+🔴 **La cifra honesta que hay que dar es «~10-12 cm», no la tolerancia.** Y sobre todo: **Nav2
+declaró `SUCCEEDED` en las tres tandas**, a 6,1, a 11,8 y a 41,3 cm. El desenlace del objetivo
+**no informa de la precisión**, y nada que se le prometa a un alumno puede apoyarse en él.

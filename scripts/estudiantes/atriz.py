@@ -70,6 +70,31 @@ ANTICIPACION_GRADOS = 4.0
 #    un robot que «no obedece». Hay que republicar más rápido que eso.
 RITMO_HZ = 10.0
 
+# 🔴 Cuánto silencio de /odom aborta un giro en lazo cerrado.
+#
+# El valor sale de una MEDIDA, no de una suposición: `/odom` va a 16.54 Hz con
+# σ 2.5 ms y su **peor hueco en 60 s son 81 ms** (2026-08-08, `medir_ritmo_ros2`).
+# 1.0 s son ~16 mensajes perdidos y **12 veces el peor hueco**.
+#
+# 🔴 La versión anterior contaba VUELTAS DEL BUCLE —5, «~0.25 s a 20 Hz»— y por
+#    eso abortaba giros con la odometría perfecta: 3× de margen sobre el jitter
+#    y una suposición sobre el ritmo del bucle que el propio fichero admitía no
+#    haber medido. Un `girar(90)` se quedaba en 5.5° **saliendo con código 0**.
+#    Evidencia 85.
+SILENCIO_ODOM_S = 1.0
+
+
+def odom_rancia(ahora, t_ultima_muestra, umbral_s=SILENCIO_ODOM_S):
+    """¿Lleva /odom demasiado tiempo sin una muestra NUEVA?
+
+    Pura a propósito, para poder probar el criterio sin robot: el fallo que
+    arregla era justo que el criterio no se podía comprobar en ningún sitio.
+    Se mide en **segundos de reloj**, nunca en iteraciones del bucle que la
+    llama — el bucle no sabe a qué ritmo corre.
+    """
+    return (ahora - t_ultima_muestra) > umbral_s
+
+
 # 🔴 TODAS las señales que terminan un programa y SE PUEDEN capturar. Con solo
 #    SIGINT, cerrar la terminal (SIGHUP) o perder el SSH dejaba el barrido del
 #    X2 girando a 11.8 Hz para siempre: el watchdog de 0.3 s del driver para los
@@ -752,10 +777,41 @@ class Robot:
         # margen. Sin el, un robot atascado gira para siempre.
         limite = time.monotonic() + abs(objetivo) / 0.20 + 5.0
 
-        # Detectar si /odom se queda congelado: contar iteraciones sin cambio de timestamp
+        # ── VIGILANTE DE /odom ───────────────────────────────────────────────
+        # Detectar si /odom se queda congelado, POR TIEMPO DE RELOJ.
+        #
+        # 🔴 ANTES ESTO CONTABA VUELTAS DEL BUCLE: `MAX_SIN_CAMBIO = 5` con el
+        #    comentario «~0.25 s a 20 Hz». Falla de tres maneras, y una sola ya
+        #    basta (medido el 2026-08-08 sobre el robot, evidencia 85):
+        #
+        #    1. MIDE EN LA UNIDAD EQUIVOCADA. Cuenta iteraciones y SUPONE que el
+        #       bucle va a 20 Hz. Si el proceso se queda sin CPU un cuarto de
+        #       segundo -- o si el bucle gira mas rapido de lo previsto --
+        #       dispara con la odometria perfecta. El propio fichero admitia
+        #       «Nada de esto esta medido sobre el robot».
+        #    2. EL MARGEN ERA DE 3x, NO DE 10. El peor hueco real de /odom en
+        #       60 s son 81 ms (16.54 Hz, sigma 2.5 ms) y el umbral estaba en
+        #       250. Cualquier hipo del planificador lo cruza.
+        #    3. Y AL DISPARAR, MENTIA SOBRE LA CAUSA: decia «Odometría perdida o
+        #       desconectada» con /odom a 16.54 Hz. Mandaba a buscar una averia
+        #       que no existe -- misma familia que «Failed to get scan» con el
+        #       barrido apagado a proposito.
+        #
+        #    🔴 El efecto para el alumno era el peor posible: `girar(90)` acababa
+        #       en 5.5 grados, imprimia «Giro 5.5 grados de verdad» y **salia con
+        #       codigo 0**. No fallaba: mentia bajito. Reproducido 1 de 4 veces.
+        #
+        # ✅ Ahora se mide lo que se quiere medir -- cuanto hace que llego una
+        #    muestra NUEVA -- con 1.0 s de umbral: unos 16 mensajes perdidos, 12
+        #    veces el peor hueco medido. Es el mismo criterio que
+        #    `_vigilar_silencio` del driver, que lleva desde julio sin un falso
+        #    positivo.
+        #
+        # ⚠️ Y sigue haciendo falta: el RVR se duerme solo a los 300.6 s, y sin
+        #    este guardia un giro en lazo cerrado se quedaria esperando para
+        #    siempre una muestra que no llega.
         ultimo_timestamp = None
-        sin_cambio = 0
-        MAX_SIN_CAMBIO = 5  # ~0.25 s a 20 Hz
+        t_ultima_muestra = time.monotonic()
 
         # Se apunta ANTES del objetivo: el robot recorre los ultimos grados
         # por inercia, despues de que dejemos de mandar. Ver ANTICIPACION_GRADOS.
@@ -816,16 +872,22 @@ class Robot:
 
             # Comprobar si la muestra de /odom cambio
             timestamp_actual = self._odom.header.stamp
-            if timestamp_actual == ultimo_timestamp:
-                sin_cambio += 1
-                if sin_cambio >= MAX_SIN_CAMBIO:
-                    print(f'AVISO: /odom no se actualiza hace ~{MAX_SIN_CAMBIO * 0.05:.2f} s. '
-                          f'Odometría perdida o desconectada.')
-                    self.parar()
-                    return math.degrees(acumulado)
-            else:
-                sin_cambio = 0
+            if timestamp_actual != ultimo_timestamp:
                 ultimo_timestamp = timestamp_actual
+                t_ultima_muestra = time.monotonic()
+            elif odom_rancia(time.monotonic(), t_ultima_muestra):
+                # 🔴 Se dice QUE SE ABORTO EL GIRO y cuanto llevaba parado el
+                #    topic. No se afirma que la odometria este «perdida o
+                #    desconectada»: eso es un diagnostico, y este bucle no tiene
+                #    con que hacerlo. Un RVR dormido, un driver caido y una Pi
+                #    saturada dan los tres el mismo silencio.
+                print(f'AVISO: giro ABORTADO en {math.degrees(acumulado):.1f} de '
+                      f'{grados:g} grados: /odom lleva {SILENCIO_ODOM_S:.1f} s sin '
+                      f'una muestra nueva.\n'
+                      f'       Mira el RITMO de /odom, no si el topic existe:\n'
+                      f'         ros2 topic hz /odom      (deberia dar ~16.5)')
+                self.parar()
+                return math.degrees(acumulado)
 
             actual = yaw_de_cuaternion(q.x, q.y, q.z, q.w)
             acumulado = acumular(anterior, actual, acumulado)

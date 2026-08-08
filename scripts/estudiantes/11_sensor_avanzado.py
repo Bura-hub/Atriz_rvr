@@ -20,11 +20,21 @@ from atriz import Robot
 # para nada. UMBRAL_NEGRO=400 se queda muy por debajo del suelo (1275) y bien
 # por encima del negro (181): esa es la separacion que hace falta.
 #
+# 🔴 ⚠️ Y «el suelo da 1275» ES UNA FOTO DE UN SUELO, NO UNA CONSTANTE. Medido
+#    el 2026-08-08 en otra habitacion con el mismo robot: el suelo dio **~950**,
+#    no 1275. El margen contra el umbral pasa de 3.2x a 2.4x -- sigue sobrando,
+#    pero depende de la luz de la sala y del suelo concreto. Si tu robot no
+#    encuentra el negro, mide TU suelo con la practica 5 antes de tocar el
+#    umbral. Evidencia 85.
+#
 # ⚠️ El azul mide clear=396 (evidencia 37) — 4 unidades por DEBAJO de este
 #    umbral. Si pruebas con cinta azul en vez de negra, el robot la clasifica
 #    como negro igual: no es un fallo del programa, es que 400 separa negro de
 #    SUELO, no negro de cualquier otro color. No se sube el umbral sin una
 #    medida nueva: la practica pide cinta negra a proposito.
+#    📌 Y esto NO es teorico: el 2026-08-08 se probo con una cartera oscura en
+#       vez de cinta y dio **clear=396 exactos** -- detecto por CUATRO cuentas.
+#       El aviso de arriba describia el caso limite y el caso limite aparecio.
 UMBRAL_NEGRO = 400
 
 # Lo que avanza cada tramo. Estas dos son las que toca el ejercicio 2.

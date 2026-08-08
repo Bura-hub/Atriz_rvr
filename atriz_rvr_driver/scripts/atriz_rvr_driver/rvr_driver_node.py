@@ -2394,10 +2394,26 @@ class RvrDriverNode(Node):
            esta misma llamada es lo que hacía la primera versión, y devolvía
            oscuridad con `success=True`.
 
-        ⚠️ Si el sensor está apagado —lo está al arrancar— esto devuelve valores
-           de oscuridad (~1, 0, 1, 1 medidos) y lo dice en `message`. Para que dé
+        ⚠️ Si la luz está apagada —lo está al arrancar— y la superficie REFLEJA,
+           esto devuelve valores de oscuridad (~1, 0, 1, 1 medidos). Para que dé
            algo, `enable_color(true)` en caliente o `color_detection:=true` al
            arrancar.
+
+        🔴 PERO CON LA LUZ APAGADA **SÍ SE LEE EL SENSOR**, y eso es una FUNCIÓN,
+           no un estado degradado. Esta llamada consulta al RVR pase lo que pase:
+           lo único que cambia con la luz es `message`. Sobre una superficie que
+           EMITE luz —una pantalla, una baldosa LED— la luz apagada es el modo
+           CORRECTO, y el encendido da lo contrario de lo que hay. Medido el
+           2026-08-08 sobre una pantalla de móvil (evidencia 86):
+
+               pantalla ROJA, luz ON   ->  R/G = 0.66   <- menos rojo que verde
+               pantalla ROJA, luz OFF  ->  R/G = 5.12   <- inconfundible
+
+        🔴 Y ESTA ES LA ÚNICA VÍA PARA ESE MODO: el topic `/color` publica
+           **ceros** con la luz apagada (medido: 39 mensajes, 0 no-cero), porque
+           sale del STREAMING del RVR y el streaming se apaga con la detección.
+           Este servicio CONSULTA, así que sigue dando datos. Contrato completo
+           en `03_operacion/SENSOR_COLOR.md`.
         """
         # 🔴 Esto cuenta como ACTIVIDAD, y de ello depende que el apagado
         #    automático no le corte la práctica a un alumno: `atriz.py` lee el
@@ -2412,9 +2428,16 @@ class RvrDriverNode(Node):
         resp.blue_channel_value = int(datos.get('blue_channel_value', 0))
         resp.clear_channel_value = int(datos.get('clear_channel_value', 0))
         resp.success = True
+        # 🔴 El mensaje AFIRMABA «estos valores son oscuridad», y eso es FALSO
+        #    cuando la superficie emite luz propia -- que es un modo legítimo y
+        #    medido (evidencia 86). Un aviso que asegura de más sobre lo que no
+        #    puede saber es peor que no avisar: aquí el driver no tiene forma de
+        #    distinguir «negro» de «pantalla apagada» de «no hay nada debajo».
         resp.message = ('' if self._color_detection else
-                        'el sensor de color está APAGADO: estos valores son '
-                        'oscuridad. Enciéndelo con enable_color(true)')
+                        'la luz del sensor está APAGADA. Si la superficie '
+                        'REFLEJA (suelo, cinta), esto es oscuridad: enciéndela '
+                        'con enable_color(true). Si EMITE luz (pantalla, '
+                        'baldosa LED), apagada es lo correcto.')
         return resp
 
     def _srv_encoders(self, _req, resp):

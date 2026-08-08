@@ -567,7 +567,23 @@ class Robot:
         self._ultimo('_scan', timeout=8.0, que='/scan')
 
     def sensor_color(self, encender=True):
-        """Enciende o apaga LA LUZ del sensor de color. Sin luz no hay lectura.
+        """Enciende o apaga LA LUZ del sensor de color.
+
+        🔴 SIN LUZ NO HAY LECTURA **DE UNA SUPERFICIE QUE REFLEJA** -- el suelo,
+           una cinta, un papel. Ahi la diferencia es de 185x y hay que
+           encenderla.
+
+        🔴 PERO SI LA SUPERFICIE EMITE LUZ PROPIA (una pantalla, una baldosa
+           LED) HAY QUE DEJARLA APAGADA. Medido el 2026-08-08 sobre una pantalla
+           de movil a brillo maximo, sin mover el robot (evidencia 86):
+
+               pantalla ROJA, LED del sensor ON   ->  R/G = 0.66   <- MENOS rojo
+                                                                     que verde
+               pantalla ROJA, LED del sensor OFF  ->  R/G = 5.12   <- inconfundible
+
+           Sobre vidrio el reflejo es especular y BLANCO, y aporta el 88 % de lo
+           que se mide: tapa el color de debajo. Apagada, los tres primarios se
+           separan por un factor 25-30.
 
         Es la «sesion de medicion»: se enciende, se mide lo que haga falta, y se
         apaga. `cerrar()` la apaga sola si la encendiste tu.
@@ -613,8 +629,15 @@ class Robot:
                   'color() puede devolver ceros.')
             return False
         if not activo:
+            # 🔴 «Apagada» NO es «mal». Sobre una superficie que EMITE luz
+            #    --una pantalla, una baldosa LED-- apagarla es lo CORRECTO, y
+            #    encenderla da lo contrario de lo que hay (evidencia 86). Por eso
+            #    esto informa en vez de regañar.
             print('AVISO: la luz del sensor de color esta apagada.\n'
-                  '       Enciendela antes de medir:  robot.sensor_color(True)')
+                  '       Para medir una superficie que REFLEJA (suelo, cinta):\n'
+                  '         robot.sensor_color(True)\n'
+                  '       Para una que EMITE luz (pantalla, baldosa LED), dejala\n'
+                  '       APAGADA: encendida taparia el color con su reflejo.')
         return activo
 
     # ── Fontaneria ──────────────────────────────────────────────────────────

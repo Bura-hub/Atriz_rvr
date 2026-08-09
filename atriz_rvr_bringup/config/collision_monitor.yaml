@@ -42,6 +42,14 @@
 #      media anchura   0.11
 #      radio circunscrito 0.142
 #
+# ✅ AFINADAS el 2026-08-09, midiendo DESDE EL EJE DEL LIDAR en los cuatro
+#    sentidos: 9.0 delante · 9.0 detrás · 10.8 a cada costado. O sea el LIDAR
+#    está CENTRADO y el robot mide 18 x 21.6 cm.
+#      radio circunscrito real = sqrt(0.090^2 + 0.108^2) = 0.1406
+#    🔎 Validado con un segundo instrumento: con el robot separado 3 cm de la
+#       pared el LIDAR leyó 12.20 cm donde la cinta predecía 12.00 (n=8268 rayos,
+#       perfil plano en +-20 grados). 2 mm de error.
+#
 # 🔴 Antes de esa medida el URDF decía 0.218 x 0.185 (ficha publicada, y CRUZADO:
 #    modelaba un robot más largo que ancho siendo al revés). Todos los huecos
 #    medidos el 2026-07-31 se calcularon con media longitud 0.109 y por tanto
@@ -66,9 +74,23 @@
 #      sino la asíntota del controlador. Medido con el monitor en el lazo en
 #      `17_collision_monitor.txt`.
 #
-#   📝 El X2 tiene `range_min: 0.1` y va montado en el centro (`laser_x: 0.0`), así
-#      que su punto ciego de 10 cm cae DENTRO del chasis (media longitud 0.109 m).
-#      No hay zona muerta alrededor del robot que ningún polígono pueda cubrir.
+#   🔴 EL PUNTO CIEGO SOBRESALE DEL CHASIS POR DELANTE Y POR DETRAS. Esto decía
+#      que no, calculado con la media longitud CRUZADA del URDF (0.109):
+#
+#        «su punto ciego de 10 cm cae DENTRO del chasis (media longitud 0.109 m).
+#          No hay zona muerta alrededor del robot.»
+#
+#      Con la media longitud REAL de 0.090 el X2 (`range_min: 0.1`, `laser_x: 0.0`)
+#      no ve **el primer centímetro por delante ni por detrás** del chasis. A los
+#      costados sí queda dentro (media anchura 0.108 > 0.10).
+#
+#        delante/detrás   0.100 - 0.090 = 1.0 cm CIEGOS fuera del robot
+#        costados         0.100 - 0.108 = dentro del chasis, sin zona muerta
+#
+#      ⚠️ Ningún polígono puede cubrir ese centímetro: no es cuestión de ajustar
+#         `radius`, es que el sensor no da el dato. Medido el 2026-08-09: con el
+#         robot TOCANDO la pared, los 10 277 rayos traseros se descartaron por
+#         debajo de `range_min` y sólo sobrevivió uno oblicuo, recortado en 10.02.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 collision_monitor:
@@ -173,7 +195,12 @@ collision_monitor:
       # ✅ Y GIRANDO NO ROZARÍA NADA. Con el monitor puenteado y el usuario
       #    mirando: **359,6° y 358,8° de 360**, en 12,6 s —los mismos que en campo
       #    abierto— y su veredicto: «no ha tocado la pared en ningún momento».
-      #    El radio circunscrito del robot es ~14,2 cm contra un círculo de 18:
+      #    El radio circunscrito del robot es 14,06 cm contra un círculo de 18:
+      #    (18 x 21,6 cm MEDIDOS CON CINTA el 2026-08-09: el eje del LIDAR está a
+      #     9,0 cm de frente y atrás y a 10,8 de cada costado, o sea CENTRADO.
+      #     Validado contra el propio LIDAR con 2 mm de error. Los 21,8 x 18,5 del
+      #     URDF son las mismas magnitudes CRUZADAS DE EJE: el RVR es más ancho
+      #     que largo, y el fichero 19 ya lo avisaba.)
       #    **el monitor es más gordo que el robot**, así que hay una franja de
       #    14,2 a 18 cm donde inmoviliza a un robot que puede moverse sin rozar.
       #

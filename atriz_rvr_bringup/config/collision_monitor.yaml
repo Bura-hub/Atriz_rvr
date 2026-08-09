@@ -154,6 +154,42 @@ collision_monitor:
       #    17 cm y el círculo mide 18. Sí pudo salir marcha atrás.
       #      pasillo mínimo ≈ 2 × radius  ->  0.18 exige 36 cm + margen
       #    Detalle en `19_paso_estrecho.txt`.
+      #
+      # 🔴🔴 Y EL 2026-08-09 SE MIDIÓ QUE ES PEOR: NO SIEMPRE PUEDE SALIR.
+      #    Con la pared **DETRÁS** a 16,8 cm y 188 cm libres delante, mandando por
+      #    `/cmd_vel_raw` (el camino normal):
+      #
+      #        AVANZAR alejándose de la pared  ->  0.0 cm   monitor: APROXIMACION
+      #        GIRAR en el sitio               ->  0.0 °
+      #        RETROCEDER hacia la pared       ->  0.0 cm
+      #
+      #    **INMOVILIZACIÓN TOTAL: ni siquiera puede ALEJARSE.** `approach` escala
+      #    el mando ENTERO —lineal y angular— por el tiempo hasta colisión, y con
+      #    un punto ya DENTRO del círculo ese factor es 0, **sin mirar si el
+      #    movimiento acerca o aleja**. Sólo sale a mano.
+      #    (En el fichero 19 el obstáculo estaba AL LADO y sí pudo retroceder. Por
+      #     qué una geometría deja salir y la otra no: ⏳ NO VERIFICADO.)
+      #
+      # ✅ Y GIRANDO NO ROZARÍA NADA. Con el monitor puenteado y el usuario
+      #    mirando: **359,6° y 358,8° de 360**, en 12,6 s —los mismos que en campo
+      #    abierto— y su veredicto: «no ha tocado la pared en ningún momento».
+      #    El radio circunscrito del robot es ~14,2 cm contra un círculo de 18:
+      #    **el monitor es más gordo que el robot**, así que hay una franja de
+      #    14,2 a 18 cm donde inmoviliza a un robot que puede moverse sin rozar.
+      #
+      # ✅ Causa aislada con UNA variable: bajando `radius` a 0.12 en caliente, las
+      #    tres órdenes funcionan y el monitor **FRENA al 40 %** en vez de
+      #    congelar (18,0 y 8,8 cm medidos = exactamente el `slowdown_ratio`).
+      #
+      # ⏳ NO SE BAJA, y por eso sigue en 0.18: este número fija DOS cosas en
+      #    sentidos opuestos —el hueco al parar y el pasillo mínimo— y el 0.18 está
+      #    respaldado por «para a 20,8 cm sin chocar» de la prueba de aceptación.
+      #    Bajarlo EXIGE repetir esa medida. 👤 Decisión del usuario.
+      #    Detalle en `93_el_robot_atrapado_por_su_propia_seguridad.txt`.
+      #
+      # 🔴 REGLA DE OPERACIÓN MIENTRAS TANTO, y vale para los 16 robots:
+      #    **no dejes un robot con nada a menos de 20 cm.** Si se queda mudo y no
+      #    obedece, mira `/collision_monitor_state` antes de pensar que se colgó.
       radius: 0.18
       action_type: "approach"
       # 1.0 s cubre con holgura los ~0.38 s reales (0.15 latencia + 0.23 frenada).

@@ -48,7 +48,32 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # 🔴🔴 EL PLAZO DEL ACUSE, Y ERA LA CAUSA DE TODOS LOS «ABORTADO».
+    #    Con el valor por defecto de Nav2 —20 ms— este robot aborta objetivos
+    #    QUE SE COMPLETAN. Medido el 2026-08-08:
+    #
+    #      22:18:57  Received a goal, begin computing control effort   <- el controlador SI lo recibio
+    #      22:18:57  Timed out while waiting for action server to acknowledge
+    #                goal request for follow_path
+    #      22:18:57  [navigate_to_pose] Aborting handle · Goal failed
+    #      22:19:07  Reached the goal!                                  <- DIEZ SEGUNDOS DESPUES
+    #
+    #    O sea: bt_navigator se rinde esperando el acuse mientras
+    #    controller_server esta conduciendo, y el robot LLEGA con la accion
+    #    marcada como ABORTADO. Explica las tres tandas del 2026-08-07 y 08 que
+    #    se dieron por fallidas: el robot habia navegado bien las tres.
+    #
+    # 📌 EL VALOR SALE DE UNA MEDIDA, no del catalogo. En esta Pi, con Nav2, el
+    #    driver y el LIDAR, un proceso se queda sin CPU hasta **326 ms** (medido
+    #    el 2026-08-08 al reiniciar el driver; en regimen permanente ~105 ms).
+    #    20 ms esta MUY POR DEBAJO del ruido de planificacion de esta maquina.
+    #    1000 ms deja 3x sobre el peor paron medido.
+    #
+    # ⚠️ Lo que cuesta subirlo: si un servidor de accion esta de verdad muerto,
+    #    el arbol tarda 1 s en enterarse en vez de 20 ms. Para la navegacion de
+    #    un alumno eso no se nota; abortar un objetivo que se estaba cumpliendo,
+    #    si.
+    default_server_timeout: 1000
     # Sin `default_nav_to_pose_bt_xml`: se usa el árbol por defecto de Nav2, que
     # es el correcto para empezar. Personalizarlo antes de tener el robot
     # navegando sería optimizar a ciegas.

@@ -42,13 +42,21 @@
 #      media anchura   0.11
 #      radio circunscrito 0.142
 #
-# ✅ AFINADAS el 2026-08-09, midiendo DESDE EL EJE DEL LIDAR en los cuatro
-#    sentidos: 9.0 delante · 9.0 detrás · 10.8 a cada costado. O sea el LIDAR
-#    está CENTRADO y el robot mide 18 x 21.6 cm.
-#      radio circunscrito real = sqrt(0.090^2 + 0.108^2) = 0.1406
-#    🔎 Validado con un segundo instrumento: con el robot separado 3 cm de la
-#       pared el LIDAR leyó 12.20 cm donde la cinta predecía 12.00 (n=8268 rayos,
-#       perfil plano en +-20 grados). 2 mm de error.
+# ✅ AFINADAS el 2026-08-09, midiendo DESDE EL EJE DEL LIDAR: **9.0 cm al borde
+#    TRASERO y 10.8 a cada costado** -> radio circunscrito sqrt(0.090^2 +
+#    0.108^2) = **0.1406**.
+#    🔎 El trasero está VALIDADO CON DOS INSTRUMENTOS: separando el robot 3 cm de
+#       la pared el LIDAR leyó 12.20 cm donde la cinta predecía 12.00 (n=8268
+#       rayos, perfil plano en +-20 grados). **2 mm de error.**
+#
+#    ⏳ EL BORDE DELANTERO ESTA EN CONFLICTO Y NO SE RESUELVE POR DECRETO:
+#         cinta 2026-08-09         ->  9.0 cm
+#         URDF  2026-08-02         -> 10.0 cm  (base_length 0.190, laser_x -0.005)
+#       Las dos son medidas, en fechas distintas, y sólo el trasero tiene desempate
+#       instrumental. Se cierra repitiendo la misma prueba con el robot mirando a
+#       la pared: si el LIDAR da ~12.0 gana la cinta, si da ~13.0 gana el URDF.
+#       **NO VERIFICADO.** No se toca el URDF mientras tanto: cambiar un valor
+#       medido por otro medido sin desempate es como se metió el cruce de ejes.
 #
 # 🔴 Antes de esa medida el URDF decía 0.218 x 0.185 (ficha publicada, y CRUZADO:
 #    modelaba un robot más largo que ancho siendo al revés). Todos los huecos

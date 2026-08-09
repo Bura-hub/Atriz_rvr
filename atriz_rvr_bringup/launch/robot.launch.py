@@ -411,10 +411,37 @@ def generate_launch_description() -> LaunchDescription:
     #    rosbridge si lo arranca; este no lo hacia.
     #    Se levanta con las mismas listas para que la introspeccion no revele lo
     #    que la lista blanca esconde.
+    #    🔴🔴 Y SE LEVANTA CON `respawn`, PORQUE SE MUERE SOLO. Medido el
+    #    2026-08-08 (evidencia 87): **UNA sola llamada a `/rosapi/get_param`
+    #    pidiendo un parametro de un nodo QUE NO EXISTE mata el proceso ~30 s
+    #    despues**, en un temporizador de limpieza suyo:
+    #
+    #      rosapi/params.py:174
+    #        (now - cached_client.last_used_time).nanoseconds
+    #      TypeError: Can't subtract times with different clock types
+    #
+    #    Con control: la misma llamada a un nodo QUE SI existe lo deja vivo 80 s.
+    #
+    #    🔴 Y le pasa a la web CONSTANTEMENTE, no como caso raro: `amcl`,
+    #    `slam_toolbox` y los nodos de Nav2 **solo existen cuando la navegacion
+    #    esta arrancada**. Una pantalla que lea un parametro de Nav2 con la
+    #    navegacion parada mata rosapi PARA TODOS los conectados a ese robot.
+    #
+    #    ⚠️ Y el modo de fallo es el de siempre en este proyecto: `systemctl`
+    #    sigue en VERDE, rosbridge sigue vivo y contestando, y lo unico que se
+    #    pierde es `/rosapi/*` -- que es lo que roslibjs usa AL CONECTAR. Los
+    #    clientes ya conectados parecen sanos; los nuevos no arrancan.
+    #
+    #    📌 `respawn` y NO `on_exit=Shutdown()`, al reves que el driver y el
+    #    collision_monitor. Alli tirar el launch entero esta justificado: sin
+    #    driver no hay robot y sin monitor no hay seguridad. Aqui perder rosapi
+    #    es que la web no puede enumerar -- reiniciar el robot entero por eso le
+    #    costaria la sesion a un alumno. Se reinicia SOLO el nodo que muere.
     introspeccion = Node(
         package='rosapi', executable='rosapi_node',
         name='rosapi', namespace=ns, output='screen',
         condition=IfCondition(LaunchConfiguration('rosbridge')),
+        respawn=True, respawn_delay=2.0,
         parameters=[{
             'topics_glob': _glob(LEER + ESCRIBIR),
             'services_glob': _glob(SERVICIOS),

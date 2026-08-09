@@ -82,3 +82,21 @@ bool hay_mapa
 #    son indistinguibles desde la web: los dos son un botón que no hace nada.
 bool slam_latcheado
 bool nav_latcheado
+
+# ── EL MAPA: cuál es y de cuándo ─────────────────────────────────────────────
+# 🔴 POR QUE NO BASTA `hay_mapa`. Medido el 2026-08-07 (evidencias 83 y 84): un
+#    mapa que NO es del sitio hace que Nav2 declare el objetivo cumplido estando
+#    a **41,3 cm**, con SUCCEEDED, `/estado_navegacion` en FUNCIONANDO y sin una
+#    linea de error en ningun log. **No hay ningun otro sintoma.**
+#
+#    Remapeado el mismo cuarto, el mismo recorrido dio 6,1 y 11,8 cm.
+#
+# 📌 Asi que la unica defensa contra ese fallo es que una persona mire la fecha
+#    del mapa -- y quien tiene delante a la persona es la WEB, que hasta ahora
+#    solo recibia un booleano. Estos dos campos existen para que pueda avisar.
+#
+# ⚠️ `mapa_edad_s` es la antiguedad del fichero (su mtime), no "cuando se mapeo
+#    ese espacio". Copiar un mapa viejo lo rejuvenece. Es lo mejor que el robot
+#    puede saber sin que alguien se lo diga.
+string mapa_nombre        # nombre del fichero, p.ej. "cuarto3.yaml". "" si no hay
+float32 mapa_edad_s       # segundos desde su mtime. -1.0 si no hay mapa

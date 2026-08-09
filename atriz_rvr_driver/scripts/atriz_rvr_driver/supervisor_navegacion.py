@@ -196,6 +196,30 @@ class Supervisor(Node):
         except Exception:                                        # noqa: BLE001
             return False
 
+    def _mapa_identidad(self):
+        """Qué mapa es y cuánto hace que se hizo. Para que la WEB pueda avisar.
+
+        🔴 Un mapa que no es del sitio hace que Nav2 diga «llegué» a 41 cm, sin
+           ningún otro síntoma (evidencias 83 y 84). El booleano `hay_mapa` no
+           basta: la única defensa es que una persona mire la fecha, y quien
+           tiene delante a la persona es la web.
+
+        ⚠️ Es el `mtime` del fichero, NO «cuándo se mapeó ese espacio». Copiar un
+           mapa viejo lo rejuvenece. Es lo mejor que el robot puede saber solo, y
+           por eso el nombre va al lado: entre los dos, una persona decide.
+
+        📌 Nunca lanza. Este método corre dentro del bucle de publicación a 1 Hz,
+           y una excepción aquí dejaría a la web sin `/estado_navegacion` entero
+           —que es el canal por el que se entera de TODO lo demás— por no poder
+           leer una fecha.
+        """
+        try:
+            nombre = os.path.basename(self._mapa)
+            edad = time.time() - os.path.getmtime(self._mapa)
+            return nombre, float(max(edad, 0.0))
+        except Exception:                                          # noqa: BLE001
+            return '', -1.0
+
     def _hay_mapa(self) -> bool:
         """El mapa Y su imagen.
 
@@ -393,6 +417,7 @@ class Supervisor(Node):
             m.header.frame_id = 'base_link'
             m.latido = int(self._latido)
             m.hay_mapa = self._hay_mapa()
+            m.mapa_nombre, m.mapa_edad_s = self._mapa_identidad()
             self._evaluar('slam', self._u_slam, m)
             self._evaluar('nav', self._u_nav, m)
             self._pub.publish(m)

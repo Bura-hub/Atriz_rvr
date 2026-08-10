@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [2026-08-09] — `Aproximacion.radius` del collision_monitor: 0.18 → 0.15
+
+### Changed
+- **`collision_monitor.yaml`: `Aproximacion.radius` baja de `0.18` a `0.15`.** El círculo
+  **inmoviliza por completo** al robot —no gira, no avanza y ni siquiera puede alejarse— cuando hay
+  algo dentro. La banda en la que eso ocurre sin que el robot toque nada pasa de **3,6 a 0,6 cm**.
+  - `banda de inmovilización` = `margen ante el error del LIDAR` = `radius − 0.1442`. **Son el mismo
+    número**, así que no se puede encoger uno sin el otro. Por eso NO se baja a 0.145: dejaría
+    0,1 cm contra un ruido de LIDAR medido de ±0,3.
+  - Hueco al parar **medido** con los dos valores: `0.18` → 9,3-9,4 cm a 0,25 m/s y 10,9 a 0,40;
+    `0.15` → 6,3 a 0,25 y **7,4 / 6,6 a 0,40** (velocidad máxima).
+  - Control decisivo a la misma distancia: pared a 15,8 cm de `base_footprint`, con `0.18`
+    congelado y con `0.15` girando 34,9°.
+  - **No arregla**: los 0,6 cm de banda que quedan, el centímetro ciego de `range_min`, ni que
+    `approach` no distinga acercarse de alejarse.
+- **`nav2_atriz.yaml`**: comentarios que citaban el 0.18.
+- **`scripts/estudiantes/atriz.py`**: el aviso al alumno pasa de «algo a menos de 18 cm» a 15, y de
+  «mira si tiene algo a menos de 20 cm» a 17.
+
+### Fixed
+- **`collision_monitor.yaml` afirmaba que el punto ciego del LIDAR cae dentro del chasis y que «no
+  hay zona muerta».** Estaba calculado con la media longitud **cruzada** del URDF (0.109). Con la
+  real (0.095) el punto ciego de `range_min` **sobresale ~1 cm por delante y por detrás**, y ningún
+  polígono puede cubrirlo.
+- **Cotas del robot cerradas con un tercer instrumento.** Con el robot tocando la pared, el LIDAR da
+  **9.00 cm** al borde trasero y **10.03** al delantero: exactamente `base_length 0.190` con
+  `laser_x −0.005`. El URDF acierta; la cinta que daba 0.182 medía al chasis.
+
+### Notes
+- 🔴 **`Aproximacion.radius` NO se puede cambiar en caliente**: `ros2 param set` lo guarda y `get` lo
+  devuelve, pero el nodo no reconstruye el polígono — con 0.18, 0.15 y **0.30** el perfil sale
+  idéntico. Hay que editar el YAML y reiniciar `atriz-robot`.
+- `verificar_robot.sh` da **FALLO** si encuentra `0.18` en un robot: significa que no le llegó este
+  fichero. Y la banda de la fase F6 de la aceptación se reajustó a `[14.0, 19.0]`, cuyo techo
+  detecta exactamente ese caso.
+- Evidencias 93, 94 y 95 en `Atriz_migracion_ros2`.
+
 ## [rama `ros2`] - 2026-07-31
 
 > 🔴 Las entradas de más abajo son del sistema **ROS 1 / Noetic** y describen otro software.

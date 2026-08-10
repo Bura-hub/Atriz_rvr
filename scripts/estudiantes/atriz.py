@@ -47,19 +47,20 @@ from std_srvs.srv import Empty as EmptySrv, SetBool
 #    agujero más silencioso del sistema, y los diez scripts de ROS 1 lo hacían.
 #
 # 🔴🔴 Y LA CARA B, MEDIDA EL 2026-08-09: pasar por el monitor significa que
-#    **con algo a menos de 18 cm el robot NO SE MUEVE. Nada.** Ni avanzar
+#    **con algo a menos de 15 cm el robot NO SE MUEVE. Nada.** Ni avanzar
 #    alejandose, ni retroceder, ni girar sobre su eje:
 #
 #        pared DETRAS a 16,8 cm, 188 cm libres delante
 #          avanzar alejandose -> 0.0 cm   ·   girar -> 0.0 grados
 #
 #    `approach` escala el mando ENTERO por el tiempo hasta colision, y con un
-#    punto ya DENTRO de su circulo (radius 0.18) el factor es 0, sin mirar si el
+#    punto ya DENTRO de su circulo (radius 0.15 desde el 2026-08-09; antes 0.18)
+#    el factor es 0, sin mirar si el
 #    movimiento acerca o aleja. El robot solo sale a mano.
 #
 #    ⚠️ Para el alumno esto se ve como **un robot colgado**: `girar(360)` tarda
 #       40 s —el plazo interno— y devuelve -0.1 grados, sin ningun mensaje.
-#       SI EL ROBOT NO OBEDECE, MIRA SI TIENE ALGO A MENOS DE 20 cm antes de
+#       SI EL ROBOT NO OBEDECE, MIRA SI TIENE ALGO A MENOS DE 17 cm antes de
 #       pensar que se ha roto:  ros2 topic echo /collision_monitor_state
 #
 #    ✅ Y girando NO rozaria: con el monitor puenteado dio 359,6 y 358,8 de 360,

@@ -162,9 +162,10 @@ collision_monitor:
       # `/local_costmap/published_footprint`, que solo existe si Nav2 corre — y
       # aquí el monitor tiene que funcionar también en teleoperación pura.
       type: "circle"
-      # 🔴 0.18, y NO tiene nada que ver con el `robot_radius: 0.145` de los
-      # costmaps —que es el circunscrito medido, otra cosa. Es el parámetro que
-      # fija la HOLGURA con la que para, y la primera vez lo puse mal:
+      # 🔴 0.15 DESDE EL 2026-08-09. Antes 0.18, y el cambio está medido de punta
+      # a punta — ver el bloque «POR QUÉ 0.15» al final de este comentario.
+      # Es el parámetro que fija la HOLGURA con la que para, y la primera vez se
+      # puso mal:
       #
       #   `approach` NO es una parada de seguridad, es un frenado suave. Nav2
       #   escala la velocidad para que el choque caiga justo en
@@ -176,21 +177,30 @@ collision_monitor:
       #   Funcionó exactamente como está escrito; lo que estaba mal era esperar
       #   que dejara hueco.
       #
-      #   La holgura sale de inflar el círculo:  hueco ≈ radius − 0.09
-      #   0.18 − 0.09 = 9 cm de asíntota; medido 9.9 cm a 0.25 m/s y 10.9 a 0.40.
-      #   Verificado en `17_collision_monitor.txt`.
+      #   La holgura sale de inflar el círculo:  hueco ≈ radius − 0.095
+      #   ✅ MEDIDO EL 2026-08-09 CON LOS DOS VALORES, contra una pared:
       #
-      # 📝 La holgura DEPENDE DE LA DIRECCIÓN, porque el robot no es un círculo:
-      #      de frente  0.18 − 0.09  = 9.0 cm   <- lo que se mide contra una pared
-      #      de costado 0.18 − 0.11  = 7.0 cm
-      #      en esquina 0.18 − 0.142 = 3.8 cm   <- el caso peor
+      #        radius   a 0.25 m/s          a 0.40 m/s (máxima)
+      #         0.18    9.3 9.4 9.3 9.4     10.9  (fichero 17)
+      #         0.15    6.3 6.3             7.4 6.6
+      #
+      #      y el perfil del recorte es lineal en la distancia al círculo:
+      #        0.18 -> mando ~ 0.0125 x (d_LIDAR - 18 cm)   cero en 18
+      #        0.15 -> mando ~ 0.0125 x (d_LIDAR - 15 cm)   cero en 15
+      #
+      # 📝 La holgura DEPENDE DE LA DIRECCIÓN, porque el robot no es un círculo.
+      #    Con 0.15 y las cotas reales (media longitud 0.095, anchura 0.1085,
+      #    circunscrito 0.1442):
+      #      de frente  0.15 − 0.095 = 5.5 cm   <- lo que se mide contra una pared
+      #      de costado 0.15 − 0.1085 = 4.2 cm
+      #      en esquina 0.15 − 0.1442 = 0.6 cm  <- el caso peor
       #
       # ⚠️ Inflar esto es hacer el robot más gordo a efectos de seguridad, y el
       #    coste está MEDIDO, no estimado: con 0.18 el robot **NO cruza un paso de
       #    40 cm**. El 2026-07-31 entró en la boca de uno, con el camino despejado
       #    delante y sin tocar nada, y se quedó bloqueado — el borde estaba a
       #    17 cm y el círculo mide 18. Sí pudo salir marcha atrás.
-      #      pasillo mínimo ≈ 2 × radius  ->  0.18 exige 36 cm + margen
+      #      pasillo mínimo ≈ 2 × radius  ->  0.18 exigía 36 cm; 0.15 exige 30.
       #    Detalle en `19_paso_estrecho.txt`.
       #
       # 🔴🔴 Y EL 2026-08-09 SE MIDIÓ QUE ES PEOR: NO SIEMPRE PUEDE SALIR.
@@ -252,7 +262,49 @@ collision_monitor:
       # 🔴 REGLA DE OPERACIÓN MIENTRAS TANTO, y vale para los 16 robots:
       #    **no dejes un robot con nada a menos de 20 cm.** Si se queda mudo y no
       #    obedece, mira `/collision_monitor_state` antes de pensar que se colgó.
-      radius: 0.18
+      #
+      # ═══════════════════════════════════════════════════════════════════════
+      # POR QUÉ 0.15 Y NO 0.18 — decidido el 2026-08-09 con todo medido
+      # ═══════════════════════════════════════════════════════════════════════
+      # El barrido de pared (evidencia 94: 24 estaciones a mano, las CUATRO
+      # direcciones) midió que este círculo INMOVILIZA POR COMPLETO al robot
+      # —no gira, no avanza y ni siquiera puede ALEJARSE— siempre que haya algo
+      # dentro de él, porque `approach` escala el mando entero por el tiempo
+      # hasta colisión y con un punto ya dentro ese factor es 0.
+      #
+      # 🔎 LA SIMETRÍA QUE DECIDE EL VALOR:
+      #
+      #      banda de trampa  =  margen ante el error del LIDAR  =  radius − 0.1442
+      #
+      #    SON EL MISMO NÚMERO. Por debajo del circunscrito (0.1442) el bloqueo es
+      #    CORRECTO —la esquina barrería el obstáculo—; por encima es un robot
+      #    congelado pudiendo girar sin rozar. No se puede encoger uno sin el otro.
+      #
+      #      radius   banda de trampa   hueco al parar 0.40 m/s   aceptación F6
+      #       0.18         3.6 cm            10.9 cm               pasa
+      #       0.15         0.6 cm             7.4 / 6.6 cm         pasa
+      #       0.145        0.1 cm             ~6.9 cm              (sin medir)
+      #
+      # ✅ 0.15 reduce la inmovilización SEIS VECES y conserva ~7 cm de holgura a
+      #    velocidad máxima, el doble del umbral de contacto del guion (11 cm
+      #    desde el LIDAR). Verificado a la misma distancia con los dos valores:
+      #      pared a 15.8 cm de base_footprint
+      #        con 0.18 -> congelado
+      #        con 0.15 -> gira 34.9 grados, retrocede 5.7, avanza 2.5
+      #
+      # 🔴 NO SE BAJA MÁS. Con 0.145 el margen queda en 0.1 cm contra un ruido de
+      #    LIDAR MEDIDO de +-0.3 cm en ese mismo barrido: autorizaría a girar
+      #    cuando el robot NO cabe. Peor remedio que la enfermedad.
+      #
+      # ⚠️ LO QUE 0.15 NO ARREGLA: quedan 0.6 cm de banda donde el robot sigue
+      #    congelado sin tocar nada, y el centímetro CIEGO de `range_min` por
+      #    delante y por detrás, que no depende de este parámetro.
+      #
+      # 🔴 ESTE PARÁMETRO NO SE PUEDE PROBAR EN CALIENTE. `ros2 param set` lo
+      #    guarda y `get` lo devuelve, pero el nodo NO reconstruye el polígono:
+      #    con 0.18, 0.15 y 0.30 en caliente el perfil sale IDÉNTICO. Hay que
+      #    editar este fichero y REINICIAR `atriz-robot`.
+      radius: 0.15
       action_type: "approach"
       # 1.0 s cubre con holgura los ~0.38 s reales (0.15 latencia + 0.23 frenada).
       time_before_collision: 1.0

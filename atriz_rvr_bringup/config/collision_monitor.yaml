@@ -49,14 +49,22 @@
 #       la pared el LIDAR leyó 12.20 cm donde la cinta predecía 12.00 (n=8268
 #       rayos, perfil plano en +-20 grados). **2 mm de error.**
 #
-#    ⏳ EL BORDE DELANTERO ESTA EN CONFLICTO Y NO SE RESUELVE POR DECRETO:
-#         cinta 2026-08-09         ->  9.0 cm
-#         URDF  2026-08-02         -> 10.0 cm  (base_length 0.190, laser_x -0.005)
-#       Las dos son medidas, en fechas distintas, y sólo el trasero tiene desempate
-#       instrumental. Se cierra repitiendo la misma prueba con el robot mirando a
-#       la pared: si el LIDAR da ~12.0 gana la cinta, si da ~13.0 gana el URDF.
-#       **NO VERIFICADO.** No se toca el URDF mientras tanto: cambiar un valor
-#       medido por otro medido sin desempate es como se metió el cruce de ejes.
+#    ✅ Y EL BORDE DELANTERO, CERRADO EL MISMO DIA A FAVOR DEL URDF: con el robot
+#       tocando la pared de frente el perfil perpendicular sale PLANO en +-24
+#       grados con mediana **10.03 cm** (n=3478, min 9.88 max 10.10) y los rayos
+#       centrales RECORTADOS en range_min. La cinta habia dado 9.0: era AL CHASIS.
+#         base_length 0.190 + laser_x -0.005  ->  9.5 - 0.5 = 9.0 detras
+#                                             ->  9.5 + 0.5 = 10.0 delante   ✅
+#       El URDF acierta en los tres ejes. Y el LIDAR NO esta centrado: va 5 mm
+#       por detras, asi que delante y detras NO miden lo mismo.
+#
+# 🔴 LA REFERENCIA QUE IMPORTA ES `base_footprint`, NO EL LIDAR. El poligono se
+#    centra ahi (`base_frame_id`), y el laser esta 5 mm por detras. Desde
+#    base_footprint:
+#         media longitud 9.5 · media anchura 10.85
+#         RADIO CIRCUNSCRITO = sqrt(0.095^2 + 0.1085^2) = 0.1442
+#    Es el numero que decide si girar es fisicamente posible, y por tanto el
+#    suelo de cualquier `radius` que no quiera bloquear giros que si caben.
 #
 # 🔴 Antes de esa medida el URDF decía 0.218 x 0.185 (ficha publicada, y CRUZADO:
 #    modelaba un robot más largo que ancho siendo al revés). Todos los huecos
@@ -88,12 +96,12 @@
 #        «su punto ciego de 10 cm cae DENTRO del chasis (media longitud 0.109 m).
 #          No hay zona muerta alrededor del robot.»
 #
-#      Con la media longitud REAL de 0.090 el X2 (`range_min: 0.1`, `laser_x: 0.0`)
-#      no ve **el primer centímetro por delante ni por detrás** del chasis. A los
-#      costados sí queda dentro (media anchura 0.108 > 0.10).
+#      El X2 tiene `range_min: 0.1` y `laser_x: -0.005` (NO 0.0). Desde el EJE DEL
+#      LASER el borde trasero esta a 9.0 y el delantero a 10.0, asi que:
 #
-#        delante/detrás   0.100 - 0.090 = 1.0 cm CIEGOS fuera del robot
-#        costados         0.100 - 0.108 = dentro del chasis, sin zona muerta
+#        DETRAS    0.100 - 0.090 = 1.0 cm CIEGO fuera del chasis
+#        DELANTE   0.100 - 0.100 = justo en el borde
+#        costados  0.100 - 0.1085 = dentro del chasis, sin zona muerta
 #
 #      ⚠️ Ningún polígono puede cubrir ese centímetro: no es cuestión de ajustar
 #         `radius`, es que el sensor no da el dato. Medido el 2026-08-09: con el
@@ -212,9 +220,28 @@ collision_monitor:
       #    **el monitor es más gordo que el robot**, así que hay una franja de
       #    14,2 a 18 cm donde inmoviliza a un robot que puede moverse sin rozar.
       #
-      # ✅ Causa aislada con UNA variable: bajando `radius` a 0.12 en caliente, las
-      #    tres órdenes funcionan y el monitor **FRENA al 40 %** en vez de
-      #    congelar (18,0 y 8,8 cm medidos = exactamente el `slowdown_ratio`).
+      # 🔴🔴 ESTE PARAMETRO ES INERTE EN CALIENTE. `ros2 param set` lo guarda y
+      #    `get` lo devuelve, pero el nodo NO reconstruye el poligono: sigue con el
+      #    que creo al configurarse. Demostrado el 2026-08-09 con un radio MUCHO
+      #    mayor, que deberia frenar mucho antes:
+      #
+      #        radius 0.18 -> el mando se anula en 18 cm · paro a 19.4
+      #        radius 0.15 -> el mando se anula en 18 cm · paro a 19.2
+      #        radius 0.30 -> el mando se anula en 18 cm · paro a 19.3
+      #
+      #    Tres perfiles identicos: `mando ~ 0.0125 x (distancia_LIDAR - 18 cm)`.
+      #    ⚠️ CAMBIAR ESTE VALOR EXIGE EDITAR ESTE FICHERO Y REINICIAR EL SERVICIO.
+      #       O sea es un cambio de IMAGEN DORADA para los 16 robots, no un boton:
+      #       hay que volver a medir el hueco al parar antes de aplicarlo.
+      #    🔴 Y retracta lo que aqui se escribio antes —«causa aislada bajando el
+      #       radio a 0.12»—, que ademas tenia el control roto: aquella prueba tenia
+      #       la pared a 18.3 cm y no a 16.8, o sea ya FUERA del circulo.
+      #
+      # ✅ HUECO AL PARAR, MEDIDO con este valor (0.18) a 0.25 m/s:
+      #        9.3 · 9.4 · 9.3 · 9.4 cm   (n=4, dispersion 1 mm)
+      #    Cuadra con la asintota `0.18 - 0.095 = 8.5 cm` mas ~1 cm de arrastre, y
+      #    con los 9.9 cm del fichero 17. El escalon de 0.25 a 0.100 a ~36 cm es el
+      #    poligono `Precaucion` con su slowdown_ratio 0.4, no la aproximacion.
       #
       # ⏳ NO SE BAJA, y por eso sigue en 0.18: este número fija DOS cosas en
       #    sentidos opuestos —el hueco al parar y el pasillo mínimo— y el 0.18 está

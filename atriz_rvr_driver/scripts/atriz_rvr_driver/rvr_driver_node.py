@@ -104,7 +104,7 @@ from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
 from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoRobot,
-                                MotorStatus, SystemInfo)
+                                InfraredMessage, MotorStatus, SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
     SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
@@ -499,6 +499,16 @@ class RvrDriverNode(Node):
         # referencia (7792 ticks/m, calibrados contra cinta métrica), así que un
         # flujo continuo vale para depurar la odometría, no solo el servicio.
         self.pub_encoders = self.create_publisher(Encoder, 'encoders', qos_tel)
+        # 🆕 2026-08-11 · La otra mitad del IR robot-a-robot. Se podía ENVIAR
+        #    (`send_infrared_message`) y no RECIBIR: el tipo estaba definido en
+        #    atriz_rvr_msgs desde el principio y no lo publicaba nadie — figuraba
+        #    como hueco en la lista del final de este fichero.
+        #    ⚠️ NO ES UN STREAM: llega cuando otro robot emite, así que puede
+        #       estar en silencio indefinidamente. Un `/infrared_messages` mudo
+        #       NO significa que esté roto; significa que nadie ha emitido.
+        self.pub_ir = self.create_publisher(InfraredMessage, 'infrared_messages',
+                                            qos_tel)
+        self._n_ir_recibidos = 0
         self._tf = TransformBroadcaster(self) if self._publicar_tf else None
 
         # La batería es un subproducto GRATIS del keepalive: para no dormirse hay
@@ -1374,6 +1384,36 @@ class RvrDriverNode(Node):
                 'no se pudieron registrar las notificaciones de motor; se seguirá '
                 f'sondeando igualmente:\n{traceback.format_exc()}')
 
+        # ── 🆕 2026-08-11 · Mensajes IR de otro robot -> /infrared_messages ───
+        #
+        # Va en su PROPIO try/except y no en el bloque de arriba a propósito: si
+        # el firmware rechaza esto, las notificaciones de motor no tienen por qué
+        # caer con él. Son cosas distintas que solo comparten el ser por evento.
+        #
+        # 🔴 Se registra la RESPUESTA del `enable_*`, igual que arriba y por el
+        #    mismo motivo: el SDK devuelve un dict de error en vez de lanzar
+        #    cuando el firmware rechaza un comando, así que un try/except a secas
+        #    diría «activada» sobre algo que el RVR ha dicho que no.
+        #
+        # ⚠️ Que esto registre bien NO significa que vayan a llegar mensajes. Las
+        #    de motor se registran igual de bien y NO llegan en este firmware.
+        #    Quien quiera saberlo, que mire el contador de `_h_ir_mensaje`: solo
+        #    un mensaje recibido de verdad lo demuestra.
+        try:
+            r = await self._rvr.enable_robot_infrared_message_notify(is_enabled=True)
+            self.get_logger().info(f'  enable IR recibido: respuesta = {r!r}')
+            self._tarea_notify_ir = \
+                await self._rvr.on_robot_to_robot_infrared_message_received_notify(
+                    handler=self._h_ir_mensaje)
+            self.get_logger().info(
+                'notificaciones IR robot-a-robot registradas -> /infrared_messages '
+                '(en silencio mientras nadie emita: NO es un fallo)')
+        except Exception:                                   # noqa: BLE001
+            self._tarea_notify_ir = None
+            self.get_logger().warn(
+                'no se pudieron registrar las notificaciones IR; se seguirá '
+                f'pudiendo ENVIAR IR, pero no recibir:\n{traceback.format_exc()}')
+
         # 🔴 LAS NOTIFICACIONES NO LLEGAN EN ESTE FIRMWARE — medido, ver
         #    `_sondear_motores`. Por eso el estado real se consigue SONDEANDO,
         #    no esperando, y este primer sondeo llena `/motor_status` con datos
@@ -1761,6 +1801,50 @@ class RvrDriverNode(Node):
         m.illuminance = float(datos['AmbientLight']['Light'])
         m.variance = 0.0            # 0.0 = desconocida (REP de sensor_msgs)
         self.pub_luz.publish(m)
+
+    async def _h_ir_mensaje(self, datos) -> None:
+        """Mensaje IR recibido de OTRO robot -> `/infrared_messages`.
+
+        🔴 EL PRIMERO SE REGISTRA CRUDO, A PROPÓSITO. Este driver ya se ha
+           quemado una vez con las claves de un payload: el propio SDK documenta
+           los encoders como «Left, Right» y el payload real trae `LeftTicks` /
+           `RightTicks` (ver `_h_encoders`). El nodo de ROS 1 leía
+           `datos['InfraredMessage']['Code']`, y eso NO está comprobado contra
+           un payload real — nadie ha visto nunca uno llegar en ROS 2.
+           Así que el primero se vuelca entero al log: si las claves no son las
+           esperadas, se sabrá al instante y con el dato delante, en vez de
+           publicar ceros silenciosos.
+
+        ⚠️ Y no se supone que el firmware entregue esto. Las notificaciones de
+           motor NO llegan en este firmware —medido, ver `_sondear_motores`—, así
+           que es perfectamente posible que ésta tampoco. Por eso se cuenta
+           cuántas llegan: `/infrared_messages` en silencio no distingue «nadie
+           emite» de «el firmware no lo entrega», y el contador sí.
+        """
+        self._n_ir_recibidos += 1
+        if self._n_ir_recibidos == 1:
+            self.get_logger().info(
+                f'PRIMER mensaje IR recibido. Payload CRUDO: {datos!r}')
+
+        cuerpo = datos.get('InfraredMessage', datos) if isinstance(datos, dict) else {}
+
+        def _campo(*nombres) -> int:
+            """El primer nombre que exista. Ver el aviso de las claves, arriba."""
+            for n in nombres:
+                if n in cuerpo:
+                    try:
+                        return int(cuerpo[n])
+                    except (TypeError, ValueError):
+                        return 0
+            return 0
+
+        m = InfraredMessage()
+        m.code = _campo('Code', 'code', 'InfraredCode')
+        m.front_strength = _campo('FrontStrength', 'front_strength')
+        m.left_strength = _campo('LeftStrength', 'left_strength')
+        m.right_strength = _campo('RightStrength', 'right_strength')
+        m.rear_strength = _campo('RearStrength', 'rear_strength')
+        self.pub_ir.publish(m)
 
     async def _h_encoders(self, datos) -> None:
         """Cuentas de encoder. Clave del stream: `Encoders` -> `Left`, `Right`.
@@ -3000,15 +3084,26 @@ if __name__ == '__main__':
 #                                          y no hay forma de volver a hacerlo en
 #                                          caliente. Para una sesión larga de
 #                                          laboratorio, esto se va a notar.
-#     · topic `ambient_light` (Float32)    el SDK tiene
-#                                          `get_ambient_light_sensor_value` y no se
-#                                          usa. El sensor está verificado.
-#     · topic `infrared_messages`          se puede ENVIAR IR (`send_infrared_message`)
-#       (InfraredMessage)                  pero NO RECIBIR. El tipo de mensaje ya
-#                                          está definido en atriz_rvr_msgs y no lo
-#                                          publica nadie.
-#     · topic `encoders` (Encoder)         existe el servicio `get_encoders`, así
-#                                          que hay acceso, pero no un flujo continuo.
+#     · ✅ topic `ambient_light`           YA EXISTE. Este renglón se quedó viejo:
+#                                          `/ambient_light` publica (105 mensajes
+#                                          en 8 s, medido el 2026-08-11 en rvr-02).
+#                                          Lo publica `_h_luz`.
+#     · ✅ topic `infrared_messages`       CERRADO el 2026-08-11. Decía: «se puede
+#       (InfraredMessage)                  ENVIAR IR pero NO RECIBIR; el tipo ya
+#                                          está definido y no lo publica nadie».
+#                                          Ya lo publica `_h_ir_mensaje`.
+#                                          ⚠️ Que se registre NO prueba que el
+#                                          firmware lo entregue: eso lo dice el
+#                                          contador de mensajes recibidos, no el
+#                                          registro.
+#     · ✅ topic `encoders` (Encoder)      YA EXISTE, y también se quedó viejo:
+#                                          `/encoders` publica a ~17 Hz (137
+#                                          mensajes en 8 s, rvr-02, 2026-08-11).
+#                                          Lo publica `_h_encoders`.
+#
+#   📌 DOS DE LOS CUATRO «HUECOS» LLEVABAN CERRADOS SIN QUE NADIE LOS TACHARA, y
+#      el tercero se ha cerrado hoy. Una lista de pendientes que no se poda dice
+#      cosas falsas con la misma seguridad que las verdaderas.
 #
 #   DIFERIDOS A PROPÓSITO, con su razón:
 #     · `configure_streaming` / `start_streaming`  pueden romper la telemetría del

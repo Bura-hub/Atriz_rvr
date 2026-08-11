@@ -26,7 +26,9 @@ import threading
 import time
 
 import rclpy
-from atriz_rvr_msgs.srv import GetRGBCSensorValues, SetLeds
+from atriz_rvr_msgs.msg import EstadoIR
+from atriz_rvr_msgs.srv import (GetRGBCSensorValues, SendInfraredMessage,
+                                SetIREvading, SetIRMode, SetLeds)
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import GetParameters
@@ -161,12 +163,22 @@ class ErrorAtriz(Exception):
 # FUNCIONES PURAS — sin ROS, sin robot. Tienen tests en atriz_migracion.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def secuencia_de_cierre(parar, apagar_barrido, desmontar, avisar=print):
-    """Los tres pasos del cierre, y los tres se INTENTAN pase lo que pase.
+def secuencia_de_cierre(apagar_ir, parar, apagar_barrido, desmontar, avisar=print):
+    """Los CUATRO pasos del cierre, y los cuatro se INTENTAN pase lo que pase.
 
     Es el corazón de la promesa de esta biblioteca: *el barrido del LIDAR se
-    apaga siempre*. Vive aquí, separada de ROS, para que se pueda probar
-    provocando los fallos de verdad en vez de razonarlos.
+    apaga siempre* — y desde el 2026-08-11, *el robot no se queda conduciendo
+    solo*. Vive aquí, separada de ROS, para que se pueda probar provocando los
+    fallos de verdad en vez de razonarlos.
+
+    🔴 `apagar_ir` VA EL PRIMERO, y el orden importa. Los modos IR `following` y
+       `evading` son del FIRMWARE del RVR: el robot conduce sin que nadie le
+       mande `cmd_vel`, así que ni el watchdog del driver ni el
+       `collision_monitor` lo ven. Si se llamara `parar()` antes, el robot
+       frenaría un instante y **volvería a arrancar en la siguiente detección
+       IR** — que es exactamente el fallo que ya mordió a la parada de
+       emergencia (driver, `_cb_parada_emergencia`). Primero se quita la fuente
+       de las órdenes, después se para lo que quede en marcha.
 
     🔴 Cada paso cuelga del `finally` del anterior. Antes había DOS `try` y un
        solo `finally`: si `parar()` reventaba, `/stop_scan` no se llamaba.
@@ -180,19 +192,24 @@ def secuencia_de_cierre(parar, apagar_barrido, desmontar, avisar=print):
        provocándolo, no razonándolo.
     """
     try:
-        parar()
+        apagar_ir()
     except BaseException as e:                               # noqa: BLE001
-        avisar(f'AVISO al parar el robot: {e!r}')
+        avisar(f'AVISO al apagar los modos IR: {e!r}')
     finally:
         try:
-            apagar_barrido()
+            parar()
         except BaseException as e:                           # noqa: BLE001
-            avisar(f'AVISO al apagar el barrido del LIDAR: {e!r}')
+            avisar(f'AVISO al parar el robot: {e!r}')
         finally:
             try:
-                desmontar()
+                apagar_barrido()
             except BaseException as e:                       # noqa: BLE001
-                avisar(f'AVISO al soltar los recursos de ROS: {e!r}')
+                avisar(f'AVISO al apagar el barrido del LIDAR: {e!r}')
+            finally:
+                try:
+                    desmontar()
+                except BaseException as e:                   # noqa: BLE001
+                    avisar(f'AVISO al soltar los recursos de ROS: {e!r}')
 
 
 def limitar(valor, tope, nombre, unidad):
@@ -388,6 +405,19 @@ class Robot:
             GetRGBCSensorValues, '/get_rgbc_sensor_values')
         self._cli_luces = self._nodo.create_client(SetLeds, '/set_leds')
         self._cli_luz_color = self._nodo.create_client(SetBool, '/enable_color')
+        # ── Infrarrojos robot-a-robot (2026-08-11) ───────────────────────────
+        self._estado_ir = None
+        self._nodo.create_subscription(
+            EstadoIR, '/estado_ir',
+            lambda m: setattr(self, '_estado_ir', m), sensor)
+        self._cli_ir_modo = self._nodo.create_client(SetIRMode, '/set_ir_mode')
+        self._cli_ir_evadir = self._nodo.create_client(SetIREvading,
+                                                       '/set_ir_evading')
+        self._cli_ir_mensaje = self._nodo.create_client(
+            SendInfraredMessage, '/send_infrared_message')
+        #: ¿Ha activado ESTE programa algún modo IR que conduzca? Solo entonces
+        #: lo apaga al cerrar — misma regla que la luz del sensor de color.
+        self._ir_encendido_por_mi = False
         #: ¿La luz del sensor la encendio ESTE programa? Solo entonces la apaga
         #: al cerrar: si el robot arranco con `color_detection:=true`, apagarla
         #: seria romperle el montaje a quien lo dejo asi a proposito.
@@ -473,6 +503,7 @@ class Robot:
         self._cerrado = True
         try:
             secuencia_de_cierre(
+                apagar_ir=self._apagar_ir,
                 parar=lambda: self._mandar(0.0, 0.0, repeticiones=5),
                 apagar_barrido=self._apagar_barrido_y_luz,
                 desmontar=self._desmontar)
@@ -1089,6 +1120,155 @@ class Robot:
         peticion = SetLeds.Request()
         peticion.rgb_color = [rojo, verde, azul]
         self._llamar(self._cli_luces, peticion, timeout=5.0, que='/set_leds')
+
+    # ── Infrarrojos: hablar con OTRO robot ───────────────────────────────────
+    #
+    # 🔴 DOS DE ESTOS MÉTODOS HACEN CONDUCIR AL ROBOT SIN QUE NADIE SE LO MANDE.
+    #    `seguir_a_otro()` y `huir_de_otro()` activan modos del FIRMWARE del RVR:
+    #    el robot se mueve solo al detectar infrarrojos, sin pasar por
+    #    `/cmd_vel`. Eso significa que **el `collision_monitor` no lo ve y el
+    #    watchdog del driver tampoco**. Las dos únicas cosas que lo paran son la
+    #    parada de emergencia y `parar_ir()` — y por eso `cerrar()` los apaga
+    #    ANTES que nada (ver `secuencia_de_cierre`).
+
+    def emitir_ir(self, codigo, fuerza=64):
+        """Emite un `codigo` (0-7) por los cuatro emisores. NO mueve el robot.
+
+        Es lo que OTRO robot recibirá con `escuchar_ir()`.
+
+        ⚠️ La misma `fuerza` va a los cuatro emisores a propósito: el firmware
+           permite encender y apagar cada uno por separado, pero **el nivel tiene
+           que ser el mismo en todos los encendidos**.
+        """
+        if not isinstance(codigo, int) or not 0 <= codigo <= 7:
+            raise ErrorAtriz(f'el codigo IR va de 0 a 7, no {codigo!r}.')
+        if not isinstance(fuerza, int) or not 0 <= fuerza <= 64:
+            raise ErrorAtriz(f'la fuerza va de 0 a 64, no {fuerza!r}.')
+        p = SendInfraredMessage.Request()
+        p.code = codigo
+        p.front_strength = p.left_strength = fuerza
+        p.right_strength = p.rear_strength = fuerza
+        r = self._llamar(self._cli_ir_mensaje, p, 5.0, '/send_infrared_message')
+        if not r.success:
+            raise ErrorAtriz(f'no se pudo emitir: {r.message}')
+
+    def escuchar_ir(self, caducidad=2.0):
+        """El último código recibido de otro robot, o `None` si no hay ninguno.
+
+        `caducidad` en segundos: un mensaje más viejo que eso se devuelve como
+        `None`. 🔴 No es un capricho — el registro del firmware **se borra al
+        segundo**, así que un código de hace diez segundos no dice que haya nadie
+        ahí ahora, solo que hubo alguien alguna vez.
+        """
+        e = self._ultimo('_estado_ir', timeout=5.0, que='/estado_ir')
+        if not e.hay_mensaje:
+            return None
+        if e.antiguedad_mensaje_s < 0 or e.antiguedad_mensaje_s > caducidad:
+            return None
+        return int(e.ultimo_codigo)
+
+    def quien_hay_cerca(self):
+        """Lo que ven los cuatro sensores IR: `(sensor_0, sensor_1, s2, s3)`.
+
+        `255` en un sensor = ese no ve nada. `0-15` = ha visto ese código.
+
+        ⏳ **QUÉ LADO DEL ROBOT ES CADA SENSOR: NO ESTÁ MEDIDO.** Por eso se
+           llaman `sensor_N` y no `izquierda`/`derecha`. La máscara que lo diría
+           está documentada por Sphero **para el BOLT**, que es otro robot con
+           otro chasis. Hasta que se mida con dos RVR, esto dice **si** hay
+           alguien, no **por dónde**.
+        """
+        e = self._ultimo('_estado_ir', timeout=5.0, que='/estado_ir')
+        if not e.lecturas_validas:
+            raise ErrorAtriz(
+                'el sondeo de los sensores IR esta apagado o fallo. '
+                'Arranca el driver con ir_sondeo_hz > 0.')
+        return (e.sensor_0, e.sensor_1, e.sensor_2, e.sensor_3)
+
+    def seguir_a_otro(self, lejos=0, cerca=1):
+        """🔴 EL ROBOT CONDUCIRÁ SOLO hacia otro que esté emitiendo.
+
+        El otro robot tiene que estar emitiendo con `emitir_como_baliza()` y
+        **los mismos dos códigos**.
+
+        🔴 Sin `collision_monitor` y sin watchdog: el firmware conduce por su
+           cuenta. Espacio despejado, y no lo dejes solo.
+        """
+        self._modo_ir_que_conduce('following', lejos, cerca)
+
+    def huir_de_otro(self, lejos=0, cerca=1):
+        """🔴 EL ROBOT CONDUCIRÁ SOLO para alejarse de otro que emita.
+
+        Mismos avisos que `seguir_a_otro()`.
+        """
+        if not (isinstance(lejos, int) and 0 <= lejos <= 7
+                and isinstance(cerca, int) and 0 <= cerca <= 7):
+            raise ErrorAtriz(f'los codigos IR van de 0 a 7: ({lejos}, {cerca}).')
+        p = SetIREvading.Request()
+        p.far_code, p.near_code = lejos, cerca
+        print('AVISO: el robot conducira SOLO al detectar infrarrojos.')
+        print('       El collision_monitor NO lo protege. Espacio despejado.')
+        r = self._llamar(self._cli_ir_evadir, p, 5.0, '/set_ir_evading')
+        if not r.success:
+            raise ErrorAtriz(f'no se pudo activar la evasion: {r.message}')
+        self._ir_encendido_por_mi = True
+
+    def emitir_como_baliza(self, lejos=0, cerca=1):
+        """Emite continuamente para que otro robot pueda seguirte o evitarte.
+
+        NO mueve este robot: solo enciende sus emisores. El que se mueve es el
+        otro, el que hace `seguir_a_otro()` con los mismos códigos.
+        """
+        self._modo_ir_que_conduce('broadcasting', lejos, cerca)
+
+    def parar_ir(self):
+        """Apaga los tres modos: baliza, seguimiento y evasión."""
+        p = SetIRMode.Request()
+        p.mode, p.far_code, p.near_code = 'off', 0, 0
+        r = self._llamar(self._cli_ir_modo, p, 5.0, '/set_ir_mode')
+        if not r.success:
+            raise ErrorAtriz(f'no se pudo apagar el IR: {r.message}')
+        self._ir_encendido_por_mi = False
+
+    def _modo_ir_que_conduce(self, modo, lejos, cerca):
+        """Lo común a `emitir_como_baliza` y `seguir_a_otro`."""
+        if not (isinstance(lejos, int) and 0 <= lejos <= 7
+                and isinstance(cerca, int) and 0 <= cerca <= 7):
+            raise ErrorAtriz(f'los codigos IR van de 0 a 7: ({lejos}, {cerca}).')
+        if modo == 'following':
+            print('AVISO: el robot conducira SOLO hacia el que emita.')
+            print('       El collision_monitor NO lo protege. Espacio despejado.')
+        p = SetIRMode.Request()
+        p.mode, p.far_code, p.near_code = modo, lejos, cerca
+        r = self._llamar(self._cli_ir_modo, p, 5.0, '/set_ir_mode')
+        if not r.success:
+            raise ErrorAtriz(f'no se pudo activar «{modo}»: {r.message}')
+        self._ir_encendido_por_mi = True
+
+    def _apagar_ir(self):
+        """Apaga los modos IR al cerrar, PERO solo si los encendimos nosotros.
+
+        🔴 Es el primer paso de `secuencia_de_cierre`, antes incluso de parar los
+           motores, porque `following`/`evading` son modos del firmware: parar
+           primero dejaría al robot arrancando otra vez en la siguiente
+           detección.
+
+        ⚠️ El `getattr` con defecto no es adorno: `cerrar()` puede correr desde
+           un manejador de señal que llegue ANTES de que `__init__` termine, y
+           entonces el atributo todavía no existe.
+        """
+        if not getattr(self, '_ir_encendido_por_mi', False):
+            return
+        cli = getattr(self, '_cli_ir_modo', None)
+        if cli is None:
+            return
+        p = SetIRMode.Request()
+        p.mode, p.far_code, p.near_code = 'off', 0, 0
+        # Sin `_llamar`: aquí no se puede lanzar por un timeout, y el cierre no
+        # debe quedarse esperando. Se manda y se sigue.
+        if cli.service_is_ready():
+            cli.call_async(p)
+        self._ir_encendido_por_mi = False
 
     def parada_emergencia(self):
         """Parada de emergencia: el driver descarta TODO comando hasta liberarla.

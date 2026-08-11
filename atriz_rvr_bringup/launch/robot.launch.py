@@ -347,8 +347,14 @@ def generate_launch_description() -> LaunchDescription:
     #:    NUNCA en ESCRIBIR: la web lo lee, no lo escribe. Es la señal de vida
     #:    barata —~0,03 kB/s por robot contra los 13,05 de `/odom`— que permite al
     #:    muro del profesor vigilar 16 robots sin pagar 1,7 Mbit/s de telemetría.
+    #: 🆕 `/infrared_messages` y `/estado_ir` (2026-08-11). Ninguno de los dos
+    #:    mueve nada: son de LECTURA. `/estado_ir` lleva ademas
+    #:    `conduciendo_por_ir`, que es como la web puede ENSEÑAR que un robot se
+    #:    esta moviendo por infrarrojos — hoy eso pasa sin que nadie se entere,
+    #:    porque no va por `cmd_vel` y el collision_monitor no lo ve.
     LEER = ['/odom', '/imu', '/scan', '/battery_state', '/motor_status',
             '/encoders', '/color', '/estado_robot', '/estado_navegacion',
+            '/infrared_messages', '/estado_ir',
             '/map', '/tf', '/tf_static',
             '/collision_monitor_state', '/amcl_pose']
 
@@ -383,7 +389,20 @@ def generate_launch_description() -> LaunchDescription:
                  #:    NO el driver. `success=true` significa PETICION ACEPTADA,
                  #:    jamas «arrancado»: quien dice si funciona es
                  #:    `/estado_navegacion`, que va en LEER.
-                 '/pedir_slam', '/pedir_nav']
+                 '/pedir_slam', '/pedir_nav',
+                 #: 🆕 IR (2026-08-11). SOLO `send_infrared_message`, que ENCIENDE
+                 #:    LOS EMISORES y no mueve nada.
+                 #:
+                 #: 🔴 `set_ir_mode` y `set_ir_evading` se quedan FUERA a
+                 #:    proposito, y no es un olvido: `following` y `evading` son
+                 #:    modos del FIRMWARE que hacen CONDUCIR al robot sin pasar
+                 #:    por `cmd_vel`, asi que se saltan el collision_monitor y el
+                 #:    watchdog. Con rosbridge SIN identidad por usuario
+                 #:    (pendiente abierto, SEGURIDAD_ROSBRIDGE.md), abrirlos
+                 #:    significaria que cualquiera en el aula puede poner a
+                 #:    conducir cualquier robot. Se reabre cuando exista esa
+                 #:    identidad, no antes.
+                 '/send_infrared_message']
 
     def _glob(lista):
         """rosbridge quiere una CADENA con una lista, no una lista."""

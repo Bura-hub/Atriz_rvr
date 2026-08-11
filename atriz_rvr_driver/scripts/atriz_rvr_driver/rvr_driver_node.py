@@ -103,8 +103,9 @@ from std_srvs.srv import Empty as EmptySrv, SetBool
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
 
-from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoRobot,
-                                InfraredMessage, MotorStatus, SystemInfo)
+from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoIR,
+                                EstadoRobot, InfraredMessage, MotorStatus,
+                                SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
     SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
@@ -237,6 +238,19 @@ class RvrDriverNode(Node):
         # propósito (por ejemplo, para MEDIR de una vez el timeout real del RVR).
         self.declare_parameter('keepalive_period', PERIODO_KEEPALIVE_S)
         self.declare_parameter('silence_timeout', TIMEOUT_SILENCIO_S)
+        # 🆕 2026-08-11 · Ritmo del sondeo de los sensores IR, en Hz. **0.0 lo apaga.**
+        #
+        # 🔴 POR QUÉ ES UN PARÁMETRO Y NO UNA CONSTANTE: es UN COMANDO MÁS POR
+        #    SEGUNDO por el mismo puerto serie que lleva la telemetría a 16,7 Hz,
+        #    y en este robot el margen del enlace está MEDIDO y es estrecho: a 50
+        #    ms de intervalo el streaming ni siquiera arranca (`_registrar_sensores`).
+        #    Así que su coste se mide con esto en 1.0 y en 0.0, comparando el
+        #    ritmo de `/odom`, en vez de suponer que «uno por segundo no se nota».
+        #
+        # 📝 1 Hz no es un número redondo elegido al azar: la lectura IR del
+        #    firmware SE BORRA AL SEGUNDO (referencia_sdk/sensor.md:54). Sondear
+        #    más despacio garantiza perder detecciones.
+        self.declare_parameter('ir_sondeo_hz', 1.0)
         # ✅ Por defecto **False** desde el 2026-07-31: se publica la
         # orientación PLANA, que es la físicamente correcta. La inclinación que
         # reporta el RVR es un artefacto de su acelerómetro, no del robot.
@@ -508,7 +522,21 @@ class RvrDriverNode(Node):
         #       NO significa que esté roto; significa que nadie ha emitido.
         self.pub_ir = self.create_publisher(InfraredMessage, 'infrared_messages',
                                             qos_tel)
+        # 🆕 2026-08-11 · El ESTADO del IR, que es otra cosa que el evento.
+        #    Ver EstadoIR.msg y el diseño en
+        #    docs/superpowers/specs/2026-08-11-sistema-ir-robot-a-robot-design.md
+        self.pub_estado_ir = self.create_publisher(EstadoIR, 'estado_ir', qos_tel)
         self._n_ir_recibidos = 0
+        # Estado del IR. Bajo `self._lock`, como el resto.
+        self._ir_modo = 'off'
+        self._ir_far = 0
+        self._ir_near = 0
+        self._ir_ultimo_codigo = 0
+        self._ir_t_ultimo_mensaje = None      # None = no ha llegado ninguno
+        self._ir_crudo = 0
+        self._ir_t_lectura = None
+        self._ir_lecturas_validas = False
+        self._ir_conduciendo = False
         self._tf = TransformBroadcaster(self) if self._publicar_tf else None
 
         # La batería es un subproducto GRATIS del keepalive: para no dormirse hay
@@ -758,6 +786,26 @@ class RvrDriverNode(Node):
         #    fuera. El latido no le habla al RVR: no puede molestar a nada.
         self.create_timer(1.0, self._publicar_estado, callback_group=g_salud)
 
+        # ── El sondeo del IR (AÑADIDO 2026-08-11) ────────────────────────────
+        # Mismo grupo `g_salud` que los otros dos, y por la misma razón: consulta
+        # al RVR y bloquea mientras espera, así que no puede compartir grupo con
+        # la telemetría.
+        _ir_hz = float(self.get_parameter('ir_sondeo_hz').value)
+        if _ir_hz > 0.0:
+            self.create_timer(1.0 / _ir_hz, self._sondear_ir,
+                              callback_group=g_salud)
+            self.get_logger().info(
+                f'sondeo IR a {_ir_hz:g} Hz -> /estado_ir')
+        else:
+            # Se publica igual, con `lecturas_validas=False`: así el topic existe
+            # y dice explícitamente que no hay lecturas, en vez de desaparecer y
+            # dejar al consumidor sin saber si está apagado o roto.
+            self.create_timer(1.0, self._publicar_estado_ir,
+                              callback_group=g_salud)
+            self.get_logger().warn(
+                'sondeo IR DESACTIVADO (ir_sondeo_hz=0): /estado_ir publicará '
+                'lecturas_validas=False. Los mensajes IR siguen llegando.')
+
         # El apagado automático de la luz del color. Mismo grupo y mismo ritmo:
         # solo compara números y, cuando toca, encola un comando sin esperarlo.
         if self._color_inactividad > 0 or self._color_max > 0:
@@ -866,6 +914,18 @@ class RvrDriverNode(Node):
     def _rgb_valido(*valores) -> bool:
         """Los canales van de 0 a 255. El SDK no lo comprueba y el RVR tampoco."""
         return all(isinstance(v, int) and 0 <= v <= 255 for v in valores)
+
+    @staticmethod
+    def _codigo_ir_valido(v) -> bool:
+        """Los códigos IR van de 0 a 7 (`InfraredCodes`, ocho valores).
+
+        🔴 Lo comprueba ESTE driver porque no lo comprueba nadie más: ni el
+           cliente del SDK, ni la capa de protocolo, ni el firmware devuelve
+           error. Medido leyendo el SDK entero el 2026-08-11.
+        📝 El registro de LECTURA admite 0-15 (referencia_sdk/sensor.md:54). Esto
+           valida lo que se EMITE, que es lo que la documentación acota a 0-7.
+        """
+        return isinstance(v, int) and 0 <= v <= 7
 
     # ─────────────────────────────────────────────────────────────────────────
     # Conexión y streaming de sensores
@@ -1802,49 +1862,150 @@ class RvrDriverNode(Node):
         m.variance = 0.0            # 0.0 = desconocida (REP de sensor_msgs)
         self.pub_luz.publish(m)
 
+    def _sondear_ir(self) -> None:
+        """Consulta los sensores IR y el sistema de control, y publica `/estado_ir`.
+
+        🔴 NO PUEDE LANZAR NUNCA — misma regla que `_publicar_estado`: el
+           2026-07-31 una excepción dentro de un manejador dejó `/odom` e `/imu` a
+           cero sin una línea en el log. Un topic informativo no puede llevarse
+           por delante la telemetría.
+
+        📝 DOS consultas, no una, y la segunda es la que da valor al mensaje:
+           `get_active_control_system_id()` devuelve 8 mientras el firmware
+           conduce el robot por IR. Sin eso, `following` mueve el robot y NADA en
+           ROS se entera — no pasa por `cmd_vel`, así que ni el watchdog ni el
+           `collision_monitor` lo ven.
+        """
+        try:
+            ok_l, lect, _ = self._pedir(
+                self._rvr.get_bot_to_bot_infrared_readings(),
+                'sondeo IR: lecturas', timeout=3.0)
+            crudo = None
+            if ok_l and isinstance(lect, dict):
+                crudo = lect.get('sensor_data')
+
+            ok_c, ctrl, _ = self._pedir(
+                self._rvr.get_active_control_system_id(),
+                'sondeo IR: sistema de control', timeout=3.0)
+            conduciendo = False
+            if ok_c and isinstance(ctrl, dict):
+                # 8 = ControlSystemIdsEnum.infrared_follow_and_evade
+                conduciendo = any(v == 8 for v in ctrl.values())
+
+            with self._lock:
+                if crudo is not None:
+                    self._ir_crudo = int(crudo)
+                    self._ir_t_lectura = self._ahora_s()
+                    self._ir_lecturas_validas = True
+                else:
+                    # 🔴 NO se publican ceros como si fueran lecturas. Si la
+                    #    consulta falló, se dice que falló.
+                    self._ir_lecturas_validas = False
+                self._ir_conduciendo = conduciendo
+        except Exception:                                   # noqa: BLE001
+            self.get_logger().error(
+                f'sondeo IR: excepción no esperada:\n{traceback.format_exc()}')
+            with self._lock:
+                self._ir_lecturas_validas = False
+        self._publicar_estado_ir()
+
+    def _publicar_estado_ir(self) -> None:
+        """Publica `/estado_ir`. Separado del sondeo para que también se publique
+        con el sondeo apagado (`ir_sondeo_hz:=0`), diciendo que no hay lecturas.
+        """
+        try:
+            ahora = self._ahora_s()
+            with self._lock:
+                crudo = self._ir_crudo
+                validas = self._ir_lecturas_validas
+                t_lect = self._ir_t_lectura
+                cod = self._ir_ultimo_codigo
+                t_msg = self._ir_t_ultimo_mensaje
+                modo, far, near = self._ir_modo, self._ir_far, self._ir_near
+                conduciendo = self._ir_conduciendo
+
+            m = EstadoIR()
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.header.frame_id = self._base_frame
+            m.crudo = int(crudo) & 0xFFFFFFFF
+            # Del byte MENOS significativo al más. Ese orden es una DECISIÓN, no
+            # un hecho: por eso va también `crudo`. Ver EstadoIR.msg.
+            m.sensor_0 = (m.crudo >> 0) & 0xFF
+            m.sensor_1 = (m.crudo >> 8) & 0xFF
+            m.sensor_2 = (m.crudo >> 16) & 0xFF
+            m.sensor_3 = (m.crudo >> 24) & 0xFF
+            m.lecturas_validas = bool(validas)
+            # -1.0 = nunca se ha consultado. Distinto de «hace mucho».
+            m.antiguedad_lectura_s = (-1.0 if t_lect is None
+                                      else float(ahora - t_lect))
+            m.ultimo_codigo = int(cod)
+            m.hay_mensaje = t_msg is not None
+            m.antiguedad_mensaje_s = (-1.0 if t_msg is None
+                                      else float(ahora - t_msg))
+            m.modo = modo
+            m.far_code = int(far)
+            m.near_code = int(near)
+            m.conduciendo_por_ir = bool(conduciendo)
+            self.pub_estado_ir.publish(m)
+        except Exception:                                   # noqa: BLE001
+            self.get_logger().error(
+                f'/estado_ir: no se pudo publicar:\n{traceback.format_exc()}')
+
     async def _h_ir_mensaje(self, datos) -> None:
         """Mensaje IR recibido de OTRO robot -> `/infrared_messages`.
 
-        🔴 EL PRIMERO SE REGISTRA CRUDO, A PROPÓSITO. Este driver ya se ha
-           quemado una vez con las claves de un payload: el propio SDK documenta
-           los encoders como «Left, Right» y el payload real trae `LeftTicks` /
-           `RightTicks` (ver `_h_encoders`). El nodo de ROS 1 leía
-           `datos['InfraredMessage']['Code']`, y eso NO está comprobado contra
-           un payload real — nadie ha visto nunca uno llegar en ROS 2.
-           Así que el primero se vuelca entero al log: si las claves no son las
-           esperadas, se sabrá al instante y con el dato delante, en vez de
-           publicar ceros silenciosos.
+        ✅ LA CLAVE ES `infrared_code`, Y ESTÁ MEDIDA. Volcado del primer mensaje
+           real, en rvr-01 el 2026-08-11 con rvr-02 emitiendo el código 3:
 
-        ⚠️ Y no se supone que el firmware entregue esto. Las notificaciones de
-           motor NO llegan en este firmware —medido, ver `_sondear_motores`—, así
-           que es perfectamente posible que ésta tampoco. Por eso se cuenta
-           cuántas llegan: `/infrared_messages` en silencio no distingue «nadie
-           emite» de «el firmware no lo entrega», y el contador sí.
+               PRIMER mensaje IR recibido. Payload CRUDO: {'infrared_code': 3}
+
+           UNA sola clave, plana, en snake_case. La notificación (CID 0x2C)
+           declara un único campo de salida.
+
+        🔴 Y ESO DESMONTÓ DOS COSAS:
+           1. Las cuatro intensidades del mensaje eran FICCIÓN: son parámetros
+              del ENVÍO. `InfraredMessage.msg` se rehizo por eso.
+           2. El nodo de ROS 1 leía `datos['InfraredMessage']['Code']` — contra
+              este payload, `KeyError` en la primera línea. **El IR de ROS 1
+              nunca recibió un solo mensaje**, y nadie lo notó porque hacía falta
+              un segundo robot para verlo.
+
+        ✅ Y el firmware SÍ entrega esta notificación, al revés que las de motor
+           (que NO llegan, medido en `_sondear_motores`). Se conserva el volcado
+           del primero y el contador: si algún día cambia el firmware, se verá
+           aquí y con el dato delante.
         """
         self._n_ir_recibidos += 1
         if self._n_ir_recibidos == 1:
             self.get_logger().info(
                 f'PRIMER mensaje IR recibido. Payload CRUDO: {datos!r}')
 
-        cuerpo = datos.get('InfraredMessage', datos) if isinstance(datos, dict) else {}
+        if not isinstance(datos, dict) or 'infrared_code' not in datos:
+            # 🔴 Se avisa en vez de publicar un 0. Un código 0 es VÁLIDO, así que
+            #    publicarlo ante un payload que no entiendo sería inventarme un
+            #    mensaje. Y el volcado dice exactamente qué llegó.
+            self.get_logger().error(
+                f'mensaje IR con un payload que no reconozco: {datos!r}. '
+                "Esperaba la clave 'infrared_code'. NO se publica nada.")
+            return
 
-        def _campo(*nombres) -> int:
-            """El primer nombre que exista. Ver el aviso de las claves, arriba."""
-            for n in nombres:
-                if n in cuerpo:
-                    try:
-                        return int(cuerpo[n])
-                    except (TypeError, ValueError):
-                        return 0
-            return 0
+        try:
+            codigo = int(datos['infrared_code'])
+        except (TypeError, ValueError):
+            self.get_logger().error(
+                f"mensaje IR con 'infrared_code' no numérico: {datos!r}")
+            return
 
         m = InfraredMessage()
-        m.code = _campo('Code', 'code', 'InfraredCode')
-        m.front_strength = _campo('FrontStrength', 'front_strength')
-        m.left_strength = _campo('LeftStrength', 'left_strength')
-        m.right_strength = _campo('RightStrength', 'right_strength')
-        m.rear_strength = _campo('RearStrength', 'rear_strength')
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.header.frame_id = self._base_frame
+        m.code = codigo & 0xFF
         self.pub_ir.publish(m)
+
+        # Y el estado, para que `/estado_ir` sepa cuánto hace del último.
+        with self._lock:
+            self._ir_ultimo_codigo = m.code
+            self._ir_t_ultimo_mensaje = self._ahora_s()
 
     async def _h_encoders(self, datos) -> None:
         """Cuentas de encoder. Clave del stream: `Encoders` -> `Left`, `Right`.
@@ -2290,6 +2451,14 @@ class RvrDriverNode(Node):
                          'parada: evasión IR')
             self._enviar(self._rvr.stop_robot_to_robot_infrared_following(),
                          'parada: seguimiento IR')
+            # Y el estado, o `/estado_ir` seguiría diciendo `modo: following`
+            # sobre un robot que la parada acaba de detener. Se anota aquí y no
+            # al confirmar cada `stop_*` porque la parada NO PREGUNTA: manda los
+            # comandos cuesten o no, y el estado tiene que reflejar la intención
+            # de la parada, no el acuse del RVR.
+            with self._lock:
+                self._ir_modo = 'off'
+                self._ir_conduciendo = False
 
     # ─────────────────────────────────────────────────────────────────────────
     # Servicios: LEDs
@@ -2708,6 +2877,22 @@ class RvrDriverNode(Node):
                 f"modo '{req.mode}' desconocido; usa {sorted(acciones)}")
             return resp
 
+        # 🔴 VALIDACIÓN DE RANGO — RECUPERADA EL 2026-08-11. Es una REGRESIÓN que
+        #    arrastrábamos desde la migración: el nodo de ROS 1 convertía los
+        #    códigos con `InfraredCodes(req.far_code)`, que lanza con un valor
+        #    inválido, y al portar a ROS 2 se pasaron crudos.
+        #
+        #    Y el SDK NO valida: de todo el árbol, el único sitio con el límite
+        #    está en un helper (`infrared_control_async.py:99`) que este driver
+        #    no usa, y solo comprueba `strength`. Un `far_code=200` viajaría al
+        #    firmware sin que nadie diga nada.
+        if modo != 'off' and not (self._codigo_ir_valido(req.far_code)
+                                  and self._codigo_ir_valido(req.near_code)):
+            resp.success, resp.message = False, (
+                f'far_code={req.far_code} near_code={req.near_code}: los códigos '
+                'IR van de 0 a 7')
+            return resp
+
         # 🔴 AGUJERO DE SEGURIDAD, encontrado el 2026-08-11 con DOS robots
         #    delante. Es el MISMO que se tapó el 2026-08-01 en `set_ir_evading`,
         #    y se quedó abierto aquí:
@@ -2747,6 +2932,18 @@ class RvrDriverNode(Node):
                          'set_ir_mode(off): following')
             self._enviar(self._rvr.stop_robot_to_robot_infrared_evading(),
                          'set_ir_mode(off): evading')
+        # 📝 El modo se anota SOLO si el comando salió bien, y es la misma regla
+        #    que el latido de `/estado_robot`: se cuentan EFECTOS, no intentos.
+        #    Un `/estado_ir` diciendo `modo: following` sobre un comando que
+        #    falló sería peor que no decir nada.
+        if ok:
+            with self._lock:
+                self._ir_modo = modo
+                if modo == 'off':
+                    self._ir_far = self._ir_near = 0
+                    self._ir_conduciendo = False
+                else:
+                    self._ir_far, self._ir_near = int(req.far_code), int(req.near_code)
         resp.success, resp.message = ok, msg or f'modo IR: {modo}'
         return resp
 
@@ -2766,6 +2963,15 @@ class RvrDriverNode(Node):
         if not ok:
             resp.success, resp.message = False, msg
             return resp
+        # 🔴 VALIDACIÓN RECUPERADA EL 2026-08-11. El nodo de ROS 1 SÍ comprobaba
+        #    los rangos aquí (`Atriz_rvr_node.py:522`) y al portar se perdió: era
+        #    una regresión de seguridad, no de estilo. El SDK tampoco valida.
+        if not (self._codigo_ir_valido(req.far_code)
+                and self._codigo_ir_valido(req.near_code)):
+            resp.success, resp.message = False, (
+                f'far_code={req.far_code} near_code={req.near_code}: los códigos '
+                'IR van de 0 a 7')
+            return resp
         self.get_logger().warn(
             'set_ir_evading: el RVR conducirá SOLO al detectar IR. Ni el watchdog '
             'de cmd_vel ni el collision_monitor intervienen. Espacio despejado.')
@@ -2773,6 +2979,10 @@ class RvrDriverNode(Node):
             self._rvr.start_robot_to_robot_infrared_evading(
                 far_code=req.far_code, near_code=req.near_code),
             'set_ir_evading')
+        if ok:
+            with self._lock:
+                self._ir_modo = 'evading'
+                self._ir_far, self._ir_near = int(req.far_code), int(req.near_code)
         resp.success, resp.message = ok, msg or 'evasión IR activada'
         return resp
 

@@ -2623,6 +2623,38 @@ class RvrDriverNode(Node):
             resp.success, resp.message = False, (
                 f"modo '{req.mode}' desconocido; usa {sorted(acciones)}")
             return resp
+
+        # 🔴 AGUJERO DE SEGURIDAD, encontrado el 2026-08-11 con DOS robots
+        #    delante. Es el MISMO que se tapó el 2026-08-01 en `set_ir_evading`,
+        #    y se quedó abierto aquí:
+        #
+        #        $ ros2 topic pub --once /emergency_stop std_msgs/msg/Empty {}
+        #        $ ros2 service call /set_ir_mode ... "{mode: 'following'}"
+        #          -> success=True          <- y el RVR se pone a conducir
+        #
+        #    `following` hace conducir al robot igual que `evading`: es un modo
+        #    del FIRMWARE, no pasa por `cmd_vel`, así que ni el watchdog ni el
+        #    collision_monitor lo ven. Arrancarlo con la parada ACTIVA es
+        #    exactamente lo que la parada existe para impedir.
+        #
+        #    Solo se protege `following`. `broadcasting` únicamente EMITE luz
+        #    infrarroja —no mueve este robot— y `off` tiene que funcionar
+        #    siempre, con parada o sin ella: apagar no se niega nunca.
+        #
+        # 📌 Y la lección: el arreglo del 2026-08-01 se dio por bueno mirando el
+        #    servicio que se arregló, no buscando los demás que movían el robot.
+        #    «Busca TODAS las menciones, no la primera» también vale para los
+        #    controles de seguridad.
+        if modo == 'following':
+            permitido, motivo = self._mover_permitido()
+            if not permitido:
+                resp.success, resp.message = False, motivo
+                return resp
+            self.get_logger().warn(
+                'set_ir_mode(following): el RVR conducirá SOLO al detectar IR. '
+                'Ni el watchdog de cmd_vel ni el collision_monitor intervienen. '
+                'Espacio despejado.')
+
         ok, _, msg = self._pedir(acciones[modo](), f'set_ir_mode({modo})')
         if modo == 'off' and ok:
             # Los otros dos, que son los que conducen. Sin esperar respuesta:

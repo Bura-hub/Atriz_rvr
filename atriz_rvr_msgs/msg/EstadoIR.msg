@@ -35,10 +35,27 @@ uint32 crudo
 # decisión mía, no un hecho del hardware.
 #   255 = ese sensor no ve nada  ·  0-15 = ha visto ese código
 #
-# ⏳ QUÉ LADO DEL ROBOT ES CADA UNO: **SIN MEDIR**. Se llaman `sensor_N` y no
-#    `frontal_izquierdo` justamente por eso. Los bautiza la prueba de viabilidad
-#    con dos robots (ver el diseño, §Pruebas); hasta entonces, nombrarlos sería
-#    inventarse la orientación del robot.
+# ✅ MEDIDO EL 2026-08-11 CON LOS DOS ROBOTS — y por eso SIGUEN llamándose
+#    `sensor_N`. No es que falte medirlo: es que la medición dice que no se
+#    pueden nombrar. Evidencia 100.
+#
+#      dónde está el emisor      rvr-01      rvr-02
+#      DELANTE                   [2,3]       [2,3]
+#      a la IZQUIERDA            [1]         [1]
+#      DETRÁS                    [1,3]       [1,2,3]
+#      a la DERECHA              [2,3]       [2,3]
+#      sensor_0                  NUNCA       NUNCA
+#
+#    · Reproducible entre robots, y el ciclo cierra al girar 360°: hay
+#      direccionalidad real.
+#    · 🔴 Pero DELANTE y DERECHA dan lo mismo. Discrimina TRES estados, no cuatro.
+#    · 🔴 Y `sensor_0` no lleva datos NUNCA, en ninguno de los dos robots, en
+#      ~10 experimentos. No es un sensor averiado de una unidad: es sistemático.
+#
+#    🔴 LA MÁSCARA DEL BOLT NO DESCRIBE AL RVR. No encaja en ninguna de las dos
+#       lecturas posibles del orden de bytes. Mismo patrón que los encoders,
+#       documentados `Left`/`Right` con payload real `LeftTicks`/`RightTicks`:
+#       la documentación del fabricante no es evidencia.
 uint8 sensor_0
 uint8 sensor_1
 uint8 sensor_2

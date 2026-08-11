@@ -1172,11 +1172,20 @@ class Robot:
 
         `255` en un sensor = ese no ve nada. `0-15` = ha visto ese código.
 
-        ⏳ **QUÉ LADO DEL ROBOT ES CADA SENSOR: NO ESTÁ MEDIDO.** Por eso se
-           llaman `sensor_N` y no `izquierda`/`derecha`. La máscara que lo diría
-           está documentada por Sphero **para el BOLT**, que es otro robot con
-           otro chasis. Hasta que se mida con dos RVR, esto dice **si** hay
-           alguien, no **por dónde**.
+        🔴 **ESTO DICE SI HAY ALGUIEN, Y SOLO A MEDIAS POR DÓNDE.** Y no por
+           falta de medirlo: está MEDIDO con los dos robots el 2026-08-11
+           (evidencia 100), y el resultado es que no se puede prometer más.
+
+               [1] solo          -> el otro robot está a tu IZQUIERDA
+               [1,3] / [1,2,3]   -> está DETRÁS
+               [2,3]             -> está DELANTE **o** A LA DERECHA  ← no separa
+
+           · `sensor_0` **no lleva datos nunca**, en ninguno de los dos robots.
+           · La lectura es **intermitente**: una sola muestra puede decir «no hay
+             nadie» habiéndolo. Hay que mirar varias veces.
+
+           Por eso siguen llamándose `sensor_N`: ponerles `frontal` o `izquierdo`
+           sería prometerte una precisión que el hardware no da.
         """
         e = self._ultimo('_estado_ir', timeout=5.0, que='/estado_ir')
         if not e.lecturas_validas:

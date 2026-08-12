@@ -145,3 +145,17 @@ uint32 reanudaciones_fallidas
 # 📝 true también cuando se arrancó con `color_detection:=true`. En ese caso NO
 #    se apaga sola: la puso alguien a propósito.
 bool color_activo
+
+# 🆕 2026-08-11 · ¿El FIRMWARE está conduciendo este robot por infrarrojos?
+#
+# 🔴 POR QUÉ ESTÁ AQUÍ Y NO SOLO EN /estado_ir: porque este es el canal BARATO.
+#    `/estado_robot` cuesta ~0,03 kB/s por robot contra los 13,05 de `/odom`, y
+#    es con el que el muro del profesor vigila los dieciséis a la vez.
+#
+#    `set_ir_mode('following')` y `set_ir_evading` activan un modo del firmware:
+#    el RVR conduce SIN pasar por `/cmd_vel`, así que el watchdog no lo ve, el
+#    `collision_monitor` no lo ve, y hasta hoy tampoco lo veía nadie desde fuera.
+#    Un robot cruzando el aula solo aparecía como «parado» en la interfaz.
+#
+#    Sale de `get_active_control_system_id() == 8` (infrared_follow_and_evade).
+bool conduciendo_por_ir

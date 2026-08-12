@@ -2269,6 +2269,11 @@ class RvrDriverNode(Node):
                 t_odom = self._t_odom_completo
                 fallidas = self._reanudaciones_fallidas
                 activo = self._streaming_activo
+                # 🆕 2026-08-11 · Se lee AQUI, dentro del cerrojo que ya esta
+                #    tomado, y no mas abajo:  es un Lock normal, NO
+                #    reentrante, asi que una segunda adquisicion en el mismo
+                #    metodo seria un bloqueo esperando a que alguien lo cambie.
+                ir_cond = self._ir_conduciendo
 
             m = EstadoRobot()
             m.header.stamp = self.get_clock().now().to_msg()
@@ -2311,6 +2316,8 @@ class RvrDriverNode(Node):
             #    un sensor a oscuras. Con el apagado automático, el estado hay que
             #    LEERLO, no recordarlo — y por eso no vale un flag en el navegador.
             m.color_activo = bool(self._color_detection)
+            # 🆕 El mismo dato que /estado_ir, en el canal barato. Ver el msg.
+            m.conduciendo_por_ir = bool(ir_cond)
 
             m.reanudaciones_fallidas = int(fallidas)
             m.latido = int(self._latido)

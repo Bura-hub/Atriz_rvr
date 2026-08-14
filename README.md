@@ -61,7 +61,7 @@ atriz-escaneo on | off | estado
 | `/battery_state` | `sensor_msgs/BatteryState` | | cada 30 s · `percentage` es **0–1**, no % · 🔴 para decidir si cargar mira `voltage` (umbrales del firmware: 7.0 / 6.5 V) |
 | `/scan` | `sensor_msgs/LaserScan` | **BEST_EFFORT** | 10.1 Hz · 0 si el barrido está apagado |
 | `/encoders` | `atriz_rvr_msgs/Encoder` | **BEST_EFFORT** | 16.5 Hz · ticks con signo, 7792 ticks/m |
-| `/estado_robot` | `atriz_rvr_msgs/EstadoRobot` | RELIABLE + TRANSIENT_LOCAL | **1 Hz, el canal barato** (caudal **SIN MEDIR** — la evidencia 68 es anterior a este topic): latido, parada, salud del enlace, `color_activo` y **`conduciendo_por_ir`** — el firmware conduciendo por IR no pasa por `/cmd_vel` y sin este campo nadie lo ve |
+| `/estado_robot` | `atriz_rvr_msgs/EstadoRobot` | RELIABLE + TRANSIENT_LOCAL | **1 Hz, el canal barato** (medido 2026-08-14: **0,35 kB/s** por rosbridge, 348 B/msg — caduca si el `.msg` gana campos): latido, parada, salud del enlace, `color_activo` y **`conduciendo_por_ir`** — el firmware conduciendo por IR no pasa por `/cmd_vel` y sin este campo nadie lo ve |
 | `/motor_status` | `atriz_rvr_msgs/MotorStatus` | | republicado a 1 Hz; el sondeo real es cada 30 s — una temperatura plana puede ser el mismo dato repetido |
 | `/estado_ir` | `atriz_rvr_msgs/EstadoIR` | **BEST_EFFORT** | estado del sistema IR (modo, emisión) |
 | `/infrared_messages` | `atriz_rvr_msgs/InfraredMessage` | **BEST_EFFORT** | mensajes IR **recibidos** de otro robot · el payload real trae solo `infrared_code` |

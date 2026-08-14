@@ -7,12 +7,12 @@
 > Se conserva porque documenta el sistema Noetic, que sigue siendo la ruta de vuelta atrás.
 >
 > **Lo que vale hoy está en el bloque de aquí abajo**, y el detalle completo —con el porqué de
-> cada decisión y lo que se midió— en el repositorio privado `Atriz_migracion_ros2`:
-> `02_manual/MANUAL_ATRIZ_ROS2.md`.
+> cada decisión y lo que se midió— en el repositorio `Atriz_migracion_ros2` (público desde el
+> 2026-08-11): `02_manual/MANUAL_ATRIZ_ROS2.md`.
 
 ---
 
-## ⚡ Referencia ROS 2 Jazzy — lo que de verdad corre (2026-07-31)
+## ⚡ Referencia ROS 2 Jazzy — lo que de verdad corre (actualizado 2026-08-14)
 
 ### Arrancar
 
@@ -58,8 +58,14 @@ atriz-escaneo on | off | estado
 | `/odom` | `nav_msgs/Odometry` | **BEST_EFFORT** | 16.5 Hz · `odom → base_footprint` |
 | `/imu` | `sensor_msgs/Imu` | **BEST_EFFORT** | 16.5 Hz |
 | `/color` | `atriz_rvr_msgs/Color` | **BEST_EFFORT** | `[0,0,0]` hasta encender la luz: servicio `/enable_color` (`std_srvs/SetBool`) o `color_detection:=true` al arrancar |
-| `/battery_state` | `sensor_msgs/BatteryState` | | cada 30 s · `percentage` es **0–1**, no % |
+| `/battery_state` | `sensor_msgs/BatteryState` | | cada 30 s · `percentage` es **0–1**, no % · 🔴 para decidir si cargar mira `voltage` (umbrales del firmware: 7.0 / 6.5 V) |
 | `/scan` | `sensor_msgs/LaserScan` | **BEST_EFFORT** | 10.1 Hz · 0 si el barrido está apagado |
+| `/encoders` | `atriz_rvr_msgs/Encoder` | **BEST_EFFORT** | 16.5 Hz · ticks con signo, 7792 ticks/m |
+| `/estado_robot` | `atriz_rvr_msgs/EstadoRobot` | RELIABLE + TRANSIENT_LOCAL | **1 Hz, el canal barato** (~0,03 kB/s): latido, parada, salud del enlace, `color_activo` y **`conduciendo_por_ir`** — el firmware conduciendo por IR no pasa por `/cmd_vel` y sin este campo nadie lo ve |
+| `/motor_status` | `atriz_rvr_msgs/MotorStatus` | | republicado a 1 Hz; el sondeo real es cada 30 s — una temperatura plana puede ser el mismo dato repetido |
+| `/estado_ir` | `atriz_rvr_msgs/EstadoIR` | **BEST_EFFORT** | estado del sistema IR (modo, emisión) |
+| `/infrared_messages` | `atriz_rvr_msgs/InfraredMessage` | **BEST_EFFORT** | mensajes IR **recibidos** de otro robot · el payload real trae solo `infrared_code` |
+| `/ambient_light` | `sensor_msgs/Illuminance` | **BEST_EFFORT** | 🔴 **no lo uses**: el sensor mira hacia arriba y lee los LEDs del propio robot reflejados en el soporte del LIDAR |
 | `/cmd_vel` | `geometry_msgs/Twist` | | 🔴 **NO publiques aquí**: salta la seguridad |
 | `/cmd_vel_raw` | `geometry_msgs/Twist` | | ✅ **la entrada correcta**, pasa por el monitor |
 
@@ -102,6 +108,18 @@ silencio: nombre, namespace, QoS, y no cancelar Nav2.
 ✅ Desde el 2026-07-31 el nodo **`cancelar_nav2`** (lo arranca `nav2.launch.py`) cancela los
 objetivos de Nav2 al pulsarla. Sin él, **liberar** la parada devolvía el robot a navegar: medido
 **34.7 cm** sin el arreglo contra **0.0 cm** con él.
+
+### Material docente (`scripts/estudiantes/`)
+
+Las prácticas del curso corren sobre **`atriz.py`**, la biblioteca del laboratorio — ningún guion
+de alumno toca `rclpy` ni publica en `/cmd_vel` (diseño en `Atriz_migracion_ros2 →
+03_operacion/API_LABORATORIO.md`). Prácticas **01-11** (movimiento y sensores), **20-24**
+(infrarrojos robot-a-robot, necesitan dos robots) y `90_template.py` para empezar una nueva.
+
+✅ **Verificado con el robot moviéndose** (2026-08-08 y 2026-08-13): ocho prácticas corridas y la
+sesión física en banda — `avanzar(0.20, 3)` da 58/59 cm, `girar(90)` ~90° con transportador,
+Ctrl-C paró 5 de 5 con ~1 cm de arrastre. ⏳ Falta solo el **seguidor de línea** (edge-following),
+que espera a que haya línea en el aula.
 
 ---
 

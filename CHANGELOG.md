@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-14] — README al día, y dos números que ahora están medidos
+
+### Changed
+- **`README.md`: el bloque de referencia ROS 2 se puso al día** (estaba fechado 2026-07-31):
+  los seis topics que faltaban en la tabla (`/estado_robot` con `conduciendo_por_ir`,
+  `/encoders`, `/motor_status`, `/estado_ir`, `/infrared_messages`, `/ambient_light` con su
+  «no lo uses»), la sección del material docente con su estado físico (sesión en banda el
+  2026-08-13, solo queda el seguidor de línea), y el repo de migración ya no figura como
+  privado (es público desde el 2026-08-11).
+- **El caudal de `/estado_robot` que decía el README era inventado y se corrigió dos veces
+  el mismo día**: el «~0,03 kB/s» era el de `/battery_state` copiado (aviso del PC) — primero
+  se retiró a «SIN MEDIR» y después entró el número medido: **0,35 kB/s por rosbridge, 348
+  B/msg** (evidencia 110 de `Atriz_migracion_ros2`).
+
+### Notas de operación (viven en `Atriz_migracion_ros2`, se citan aquí por visibilidad)
+- El robot ahora **se cura solo** de dos fallos: nacer mudo en DDS (`atriz-vigia-dds`,
+  evidencia 113) y el USB del LIDAR desenchufado (`atriz-lidar-reenganche` por udev,
+  evidencia 115). Al parar la navegación, el barrido **vuelve al estado que la unidad
+  encontró** (evidencia 114).
+
+
 ## [2026-08-09] — `Aproximacion.radius` del collision_monitor: 0.18 → 0.15
 
 ### Changed

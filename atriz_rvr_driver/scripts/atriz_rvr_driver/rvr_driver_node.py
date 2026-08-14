@@ -390,6 +390,12 @@ class RvrDriverNode(Node):
         self._muestras_al_reanudar = 0
         #: Intentos de reanudar SEGUIDOS que no devolvieron ni una muestra.
         self._reanudaciones_fallidas = 0
+        #: Espera creciente entre intentos (2026-08-14, evidencia 116). Sin
+        #: ella, un RVR APAGADO —cargando, lo cotidiano— provocaba un intento
+        #: cada ~6 s para siempre: ~46.000 líneas/día por robot sobre una
+        #: microSD, ahogando los errores de verdad (evidencia 52). No antes de
+        #: este instante monotónico no se lanza otro intento.
+        self._no_reanudar_antes_s = 0.0
         #: Contador monótono de publicaciones de `/estado_robot`. Es la señal de
         #: vida del NODO: un topic que existe no prueba que haya nadie detrás.
         self._latido = 0
@@ -1264,8 +1270,29 @@ class RvrDriverNode(Node):
             # robot va bien y hay silencio de sobra— es justamente el que tiene
             # que poner el contador a cero.
             if self._n_muestras > self._muestras_al_reanudar:
+                # ── EL «REANUDADO» HONESTO VIVE AQUÍ (2026-08-14, ev. 116) ───
+                # Antes lo imprimía `_recuperar_streaming` cuando wake+stop+
+                # start no lanzaban excepción — que con el RVR APAGADO es
+                # siempre: 8 «streaming reanudado» en 30 s con /odom a cero
+                # (evidencia 52). El único sitio que puede decir «volvió» es
+                # este: donde se comprueba que LLEGÓ UNA MUESTRA.
+                if self._reanudaciones_fallidas > 0:
+                    self.get_logger().info(
+                        f'el RVR VOLVIÓ: primera muestra tras '
+                        f'{self._reanudaciones_fallidas} intento(s) de '
+                        f'reanudación sin respuesta.'
+                    )
                 self._reanudaciones_fallidas = 0
+                self._no_reanudar_antes_s = 0.0
         if silencio < self._timeout_silencio:
+            return
+        # ── ESPERA CRECIENTE (2026-08-14, evidencia 116) ─────────────────────
+        # timeout × 2^fallidas, con tope de 60 s: 3, 6, 12, 24, 48, 60, 60…
+        # Un RVR dormido de verdad se recupera al PRIMER intento (medido), así
+        # que la espera solo crece en el caso que no tiene arreglo automático:
+        # el RVR apagado. De ~14.000 intentos/día a ~1.440 líneas en el peor
+        # caso, y el journal deja de ahogar los errores de verdad.
+        if self._ahora_s() < self._no_reanudar_antes_s:
             return
 
         # AÑADIDO 2026-08-04 · se cuenta el intento y se fotografía el número de
@@ -1274,14 +1301,28 @@ class RvrDriverNode(Node):
         with self._lock:
             self._reanudaciones_fallidas += 1
             self._muestras_al_reanudar = self._n_muestras
+            fallidas = self._reanudaciones_fallidas
+            espera = min(60.0, self._timeout_silencio * (2.0 ** fallidas))
+            self._no_reanudar_antes_s = self._ahora_s() + espera
 
         self._n_recuperaciones += 1
-        self.get_logger().warn(
-            f'el RVR lleva {silencio:.1f} s sin enviar telemetría '
-            f'(se esperan ~{1000 / self._intervalo_ms:.1f} muestras/s). '
-            'Lo más probable es que se haya dormido. Intentando reanudar '
-            f'(intento nº {self._n_recuperaciones})…'
-        )
+        if fallidas <= 1:
+            self.get_logger().warn(
+                f'el RVR lleva {silencio:.1f} s sin enviar telemetría '
+                f'(se esperan ~{1000 / self._intervalo_ms:.1f} muestras/s). '
+                'Lo más probable es que se haya dormido. Intentando reanudar '
+                f'(intento nº {self._n_recuperaciones})…'
+            )
+        else:
+            # A partir del segundo intento sin respuesta, el diagnóstico
+            # honesto ya no es «se durmió»: un RVR dormido vuelve al primer
+            # intento (medido, 3 de 3). Esto es un RVR apagado, cargando o
+            # con el cable fuera — y se dice, con la próxima cita anotada.
+            self.get_logger().warn(
+                f'sigue SIN llegar ni una muestra del RVR tras {fallidas} '
+                f'intentos: apagado, cargando o el cable fuera. Próximo '
+                f'intento en {espera:.0f} s.'
+            )
         self._recuperando = True
         self._enviar(self._recuperar_streaming(), 'recuperación del streaming')
 
@@ -1313,9 +1354,14 @@ class RvrDriverNode(Node):
             # primera muestra nueva todavía no habrá llegado.
             with self._lock:
                 self._t_ultima_muestra = self._ahora_s()
-            self.get_logger().info(
-                'streaming reanudado. Si esto se repite cada pocos minutos, el '
-                'keepalive no está llegando: revisa keepalive_period y el enlace.'
+            # 🔴 AQUÍ DECÍA «streaming reanudado» — Y ERA MENTIRA (ev. 52/116):
+            #    con el RVR apagado, wake+stop+start NO lanzan, así que esto se
+            #    imprimía cada ~6 s para siempre sobre un robot muerto. El
+            #    «volvió» de verdad lo imprime `_vigilar_silencio` cuando LLEGA
+            #    una muestra — el único testigo que no puede mentir.
+            self.get_logger().debug(
+                'reanudación enviada sin excepción — eso NO prueba nada: el '
+                'éxito es que llegue una muestra.'
             )
         except Exception:
             # Aquí NO se calla: que la recuperación falle es exactamente lo que

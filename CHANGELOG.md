@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [2026-08-14] — README al día, y dos números que ahora están medidos
+## [2026-08-14] — README al día, dos números medidos, y el driver deja de mentir con el RVR apagado
+
+### Fixed
+- **`rvr_driver_node.py`: «streaming reanudado» era mentira con el RVR apagado y ya no existe**
+  (evidencias 52 y 116 de `Atriz_migracion_ros2`). `wake+stop+start` no lanzan excepción con el
+  robot muerto, así que el mensaje salía cada ~6 s para siempre (~46.000 líneas/día por robot
+  sobre la microSD). Ahora el éxito lo declara el único testigo válido — el contador de
+  muestras—: **«el RVR VOLVIÓ: primera muestra tras N intento(s)»**. Verificado con un apagado
+  real: 0 mentiras en la ventana.
+- **Espera creciente entre reintentos de reanudación**: `timeout × 2^fallidas` con tope de
+  60 s (3→6→12→24→48→60, progresión medida en el journal). Desde el 2º intento el diagnóstico
+  dice la verdad: «apagado, cargando o el cable fuera. Próximo intento en N s». ⚠️ Coste: tras
+  encender el RVR, el reenganche puede tardar hasta ~1 min (necesita un intento posterior).
+- **`supervisor_navegacion.py`: el detalle de `nav_latcheado` incorpora lo medido** (evidencia
+  112): «espera ~5 minutos (el bloqueo caduca solo) y quita la causa antes de reintentar, o
+  reset-failed desde el robot para no esperar» — antes solo mandaba al reset-failed.
 
 ### Changed
 - **`README.md`: el bloque de referencia ROS 2 se puso al día** (estaba fechado 2026-07-31):

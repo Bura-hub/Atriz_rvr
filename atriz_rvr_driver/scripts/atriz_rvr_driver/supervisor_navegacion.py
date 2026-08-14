@@ -53,8 +53,11 @@ Evidencia 79 (2026-08-07, n=2 sobre rvr-01):
 
 🔴 **Un solo `start` sin mapa deja la unidad LATCHEADA.** `StartLimitBurst=3`
    cuenta *arranques*, no clics: el inicial más dos reintentos automáticos son
-   ya los tres, en ~40 s. De `failed` solo se sale con `reset-failed`, o sea con
-   privilegio, que nadie tiene desde el navegador.
+   ya los tres, en ~40 s. De `failed` se sale con `reset-failed` (privilegio,
+   que nadie tiene desde el navegador) **o esperando ~5 minutos**: medido el
+   2026-08-14 (evidencia 112), la ventana de `StartLimitIntervalSec=300` es
+   deslizante y el bloqueo caduca solo — pero sin quitar la causa, el
+   siguiente intento vuelve a latchear.
    → **Por eso este nodo se NIEGA antes de llamar a systemctl.** Un `isfile` de
      coste cero evita el único estado del que la web no puede salir sola.
 """
@@ -262,10 +265,15 @@ class Supervisor(Node):
                 motivos.append(f'{unidad} no está instalada en este robot '
                                f'(falta el fichero; no es un fallo pasajero)')
             if self._latcheado(unidad):
+                # El «o espera ~5 min» está MEDIDO (evidencia 112): la ventana
+                # de StartLimitIntervalSec=300 es deslizante y el bloqueo
+                # caduca solo. Se dice entero: sin quitar la causa, reintentar
+                # solo vuelve a latchear.
                 motivos.append(
-                    f'{unidad} está bloqueada por reintentos agotados: hace '
-                    f'falta «sudo systemctl reset-failed {unidad}» DESDE EL '
-                    f'ROBOT, no se puede desde la web')
+                    f'{unidad} está bloqueada por reintentos agotados: espera '
+                    f'~5 minutos (el bloqueo caduca solo) y QUITA LA CAUSA '
+                    f'antes de reintentar, o «sudo systemctl reset-failed '
+                    f'{unidad}» desde el robot para no esperar')
             if cual == 'nav':
                 if not self._hay_mapa():
                     motivos.append(f'no hay mapa legible en {self._mapa}')
@@ -341,7 +349,8 @@ class Supervisor(Node):
         detalle = ''
         if latcheado:
             estado = EstadoNavegacion.FALLO
-            detalle = (f'bloqueada por reintentos agotados: hace falta '
+            detalle = (f'bloqueada por reintentos agotados: caduca sola en '
+                       f'~5 min (quita la causa antes de reintentar), o '
                        f'«sudo systemctl reset-failed {unidad}» desde el robot')
             self._t_pedido[cual] = None
         elif estado_sd == 'failed':

@@ -12,6 +12,12 @@ Documentation=https://github.com/Bura-hub/Atriz_migracion_ros2
 # necesita el grafo ROS levantado. Sin el driver no tiene con qué trabajar.
 After=network-online.target atriz-robot.service
 Wants=network-online.target
+# ⚠️ `PartOf=` tiene un interplay MEDIDO con el vigía de DDS (evidencia 113):
+#    cuando el vigía cura un robot mudo reinicia atriz-robot, y `PartOf=`
+#    propaga ese reinicio AQUÍ — la ejecución del alumno muere con los cuatro
+#    peldaños y el aviso «el agente se reinicia». Es lo correcto (su sesión ROS
+#    estaba rota igual), pero tiene que estar ESCRITO: un programa que muere
+#    «solo» sin esta nota se buscaría en el sitio equivocado.
 PartOf=atriz-robot.service
 
 [Service]
@@ -22,7 +28,11 @@ Type=simple
 #    alumno puede leer lo que `sphero` lea.
 User=sphero
 Group=sphero
-SupplementaryGroups=dialout video
+# `dialout`: mismo alcance que una sesión SSH de sphero (los puertos serie).
+# 📝 Aquí ponía también `video` y se quitó en la auditoría del 2026-08-14: el
+#    robot no tiene cámara (decisión del usuario) y un grupo de más es alcance
+#    de más sin motivo escrito.
+SupplementaryGroups=dialout
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 🔴🔴 `RuntimeDirectoryPreserve=yes` NO ES OPCIONAL, Y AQUÍ ESTÁ EL PORQUÉ
@@ -46,7 +56,15 @@ ExecStart=/usr/local/bin/atriz-agente.sh
 #    de irse, y el primero de esos peldaños es el Ctrl-C que `atriz.py` captura
 #    para parar el robot y apagar el barrido. Un reinicio del agente que deje un
 #    guion conduciendo es peor que el propio reinicio.
+#    📝 Esa promesa la cumple `apagar_ordenado()` de agente_sesion.py — añadido
+#    en la auditoría del 2026-08-14: hasta entonces la unidad lo prometía y el
+#    código no lo tenía (el SIGINT era un KeyboardInterrupt a mitad de bucle).
 KillSignal=SIGINT
+# `mixed`: la señal SOLO al proceso principal — es quien orquesta los peldaños
+# del hijo. Con el `control-group` por defecto, el hijo recibiría el SIGINT de
+# systemd Y el del agente, y un doble Ctrl-C es justo el camino que atriz.py
+# tuvo que endurecer una vez. El SIGKILL final del timeout sí va a todos.
+KillMode=mixed
 # 45 s: los cuatro peldaños del hijo (10 + 5 + margen) caben dentro.
 TimeoutStopSec=45
 

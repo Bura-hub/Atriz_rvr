@@ -286,7 +286,12 @@ def test_el_hijo_NO_ve_lo_que_el_entorno_descarta(taller):
         prog = escribir_guion(taller, "import os\nprint('X', os.environ.get('SECRETO_DE_PRUEBA'))\n")
         ej = lanzar([sys.executable, prog], entorno(taller), str(taller))
         try:
-            assert 'X None' in leer_hasta(ej, 3, hasta='X ')
+            # 🔴 `hasta='X '` era una CARRERA del propio arnés (auditoría
+            #    2026-08-14, 1 fallo en 4 tandas en la Pi): el PTY puede
+            #    entregar «X » en un trozo y «None» en el siguiente, y
+            #    `leer_hasta` cortaba al ver la subcadena. Se espera la línea
+            #    ENTERA, que es lo que la aserción necesita.
+            assert 'X None' in leer_hasta(ej, 3, hasta='X None')
         finally:
             senalar(ej.pgid, 'SIGKILL')
     finally:
@@ -320,3 +325,35 @@ def test_leer_devuelve_None_cuando_el_hijo_cierra(taller):
         time.sleep(0.05)
     cosechar(ej.pid)
     assert cerrado
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# La carrera del pgid — añadidas en la auditoría del 2026-08-14 (evidencia 117)
+# ═══════════════════════════════════════════════════════════════════════════
+def test_el_pgid_es_el_pid_y_NUNCA_el_grupo_del_padre(taller):
+    """🔴 CONFIRMADO POR EFECTO en la Pi: `os.getpgid(pid)` justo tras el fork
+    corre en CARRERA con el `setsid()` del hijo. Si gana el padre, `pgid` es el
+    grupo DEL PROPIO AGENTE — y el peldaño de SIGKILL se suicida. Medido: 2 de
+    4 tandas de esta suite murieron enteras por SIGKILL; con `pgid = pid`,
+    6 de 6 limpias. Tras `setsid`, pgid == pid por definición: no hay nada que
+    preguntar, y preguntar es lo que abría la ventana."""
+    prog = escribir_guion(taller, 'import time\ntime.sleep(5)\n')
+    ej = lanzar([sys.executable, prog], entorno(taller), str(taller))
+    try:
+        assert ej.pgid == ej.pid
+        assert ej.pgid != os.getpgrp(), (
+            'el pgid es el grupo de ESTE proceso: señalarlo nos mataría a nosotros')
+    finally:
+        senalar(ej.pgid, 'SIGKILL')
+        cosechar(ej.pid)
+
+
+def test_senalar_y_vive_se_niegan_con_un_pgid_absurdo():
+    """El cinturón: `os.killpg(0, sig)` señala al grupo DEL LLAMANTE, y
+    `killpg(1, sig)` a init. Un pgid <= 1 jamás puede ser un hijo nuestro:
+    la respuesta es negarse, nunca preguntar al kernel."""
+    assert senalar(0, 'SIGKILL') is False
+    assert senalar(1, 'SIGTERM') is False
+    assert senalar(-1, 'SIGINT') is False
+    assert vive(0) is False
+    assert vive(1) is False

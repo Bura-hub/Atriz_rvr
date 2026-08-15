@@ -100,10 +100,18 @@ def lanzar(argv: list[str], entorno: dict, cwd: str,
     # ── PADRE ───────────────────────────────────────────────────────────────
     os.set_blocking(maestro, False)
     redimensionar(maestro, columnas, filas)
-    try:
-        pgid = os.getpgid(pid)
-    except OSError:
-        pgid = pid
+    # 🔴🔴 `pgid = pid`, SIN preguntarle al kernel. CONFIRMADO POR EFECTO en la
+    #    Pi (2026-08-14, evidencia 117): `os.getpgid(pid)` aquí corre en CARRERA
+    #    con el `setsid()` del hijo. Si gana el padre, devuelve el grupo DEL
+    #    PROPIO AGENTE — y el peldaño de SIGKILL de la parada se suicida con
+    #    todo su grupo. Medido: 2 de 4 tandas de la suite murieron enteras por
+    #    SIGKILL; con esta línea, 6 de 6 limpias.
+    #
+    #    Tras `setsid()` el pgid del hijo ES su pid, por definición — y
+    #    `pty.fork()` garantiza ese `setsid` en el hijo (es lo que hace al
+    #    esclavo su terminal de control). No hay nada que preguntar; preguntar
+    #    era la ventana.
+    pgid = pid
     return Ejecucion(pid=pid, pgid=pgid, maestro=maestro)
 
 
@@ -162,6 +170,11 @@ def senalar(pgid: int, nombre: str) -> bool:
     senal = _POR_NOMBRE.get(nombre)
     if senal is None:
         return False
+    # 🔴 El cinturón del arreglo de `lanzar()`: `os.killpg(0, s)` señala al
+    #    grupo DEL LLAMANTE y `killpg(1, s)` a init. Un pgid <= 1 jamás puede
+    #    ser un hijo nuestro: la respuesta es negarse, no preguntar al kernel.
+    if pgid <= 1:
+        return False
     try:
         os.killpg(pgid, senal)
         return True
@@ -172,7 +185,14 @@ def senalar(pgid: int, nombre: str) -> bool:
 
 
 def vive(pgid: int) -> bool:
-    """¿Queda alguien del grupo? La señal 0 no manda nada: solo pregunta."""
+    """¿Queda alguien del grupo? La señal 0 no manda nada: solo pregunta.
+
+    ⚠️ Con `pgid <= 1` la pregunta misma miente: `killpg(0, 0)` responde por el
+       grupo DEL LLAMANTE — o sea «sí» siempre — y la pantalla enseñaría
+       «corriendo» para la eternidad. Un pgid así no es de ningún hijo nuestro.
+    """
+    if pgid <= 1:
+        return False
     try:
         os.killpg(pgid, 0)
         return True

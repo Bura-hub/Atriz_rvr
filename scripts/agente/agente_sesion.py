@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import signal
 import sys
 import time
 import uuid
@@ -86,6 +88,9 @@ ranura = Ranura()
 #: La ejecución viva. Uno por proceso: la ranura ya garantiza que sea una.
 actual: dict | None = None
 clientes: set = set()
+#: True desde que systemd nos manda parar: no se aceptan ejecuciones nuevas y
+#: el bucle se detiene en cuanto la que haya termine sus peldaños.
+apagando = False
 
 
 def difundir(mensaje: dict) -> None:
@@ -153,6 +158,15 @@ def terminar(motivo: str, senal: str | None = None) -> None:
         return
     ej = actual['ej']
     codigo, senal_real = agente_pty.cosechar(ej.pid)
+    # 🔴 QUITAR EL HANDLER ANTES DE CERRAR EL FD (auditoría 2026-08-14). Sin
+    #    esto, tornado conserva el registro del fd cerrado, el kernel REUTILIZA
+    #    ese número para el PTY de la SIGUIENTE ejecución, y el `add_handler`
+    #    nuevo choca con el rancio: el agente sobrevive a una ejecución y
+    #    revienta en la segunda — que es justo la que nadie prueba.
+    try:
+        tornado.ioloop.IOLoop.current().remove_handler(ej.maestro)
+    except (KeyError, ValueError, OSError):
+        pass
     try:
         os.close(ej.maestro)
     except OSError:
@@ -167,9 +181,15 @@ def terminar(motivo: str, senal: str | None = None) -> None:
         'lineas_descartadas': actual['limitador'].lineas_descartadas,
         'efecto': efecto,
     })
+    # La carpeta de la sesión es tmpfs = RAM: una clase entera de ejecuciones
+    # la iría comiendo sin devolverla hasta el reinicio. Se recoge al terminar.
+    shutil.rmtree(os.path.join(DIR_RUN, actual['sid']), ignore_errors=True)
     actual = None
     ranura.soltar()
     difundir(estado_actual())
+    # Si systemd nos pidió parar, este era el último encargo: ahora sí.
+    if apagando:
+        tornado.ioloop.IOLoop.current().stop()
 
 
 def comprobar_efecto() -> dict:
@@ -320,6 +340,22 @@ class Sesion(tornado.websocket.WebSocketHandler):
         elif orden.op == 'atriz_listar':
             self.write_message(json.dumps(listado()))
         elif orden.op == 'atriz_leer':
+            # El docstring de `nombre_seguro` promete que el nombre «solo sirve
+            # para BUSCARLO en la lista que el propio agente produjo» — y esta
+            # línea lo cumple de verdad (auditoría 2026-08-14): primero se
+            # comprueba que el fichero ESTÁ en el directorio real, y solo
+            # entonces se abre. La regex ya impedía rutas; esto alinea el código
+            # con su contrato.
+            try:
+                presentes = set(os.listdir(DIR_PRACTICAS))
+            except OSError:
+                presentes = set()
+            if orden.datos['fichero'] not in presentes:
+                self.write_message(json.dumps({
+                    'op': 'atriz_rechazo', 'codigo': 'NO_ESTA',
+                    'motivo': f'{orden.datos["fichero"]} no está en este robot',
+                }))
+                return
             ruta = os.path.join(DIR_PRACTICAS, orden.datos['fichero'])
             try:
                 with open(ruta, encoding='utf8') as f:
@@ -332,6 +368,15 @@ class Sesion(tornado.websocket.WebSocketHandler):
                     'op': 'atriz_rechazo', 'codigo': 'NO_ESTA', 'motivo': str(e),
                 }))
         elif orden.op == 'atriz_exec':
+            if apagando:
+                # El agente está cerrando (reinicio de la unidad): aceptar una
+                # ejecución nueva aquí la mataría a los pocos segundos con un
+                # SIGINT que el alumno no pidió. Mejor negarse y decirlo.
+                self.write_message(json.dumps({
+                    'op': 'atriz_rechazo', 'codigo': 'AGENTE_PARANDO',
+                    'motivo': 'el agente se está reiniciando: reintenta en unos segundos',
+                }))
+                return
             self._arrancar(orden.datos)
         elif orden.op == 'atriz_stdin':
             if actual is not None:
@@ -385,6 +430,28 @@ class Sesion(tornado.websocket.WebSocketHandler):
         difundir(estado_actual(self.sujeto))
 
 
+def apagar_ordenado() -> None:
+    """Lo que la unidad PROMETE en su `KillSignal=SIGINT` — y hasta la auditoría
+    del 2026-08-14 no existía: sin manejador, el SIGINT era un KeyboardInterrupt
+    que tumbaba tornado a mitad de bucle, y los «cuatro peldaños al hijo» del
+    comentario de la unidad no los aplicaba nadie (el hijo recibía la señal de
+    rebote por `KillMode=control-group`, y al vencer el timeout, SIGKILL a pelo
+    sin pasar por SIGTERM).
+
+    Ahora: sin ejecución → parar el bucle ya. Con ejecución → recorrer los
+    peldaños de `plan_de_parada` y detener el bucle cuando `terminar()` acabe.
+    Cabe en los 45 s de `TimeoutStopSec` (10 + 5 + margen).
+    """
+    global apagando
+    apagando = True
+    if actual is None:
+        tornado.ioloop.IOLoop.current().stop()
+        return
+    difundir({'op': 'atriz_aviso', 'nivel': 'ATENCION',
+              'mensaje': 'el agente se reinicia: parando tu programa con Ctrl-C'})
+    parar('AGENTE_PARANDO')
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description='Agente de sesión del taller Atriz')
     p.add_argument('--robot', type=int, required=True, help='número de este robot (1-16)')
@@ -411,6 +478,11 @@ def main() -> None:
     app.listen(args.puerto)
     print(f'agente de sesión del robot {args.robot} en ws://0.0.0.0:{args.puerto}')
     print(f'  prácticas: {DIR_PRACTICAS}')
+    # Las señales de systemd (SIGINT por KillSignal=; SIGTERM por si alguien lo
+    # cambia) entran por el camino seguro-para-señales del bucle.
+    for s in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(s, lambda _n, _f: tornado.ioloop.IOLoop.current()
+                      .add_callback_from_signal(apagar_ordenado))
     tornado.ioloop.PeriodicCallback(latir, 1000).start()
     tornado.ioloop.IOLoop.current().start()
 

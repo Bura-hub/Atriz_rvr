@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-15d] — `atriz.py` apagaba el barrido de OTRO 3 de cada 5 veces, en silencio
+
+### Fixed
+- 🔴🔴 **`_encender_barrido()` daba 1,0 s al primer `/scan` para decidir si el barrido ya estaba
+  encendido, y el primer mensaje tarda más de eso la mitad de las veces.** Cuando el plazo
+  vencía, se creía dueña del barrido y al cerrar llamaba a `/stop_scan` sobre un barrido ajeno
+  — **dejando ciega a una navegación en curso, y sin imprimir su propio aviso**.
+
+  Encontrado por la casilla 4-9 de `VALIDAR_CON_EL_ROBOT.md`, medido desde el terminal web
+  (evidencia 119 en `atriz_migracion`). Con el barrido encendido de antemano y `/scan` a 12 Hz:
+
+  ```
+  corrida 1  aviso=0 → APAGADO      corrida 4  aviso=1 → ENCENDIDO
+  corrida 2  aviso=0 → APAGADO      corrida 5  aviso=1 → ENCENDIDO
+  corrida 3  aviso=0 → APAGADO
+  ```
+
+  La correlación es exacta: falla la **detección**, no la decisión — `debe_apagar_balido()` hace
+  bien su trabajo con la bandera que le dan.
+
+  **La causa, medida:** el retardo no es el ritmo del topic, es el **descubrimiento de DDS**.
+  Primer `/scan` en una suscripción recién creada: `40 · 1282 · 16 · 1677 · 28 · 964 ms` (n=6).
+  Partido en sus dos mitades: `emparejar 11-1598 ms` y, una vez emparejado, `mensaje en
+  22-333 ms`. Casi todo es descubrimiento.
+
+  ✅ **El arreglo separa las dos esperas**, porque son dos fenómenos distintos y solo uno es
+  lento: primero `ESPERA_EMPAREJAR_S = 5.0` (3× el peor emparejamiento medido) a que
+  `get_publisher_count() > 0`, y **solo entonces** `ESPERA_PRIMER_SCAN_S = 1.0` (3× el peor
+  hueco medido) al dato.
+  🔴 **Y el segundo plazo NO se puede subir a lo bruto**: con el barrido apagado —el caso
+  normal— se paga entero en cada arranque de cada programa de cada alumno.
+  📌 Control medido: con el barrido **apagado**, la suscripción empareja en **10 ms** y no llega
+  ningún mensaje en 8 s. Por eso el emparejamiento sirve de señal y el mensaje de discriminador.
+
+  📝 La familia: **un plazo puesto contra un fenómeno cuya latencia no se había medido**, igual
+  que el `default_server_timeout: 20` de Nav2 y el `MAX_SIN_CAMBIO = 5` de `girar()`.
+
+  ⚠️ **Sin prueba unitaria**, y se dice: la lógica nueva es espera de E/S y necesita ROS. La
+  verificación es empírica —5 corridas antes y 5 después— y **la escribió el PC, que no puede
+  correr las 65 pruebas de este fichero**. 👤 Revisadlo desde la Pi.
+
+---
+
 ## [2026-08-15c] — `soy_el_dueno` se difundía calculado para UNO, y el segundo alumno veía el programa del primero como suyo
 
 ### Fixed

@@ -120,6 +120,19 @@ RITMO_HZ = 10.0
 #    Evidencia 85.
 SILENCIO_ODOM_S = 2.0
 
+#: Cuanto se espera a que la suscripcion a `/scan` EMPAREJE con su publicador.
+#: 🔴 No es el ritmo del topic: es el descubrimiento de DDS, y es lo lento.
+#:    Medido el 2026-08-15 desde el terminal, n=5: 11 · 638 · 1400 · 1523 · 1598 ms.
+#:    5,0 s son 3x el peor caso medido. Se paga UNA vez, al construir el Robot.
+ESPERA_EMPAREJAR_S = 5.0
+
+#: Y cuanto se espera al PRIMER barrido **una vez emparejado**. Esto si va con
+#: el ritmo del topic. Medido el mismo dia: 22 · 26 · 50 · 66 · 333 ms (n=5).
+#: 🔴 1,0 s = 3x el peor hueco medido, y NO mas: cuando el barrido esta apagado
+#:    -el caso normal- este plazo se paga ENTERO en cada arranque de cada
+#:    programa de cada alumno.
+ESPERA_PRIMER_SCAN_S = 1.0
+
 
 def odom_rancia(ahora, t_ultima_muestra, umbral_s=SILENCIO_ODOM_S):
     """¿Lleva /odom demasiado tiempo sin una muestra NUEVA?
@@ -382,7 +395,9 @@ class Robot:
         self._bateria = None
         self._nodo.create_subscription(
             Odometry, '/odom', lambda m: setattr(self, '_odom', m), sensor)
-        self._nodo.create_subscription(
+        #: 🔴 Se GUARDA la suscripcion, y no es cosmetico: `_encender_barrido`
+        #: necesita preguntarle si ya emparejo con el publicador. Ver alli.
+        self._sub_scan = self._nodo.create_subscription(
             LaserScan, '/scan', lambda m: setattr(self, '_scan', m), sensor)
         self._nodo.create_subscription(
             BatteryState, '/battery_state',
@@ -615,10 +630,59 @@ class Robot:
         0.0 cm contra 9.9 del control. Desde fuera es identico a un robot roto.
         """
         # ¿Lo tenia encendido otro? Se mira ANTES de encenderlo nosotros.
-        # Una espera corta basta: /scan va a ~10 Hz cuando esta activo.
+        #
+        # ═══════════════════════════════════════════════════════════════════
+        # 🔴🔴 AQUI HABIA UN `timeout=1.0` Y APAGABA EL BARRIDO DE OTRO,
+        #      3 DE CADA 5 VECES Y EN SILENCIO
+        # ═══════════════════════════════════════════════════════════════════
+        # El comentario decia «una espera corta basta: /scan va a ~10 Hz cuando
+        # esta activo». Cierto para el RITMO, y falso para el PRIMER mensaje:
+        # antes de recibir nada hay que EMPAREJAR con el publicador, y eso no lo
+        # acota el ritmo del topic. Medido desde el terminal el 2026-08-15, con
+        # el barrido ENCENDIDO y suscripciones recien creadas:
+        #
+        #     primer /scan:  40 · 1282 · 16 · 1677 · 28 · 964 ms   (n=6)
+        #                          ^^^^        ^^^^        ^^^     > 1000
+        #
+        # Con 1,0 s de plazo, la mitad de las veces concluia «no llegaba nada»,
+        # se creia dueña, y al cerrar llamaba a `/stop_scan` sobre un barrido
+        # ajeno. Medido por efecto: **3 de 5 corridas dejaron el LIDAR apagado**
+        # con una navegacion hipotetica que se habria quedado CIEGA, y sin
+        # imprimir el aviso de abajo — o sea sin que nadie se enterara.
+        #
+        # ✅ EL ARREGLO SEPARA LAS DOS ESPERAS, porque son dos fenomenos
+        #    distintos y solo uno es lento. Medido el mismo dia, partiendo el
+        #    retardo en sus dos mitades:
+        #
+        #     emparejar   primer_msg   hueco
+        #      1523 ms      1549        26        <- casi TODO es descubrimiento
+        #       638          688        50
+        #      1400         1733       333        <- el peor hueco medido
+        #        11           33        22
+        #      1598         1664        66
+        #
+        #    Una vez emparejado, el mensaje llega en 22-333 ms. Asi que:
+        #      1) se espera al EMPAREJAMIENTO, que ocurre igual esté el barrido
+        #         encendido o apagado — control medido: con el barrido APAGADO
+        #         empareja en 10 ms y no llega ningun mensaje en 8 s;
+        #      2) y solo entonces se abre una ventana corta para el DATO.
+        #
+        # 🔴 Y el plazo del dato NO se puede subir a lo bruto: cuando el barrido
+        #    esta apagado —el caso NORMAL— se paga entero en cada arranque de
+        #    cada programa de cada alumno. Por eso 1,0 s (3x el peor hueco
+        #    medido) y no 5.
+        #
+        # 📝 La familia: **un plazo puesto contra un fenomeno cuya latencia no
+        #    se habia medido**, igual que el `default_server_timeout: 20` de
+        #    Nav2 y el `MAX_SIN_CAMBIO = 5` de `girar()`.
         self._barrido_era_mio = True
+        limite = time.monotonic() + ESPERA_EMPAREJAR_S
+        while time.monotonic() < limite:
+            if self._sub_scan.get_publisher_count() > 0:
+                break
+            time.sleep(0.02)
         try:
-            self._ultimo('_scan', timeout=1.0, que='/scan')
+            self._ultimo('_scan', timeout=ESPERA_PRIMER_SCAN_S, que='/scan')
             self._barrido_era_mio = False
             print('AVISO: el barrido del LIDAR ya estaba encendido (¿navegacion\n'
                   '       en marcha?). NO lo apagare al cerrar, para no dejar\n'

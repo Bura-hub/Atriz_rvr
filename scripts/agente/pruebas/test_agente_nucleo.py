@@ -344,11 +344,23 @@ def test_entorno_conserva_el_pythonpath_de_ros_DETRAS_de_la_sesion():
     (la copia de atriz.py debe ganar), y el resto del PYTHONPATH del agente,
     detrás."""
     import os
-    padre = {'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages:/otro'}
+    #: ⚠️ EL SEPARADOR SE ARMA CON `os.pathsep`, NO SE ESCRIBE A MANO.
+    #:
+    #: Esta prueba llegó del robot con un `:` fijo dentro del valor, y **pasaba
+    #: en la Pi y fallaba en el PC**: allí `os.pathsep` es `;`, la cadena no se
+    #: partía, y el `in partes` daba falso **sobre un código correcto** — el
+    #: código sí usa `os.pathsep`.
+    #:
+    #: 🔴 Importa más de lo que parece: el núcleo está separado del PTY
+    #:    justamente para poder correr donde no hay robot. Una prueba suya que
+    #:    solo pasa en Linux devuelve el fichero a depender de la Pi, que es lo
+    #:    que la separación existe para evitar.
+    ros = '/opt/ros/jazzy/lib/python3.12/site-packages'
+    padre = {'PYTHONPATH': os.pathsep.join([ros, '/otro'])}
     hijo = entorno_de_ejecucion(padre, '/run/atriz/abc')
     partes = hijo['PYTHONPATH'].split(os.pathsep)
     assert partes[0] == '/run/atriz/abc', 'la sesión tiene que ir PRIMERO'
-    assert '/opt/ros/jazzy/lib/python3.12/site-packages' in partes
+    assert ros in partes
     assert '/otro' in partes
 
 

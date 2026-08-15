@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-15b] — Una prueba del núcleo del agente que solo pasaba en Linux (desde el PC)
+
+### Fixed
+- **`test_entorno_conserva_el_pythonpath_de_ros_DETRAS_de_la_sesion` escribía el separador de
+  rutas a mano** (`'/opt/ros/…:/otro'`) mientras el código, correctamente, usa `os.pathsep`.
+  Resultado: **pasaba en la Pi y fallaba en el PC**, donde `os.pathsep` es `;`, la cadena no se
+  partía y el `in partes` daba falso **sobre un código correcto** — un falso positivo, de la
+  familia que este proyecto ya lleva once veces.
+  🔴 Y lo que lo hace algo más que un papercut: `agente_nucleo.py` está separado de `agente_pty.py`
+  **justamente para poder probarse donde no hay robot**. Una prueba suya que solo corre en Linux
+  devuelve el fichero a depender de la Pi, que es lo que la separación existe para evitar.
+  → **Verificado en el PC (Windows): 33 pasan, 17 se saltan** (las 17 son las del PTY, que no
+  existe aquí y tienen que saltarse). Antes: 32 pasaban y 1 fallaba.
+
+---
+
 ## [2026-08-15] — El agente de sesión, auditado en la Pi y validado en vivo: cinco arreglos con su experimento
 
 ### Fixed

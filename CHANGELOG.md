@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-15] — El agente de sesión, auditado en la Pi y validado en vivo: cinco arreglos con su experimento
+
+### Fixed
+- **`agente_pty.lanzar()`: la carrera del pgid, confirmada por efecto** (evidencia 117 de
+  `Atriz_migracion_ros2`): `os.getpgid(pid)` tras `pty.fork()` compite con el `setsid()` del
+  hijo; si gana el padre, el peldaño SIGKILL **suicida al agente con su propio grupo**. Sin
+  parche, 2 de 4 tandas de la propia suite murieron por SIGKILL; con `pgid = pid`, 6/6. Cinturón
+  además en `senalar()`/`vive()`: `pgid <= 1` se niega (`killpg(0)` es el grupo del llamante).
+- **`agente_sesion.terminar()`: faltaba `remove_handler`** antes de cerrar el fd maestro — el
+  kernel reutiliza el número y la SEGUNDA ejecución chocaba con el registro rancio de tornado.
+  Verificado en vivo: segunda y tercera ejecución corren y terminan.
+- **El manejador de señales que la unidad prometía y no existía**: `apagar_ordenado()` recorre
+  los cuatro peldaños del hijo y para el bucle al terminar; rechazo `AGENTE_PARANDO` a
+  ejecuciones nuevas durante el cierre; la unidad pasa a `KillMode=mixed` (la señal solo al
+  principal, que ahora sí orquesta) y pierde el grupo `video` (no hay cámara).
+- **`entorno_de_ejecucion()` pisaba `PYTHONPATH` — CAZADO EN VIVO**: la práctica 05 moría en
+  `import rclpy` a los 0 s (es PYTHONPATH, no `AMENT_PREFIX_PATH`, quien hace visible
+  `/opt/ros/…/site-packages`). La sesión va primero (la copia de `atriz.py` gana) y el heredado
+  detrás. Con el arreglo, la 05 corre de punta a punta por el agente con el sensor real.
+- **`cosechar()` con memoria — cazado en vivo**: `latir()` (1 Hz) le ganaba el `waitpid` a
+  `terminar()` y el `atriz_fin` salía con `codigo=None` sobre un programa que terminó bien.
+- **`copiar_biblioteca()` lleva también los `.json`**: el seguidor lee `seguidor_config.json`
+  con `if exists else {}` — en la sesión no moría, corría **callado con los umbrales de fábrica**
+  en vez de los calibrados del aula.
+- Arnés: `leer_hasta(hasta='X ')` cortaba en la subcadena (carrera, 1 de 4 tandas) → `'X None'`.
+- `atriz_leer` resuelve contra el listado real antes de abrir (el contrato del docstring de
+  `nombre_seguro`, ahora cumplido), y `terminar()` recoge la carpeta tmpfs de la sesión.
+
+La suite del agente pasa de 44 a **50 pruebas**, ×3 tandas limpias en la Pi. Validación en vivo
+completa (19 casillas, práctica 05 con el RVR) en la evidencia 117.
+
 ## [2026-08-14] — README al día, dos números medidos, y el driver deja de mentir con el RVR apagado
 
 ### Fixed

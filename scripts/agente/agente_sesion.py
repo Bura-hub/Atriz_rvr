@@ -22,7 +22,7 @@ Lo que sigue **sin medir**, y va aquí para que se vea sin buscar:
 
 Este fichero es el pegamento: tornado, el bucle de eventos y la comprobación de
 efecto. Su lógica se mantuvo deliberadamente delgada para que lo que decide viva
-en `agente_nucleo.py` (36 pruebas) y `agente_pty.py` (13, **13/13 en la Pi**;
+en `agente_nucleo.py` (36 pruebas) y `agente_pty.py` (17, **17/17 en la Pi**;
 se saltan en Windows), donde se puede probar sin robot.
 
 ════════════════════════════════════════════════════════════════════════════

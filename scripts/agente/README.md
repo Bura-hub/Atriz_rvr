@@ -6,14 +6,16 @@ donde un alumno escribe su programa y lo ejecuta desde el navegador, sin SSH.
 > ✅ **CORRE EN PRODUCCIÓN DESDE EL 2026-08-15**, en rvr-01: unidad instalada y
 > habilitada por `fase_7`, y las **16 casillas** de `VALIDAR_CON_EL_ROBOT.md` §4
 > cerradas contra el robot y un navegador de verdad. Pruebas: **36** del núcleo
-> (Windows y Pi) y **13/13** del PTY **en la Pi**.
+> (Windows y Pi) y **17/17** del PTY **en la Pi** (las 13 originales más las 4
+> que dejaron los fallos de la auditoría 117: pgid, las guardas de señal, la
+> memoria de `cosechar` y los `.json` de la biblioteca).
 >
 > ~~«Nada de este directorio se ha ejecutado en un robot»~~ — así se escribió el
 > 2026-08-14, y **dejó de ser cierto al día siguiente**. Se deja el rastro
 > porque una cabecera rancia hace que alguien vuelva a probar lo probado, o dé
 > por frágil lo que ya aguanta una clase.
 >
-> ⚠️ **Y la advertencia que SIGUE valiendo**: las 13 del PTY **se saltan donde no
+> ⚠️ **Y la advertencia que SIGUE valiendo**: las 17 del PTY **se saltan donde no
 > hay POSIX**, y eso **no es que pasen**. Si las corres en Windows y las ves
 > verdes, no las has corrido.
 
@@ -45,7 +47,7 @@ recorrer sin un robot delante.
 python3 -m pytest scripts/agente/pruebas/ -q
 ```
 
-⚠️ En Windows salen **13 `skipped`**: son las del PTY, y con ellas quedan sin
+⚠️ En Windows salen **17 `skipped`**: son las del PTY, y con ellas quedan sin
 medir los dos requisitos que justifican todo este diseño —que `print()` salga en
 vivo y que `input()` espere—. Cada una lleva **su control contra una tubería**:
 sin el control, «funciona con PTY» no distinguiría que el PTY lo arregle de que

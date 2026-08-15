@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-15c] — `soy_el_dueno` se difundía calculado para UNO, y el segundo alumno veía el programa del primero como suyo
+
+### Fixed
+- 🔴🔴 **`agente_sesion.py` difundía el estado con `soy_el_dueno` calculado para el dueño.**
+  `difundir(estado_actual(actual['sujeto']))` manda **el mismo mensaje a todos los clientes**,
+  así que **todos** lo recibían en `True`.
+
+  **Medido desde el navegador contra rvr-01** (2026-08-15, dos alumnos y un solo robot): con
+  `bura_hub` ejecutando `05_sensor_color.py`, la pantalla de `ana` decía **«Ya tienes un programa
+  corriendo. Párralo antes.»** sobre el programa ajeno, con su PID (61700) delante.
+
+  ⚠️ **No era un agujero de seguridad, y conviene decirlo con precisión:** `ana` pulsó «Parar el
+  programa» y **el programa siguió vivo** — la comprobación de dueño de `atriz_signal` nunca
+  dependió de este campo. Lo que fallaba era **lo que la pantalla podía afirmar**, que es
+  exactamente lo que la casilla 4-10 existe para cazar: *«el nombre es la diferencia entre
+  esperar y cruzar el aula a preguntar»*.
+
+  → **Arreglo en dos piezas.** `difundir_estado()` manda a cada cliente **el suyo**, leyendo su
+  nombre con `getattr(c, 'sujeto', '')` —un `AttributeError` ahí lo tragaría el `except` de al
+  lado y **descartaría al cliente en silencio**—; y la decisión se extrae a `es_el_dueno()` en
+  `agente_nucleo.py`, que **sí se puede probar sin robot** (aquí no hay tornado). El sujeto vacío
+  nunca es dueño: sin ese guardia, un cliente sin nombre casaría con un dueño vacío, que es la
+  rama por descarte sin condición de señal que este proyecto persigue.
+
+  → **3 pruebas nuevas** (suite 33 → **36** en el PC, +17 saltadas del PTY). Mutada a
+  `return True` —el fallo original— caen dos.
+
+  📌 **La regla que deja: cuando un campo depende de QUIÉN pregunta, no se puede difundir.** Es
+  la misma forma que rosbridge compartiendo una única suscripción por topic, donde el QoS del
+  primero se lo impone a todos.
+
+⚠️ **rvr-01 sigue con el código viejo** hasta que se haga `git pull` y `systemctl restart
+atriz-agente` en el robot.
+
+---
+
 ## [2026-08-15b] — Una prueba del núcleo del agente que solo pasaba en Linux (desde el PC)
 
 ### Fixed

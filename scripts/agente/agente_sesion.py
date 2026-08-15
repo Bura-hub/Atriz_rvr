@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agente_nucleo import (  # noqa: E402
     ARRANCANDO, CORRIENDO, LIBRE, PARANDO, Decodificador, Limitador, Ranura,
-    entorno_de_ejecucion, interpretar,
+    entorno_de_ejecucion, es_el_dueno, interpretar,
 )
 import agente_pty  # noqa: E402
 
@@ -101,6 +101,38 @@ def difundir(mensaje: dict) -> None:
             clientes.discard(c)
 
 
+def difundir_estado() -> None:
+    """El estado, pero **cada cliente el suyo**.
+
+    🔴🔴 `soy_el_dueno` ES POR DESTINATARIO, Y SE DIFUNDÍA CALCULADO PARA UNO.
+
+    Estaba escrito `difundir(estado_actual(actual["sujeto"]))`: el MISMO mensaje
+    a todos los clientes, con `soy_el_dueno` calculado para el dueño. O sea que
+    **todos** lo recibían en `True`.
+
+    Medido desde el navegador el 2026-08-15, con dos alumnos y un solo robot: la
+    pantalla del segundo decía «Ya tienes un programa corriendo. Párralo antes.»
+    sobre el programa del primero, y le enseñaba su PID.
+
+    ⚠️ **No era un agujero**: el `parar` del segundo se rechazó aquí y el
+       programa siguió vivo — la comprobación de dueño nunca dependió de este
+       campo. Lo que fallaba era lo que la PANTALLA podía afirmar.
+
+    📌 Es la forma de siempre en este proyecto: **una cosa compartida sirviendo a
+       varios clientes**, igual que rosbridge con su única suscripción por topic,
+       donde el QoS del primero se lo impone a todos. Cuando un campo depende de
+       QUIÉN pregunta, no se puede difundir.
+    """
+    for c in list(clientes):
+        try:
+            # `getattr` y no `c.sujeto`: un AttributeError aqui lo tragaria el
+            # `except` de abajo y **descartaria al cliente en silencio**. Sin
+            # nombre, `es_el_dueno` dice que no, que es la respuesta prudente.
+            c.write_message(json.dumps(estado_actual(getattr(c, 'sujeto', ''))))
+        except Exception:                                        # noqa: BLE001
+            clientes.discard(c)
+
+
 def estado_actual(para_sujeto: str = '') -> dict:
     if actual is None:
         return {'op': 'atriz_estado', 'estado': LIBRE, 'sujeto': '', 'pid': None,
@@ -112,7 +144,7 @@ def estado_actual(para_sujeto: str = '') -> dict:
         'estado': actual['estado'],
         'sujeto': actual['sujeto'],
         'pid': actual['ej'].pid,
-        'soy_el_dueno': actual['sujeto'] == para_sujeto,
+        'soy_el_dueno': es_el_dueno(actual['sujeto'], para_sujeto),
         'nombre': actual['nombre'],
         'huella': actual['huella'],
         # 🔴 Lo manda el AGENTE. El navegador NO puede calcularlo: la Pi no tiene
@@ -246,7 +278,7 @@ def latir() -> None:
     """1 Hz: el estado, y el tope de pared."""
     if actual is None:
         return
-    difundir(estado_actual(actual['sujeto']))
+    difundir_estado()
     if time.time() - actual['arranco'] > actual['tope_pared_s']:
         parar('TOPE_PARED')
     else:
@@ -269,7 +301,7 @@ def parar(motivo: str) -> None:
     if paso != 'ESPERAR':
         agente_pty.senalar(actual['ej'].pgid, paso)
         actual['enviadas'] = (*actual['enviadas'], paso)
-    difundir(estado_actual(actual['sujeto']))
+    difundir_estado()
     tornado.ioloop.IOLoop.current().call_later(1.0, lambda: parar(motivo))
 
 
@@ -427,7 +459,7 @@ class Sesion(tornado.websocket.WebSocketHandler):
             }))
         tornado.ioloop.IOLoop.current().add_handler(
             ej.maestro, bombear, tornado.ioloop.IOLoop.READ)
-        difundir(estado_actual(self.sujeto))
+        difundir_estado()
 
 
 def apagar_ordenado() -> None:

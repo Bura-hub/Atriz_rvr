@@ -449,3 +449,32 @@ def entorno_de_ejecucion(padre: dict, dir_sesion: str) -> dict:
     # que llega al navegador es texto, no una pantalla de terminal.
     hijo['TERM'] = 'dumb'
     return hijo
+
+
+def es_el_dueno(sujeto_dueno: str, destinatario: str) -> bool:
+    """¿Es de ESTE destinatario la ejecución que corre?
+
+    ═══════════════════════════════════════════════════════════════════════
+    🔴🔴 EXISTE PORQUE `soy_el_dueno` SE DIFUNDIÓ CALCULADO PARA UNO SOLO
+    ═══════════════════════════════════════════════════════════════════════
+    `agente_sesion.py` hacía `difundir(estado_actual(actual['sujeto']))`: el
+    MISMO mensaje a todos los clientes, con este campo calculado para el dueño.
+    O sea que **todos** lo recibían en `True`.
+
+    Medido desde el navegador el 2026-08-15, con dos alumnos y un solo robot: la
+    pantalla del segundo decía «Ya tienes un programa corriendo. Párralo antes.»
+    sobre el programa del primero, y le enseñaba su PID.
+
+    ⚠️ **No era un agujero**: el `parar` del segundo se rechazó y el programa
+       siguió vivo. Lo que fallaba era lo que la pantalla podía afirmar.
+
+    📌 La regla que deja: **cuando un campo depende de QUIÉN pregunta, no se
+       puede difundir.** Misma forma que rosbridge compartiendo una única
+       suscripción por topic, donde el QoS del primero se lo impone a todos.
+
+    🔴 Y el sujeto vacío NUNCA es dueño. Sin ese guardia, un cliente sin nombre
+       —o un `getattr(c, 'sujeto', '')` que falle abierto— casaría con un dueño
+       vacío y se creería suyo lo que no es. Es la rama por descarte que este
+       proyecto persigue: necesita su propia condición de señal.
+    """
+    return sujeto_dueno != '' and sujeto_dueno == destinatario

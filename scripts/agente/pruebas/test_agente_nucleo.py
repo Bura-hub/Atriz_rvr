@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from agente_nucleo import (  # noqa: E402
     ESPERA_TRAS_SIGINT_S, SENALES, TOPE_CODIGO_BYTES, TOPE_PARED_MAX_S,
     TOPE_PARED_MIN_S, TOPE_PARED_S, Decodificador, Limitador, Ranura,
-    entorno_de_ejecucion, huella_de, interpretar, nombre_seguro,
+    entorno_de_ejecucion, es_el_dueno, huella_de, interpretar, nombre_seguro,
     plan_de_parada, recortar_tope,
 )
 
@@ -367,3 +367,45 @@ def test_entorno_conserva_el_pythonpath_de_ros_DETRAS_de_la_sesion():
 def test_entorno_sin_pythonpath_del_padre_queda_solo_la_sesion():
     hijo = entorno_de_ejecucion({}, '/run/atriz/abc')
     assert hijo['PYTHONPATH'] == '/run/atriz/abc'
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# De quien es la ejecucion — el campo que se difundia calculado para UNO
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_solo_el_dueno_recibe_soy_el_dueno_en_true():
+    """🔴🔴 El fallo medido desde el navegador el 2026-08-15.
+
+    `agente_sesion.py` hacia `difundir(estado_actual(actual['sujeto']))`: el
+    MISMO mensaje a todos los clientes, con `soy_el_dueno` calculado para el
+    dueno. Con dos alumnos y un solo robot, la pantalla del segundo decia «Ya
+    tienes un programa corriendo. Parralo antes.» sobre el programa del primero,
+    y le ensenaba su PID.
+
+    Esta prueba fija la invariante que se rompio: de una lista de destinatarios,
+    **exactamente uno** puede recibir True, y es el dueno.
+    """
+    dueno = 'bura_hub'
+    en_el_aula = ['bura_hub', 'ana', 'luis', 'profe']
+    recibido = [es_el_dueno(dueno, quien) for quien in en_el_aula]
+    assert recibido == [True, False, False, False]
+    assert sum(recibido) == 1, 'como mucho UNO, y ese es el dueno'
+
+
+def test_el_sujeto_vacio_NUNCA_es_dueno():
+    """🔴 La rama por descarte necesita su propia condicion de senal.
+
+    `difundir_estado` lee el nombre del cliente con `getattr(c, 'sujeto', '')`
+    para fallar abierto en vez de descartarlo en silencio. Sin este guardia, un
+    cliente sin nombre casaria con un dueno vacio y se creeria suyo lo que no es
+    — el mismo fallo que el clasificador de color diciendo «verde» por descarte.
+    """
+    assert es_el_dueno('', '') is False
+    assert es_el_dueno('', 'ana') is False
+    assert es_el_dueno('ana', '') is False
+
+
+def test_y_el_dueno_SI_lo_es():
+    """El control positivo. Sin el, lo de arriba pasaria devolviendo siempre
+    False, que es tan falso como devolver siempre True."""
+    assert es_el_dueno('ana', 'ana') is True

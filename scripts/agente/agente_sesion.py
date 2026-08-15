@@ -317,14 +317,50 @@ class Sesion(tornado.websocket.WebSocketHandler):
         return True
 
     def select_subprotocol(self, subprotocols):
-        """🔴 SE DEVUELVE SIEMPRE, incluso al ir a rechazar.
+        """🔴 SE DEVUELVE SIEMPRE QUE SE PUEDA, incluso al ir a rechazar.
 
         Si no se devuelve ninguno, el navegador cierra por su cuenta con 1006 y
         **sin motivo**: el alumno vería «la conexión se cortó» en vez de «esa
         credencial es de otro robot».
+
+        ═══════════════════════════════════════════════════════════════════
+        🔴🔴 PERO «SIEMPRE» A SECAS REVENTABA: TORNADO LO COMPRUEBA
+        ═══════════════════════════════════════════════════════════════════
+        Aquí ponía `return SUBPROTOCOLO` sin mirar lo ofrecido, y
+        `tornado/websocket.py:905` hace:
+
+            assert self.selected_subprotocol in subprotocols
+
+        Con un cliente que **no ofrece ningún subprotocolo** —que es justo el
+        que no lleva testigo— eso es un `AssertionError` sin capturar y un
+        **HTTP 500**, no el cierre `4401 · no llegó ningún testigo` que esta
+        clase promete tres líneas más abajo. Visto en producción el 2026-08-15
+        en el journal de rvr-01, con su traza entera repetida por cada intento:
+
+            AssertionError
+            500 GET / (192.168.1.2) 2.31ms
+
+        🔴 **La rama del 4401 era inalcanzable por ese camino**, y encima cada
+           intento deja una traza en el journal — sobre una microSD.
+
+        📌 Y lo que lo hace peor: **el doble (`agente_de_mentira.mjs`) SÍ
+           contesta 4401 ahí**, porque escribe la cabecera a mano y no tiene el
+           `assert`. O sea que la prueba del doble pasaba en verde sobre un
+           camino que en el robot da un 500. Es *«un doble que miente»* en su
+           forma más difícil de ver: no miente sobre los datos, miente sobre el
+           MANEJO DE ERRORES.
+
+        ✅ Ahora se elige algo que el cliente HAYA ofrecido, que es lo único que
+           tornado acepta, y así el apretón de manos siempre TERMINA — que es la
+           condición para poder cerrar con código y motivo.
         """
         self._ofrecidos = list(subprotocols or [])
-        return SUBPROTOCOLO
+        if SUBPROTOCOLO in self._ofrecidos:
+            return SUBPROTOCOLO
+        # No ofreció el nuestro. Vale cualquiera de los suyos con tal de que el
+        # apretón termine y podamos cerrar con motivo; y si no ofreció ninguno,
+        # `None` — no hay nada que elegir, y el apretón termina igual.
+        return self._ofrecidos[0] if self._ofrecidos else None
 
     def open(self) -> None:                                      # noqa: A003
         crudo = next((s for s in getattr(self, '_ofrecidos', [])

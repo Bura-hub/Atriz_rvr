@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-15e] — Un cliente sin subprotocolo se llevaba un HTTP 500 en vez del cierre 4401
+
+### Fixed
+- 🔴🔴 **`select_subprotocol` devolvía `atriz.v1` SIEMPRE, y tornado lo comprueba.**
+  `tornado/websocket.py:905` ejecuta `assert self.selected_subprotocol in subprotocols`, así que
+  un cliente que **no ofrece ningún subprotocolo** —justo el que no lleva testigo— provocaba un
+  `AssertionError` sin capturar y un **HTTP 500**, en vez del cierre `4401 · no llegó ningún
+  testigo` que la propia clase promete tres líneas más abajo.
+
+  **La rama del 4401 era inalcanzable por ese camino**, y cada intento dejaba una traza entera en
+  el journal — sobre una microSD. Visto en producción en rvr-01 el 2026-08-15.
+
+  📌 **Y lo que lo hace difícil de ver: el doble NO fallaba ahí.** `agente_de_mentira.mjs` escribe
+  la cabecera a mano y no tiene el `assert`, así que contestaba 4401 correctamente y la prueba
+  automatizada del PC estaba **en verde sobre un camino que en el robot revienta**. Es *«un doble
+  que miente»* en su forma más difícil de ver: no miente sobre los datos —esos se acaban
+  comparando contra el robot— sino sobre el **manejo de errores**, que no lo mira nadie hasta que
+  ocurre.
+
+  ✅ Ahora se elige algo que el cliente **haya ofrecido**: `atriz.v1` si está, si no el primero
+  que ofreciera, y `None` si no ofreció ninguno. Así el apretón de manos **siempre termina**, que
+  es la condición para poder cerrar con código y motivo.
+  ✅ El doble se alineó con este comportamiento, y la prueba del PC pasó a exigir que en ese caso
+  **NO venga** subprotocolo (antes exigía lo contrario, que era el error).
+
+---
+
 ## [2026-08-15d] — `atriz.py` apagaba el barrido de OTRO 3 de cada 5 veces, en silencio
 
 ### Fixed

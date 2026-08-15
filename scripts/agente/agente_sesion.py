@@ -3,15 +3,27 @@
 
     python3 agente_sesion.py --robot 7 --clave /etc/atriz/testigo.pub
 
-🔴🔴 **NADA DE ESTE FICHERO ESTÁ EJECUTADO NI MEDIDO.** Escrito desde el PC el
-2026-08-14, sin robot donde instalarlo y sin Linux donde probar el PTY. Lo que sí
-está probado es todo lo que hay debajo: `agente_nucleo.py` (31 pruebas, en el PC)
-y `agente_pty.py` (13 pruebas que **se saltan en Windows** y quedan pendientes de
-un Linux cualquiera).
+✅ **CORRE EN PRODUCCIÓN DESDE EL 2026-08-15.** ~~«Nada de este fichero está
+ejecutado ni medido»~~ — se escribió así el 2026-08-14, sin robot donde
+instalarlo, y **dejó de ser cierto al día siguiente**. Hoy: unidad instalada y
+habilitada por `fase_7`, auditada por la Pi (evidencia 117, cinco fallos
+cazados), y las **16 casillas** de `VALIDAR_CON_EL_ROBOT.md` §4 cerradas contra
+rvr-01 y un navegador de verdad.
+
+📌 Se conserva el rastro de la frase porque **una cabecera que se queda rancia
+   es peor que no tenerla**: quien la leyera hoy no probaría lo que ya está
+   probado, o daría por frágil lo que aguanta una clase.
+
+Lo que sigue **sin medir**, y va aquí para que se vea sin buscar:
+· `comprobar_efecto()` devuelve «no lo sé» en casi todos sus campos, **a
+  propósito** — implementarlo exige hablar con rosbridge y medirlo en el robot.
+· cgroups: decidido para después. Hoy hay tope de pared y de salida.
+· TLS: el testigo viaja en claro. Dura 10 min y se pide antes de cada conexión.
 
 Este fichero es el pegamento: tornado, el bucle de eventos y la comprobación de
 efecto. Su lógica se mantuvo deliberadamente delgada para que lo que decide viva
-en los otros dos, donde se puede probar.
+en `agente_nucleo.py` (36 pruebas) y `agente_pty.py` (13, **13/13 en la Pi**;
+se saltan en Windows), donde se puede probar sin robot.
 
 ════════════════════════════════════════════════════════════════════════════
 🔴 LO QUE ESTE AGENTE **NO** ES

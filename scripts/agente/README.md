@@ -3,10 +3,19 @@
 Es la mitad que corre **en el robot** del Taller de `atriz-lab`: la pantalla
 donde un alumno escribe su programa y lo ejecuta desde el navegador, sin SSH.
 
-> 🔴🔴 **NADA DE ESTE DIRECTORIO SE HA EJECUTADO EN UN ROBOT.** Escrito el
-> 2026-08-14 desde el PC. Lo que **sí** está probado es `agente_nucleo.py`
-> (31 pruebas, que corren en Windows). El PTY tiene 13 pruebas que **se saltan**
-> donde no hay POSIX, y eso **no es que pasen**.
+> ✅ **CORRE EN PRODUCCIÓN DESDE EL 2026-08-15**, en rvr-01: unidad instalada y
+> habilitada por `fase_7`, y las **16 casillas** de `VALIDAR_CON_EL_ROBOT.md` §4
+> cerradas contra el robot y un navegador de verdad. Pruebas: **36** del núcleo
+> (Windows y Pi) y **13/13** del PTY **en la Pi**.
+>
+> ~~«Nada de este directorio se ha ejecutado en un robot»~~ — así se escribió el
+> 2026-08-14, y **dejó de ser cierto al día siguiente**. Se deja el rastro
+> porque una cabecera rancia hace que alguien vuelva a probar lo probado, o dé
+> por frágil lo que ya aguanta una clase.
+>
+> ⚠️ **Y la advertencia que SIGUE valiendo**: las 13 del PTY **se saltan donde no
+> hay POSIX**, y eso **no es que pasen**. Si las corres en Windows y las ves
+> verdes, no las has corrido.
 
 Diseño completo, con lo que se descartó y por qué:
 `Atriz_migracion_ros2 → docs/superpowers/specs/2026-08-14-el-taller-terminal-del-alumno-design.md`

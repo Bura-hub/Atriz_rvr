@@ -431,7 +431,17 @@ def entorno_de_ejecucion(padre: dict, dir_sesion: str) -> dict:
     """
     hijo = {k: v for k, v in padre.items()
             if k in _CONSERVAR or k.startswith(_CONSERVAR_PREFIJO)}
-    hijo['PYTHONPATH'] = dir_sesion
+    # 🔴 CAZADO EN VIVO el 2026-08-14 (evidencia 117): aquí se PISABA el
+    #    PYTHONPATH entero y la práctica 05 moría en `import rclpy` a los 0 s —
+    #    porque es PYTHONPATH quien hace visible /opt/ros/.../site-packages
+    #    (AMENT_PREFIX_PATH no importa módulos; el comentario de arriba lo
+    #    afirmaba y era falso). La carpeta de sesión va PRIMERO —la copia de
+    #    atriz.py debe ganar a cualquier otra— y el PYTHONPATH del agente,
+    #    detrás. Ninguna prueba pura podía verlo: lo vio la práctica real.
+    import os as _os
+    heredado = padre.get('PYTHONPATH', '')
+    hijo['PYTHONPATH'] = (dir_sesion + _os.pathsep + heredado) if heredado \
+        else dir_sesion
     # Sin esto `print()` sale a bloques aunque haya PTY, y la pantalla se
     # congelaría con el robot en marcha — que es el requisito 1 entero.
     hijo['PYTHONUNBUFFERED'] = '1'

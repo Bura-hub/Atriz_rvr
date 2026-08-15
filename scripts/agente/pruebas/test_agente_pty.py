@@ -357,3 +357,34 @@ def test_senalar_y_vive_se_niegan_con_un_pgid_absurdo():
     assert senalar(-1, 'SIGINT') is False
     assert vive(0) is False
     assert vive(1) is False
+
+
+def test_cosechar_dos_veces_recuerda_el_desenlace(taller):
+    """🔴 CAZADO EN VIVO (práctica 05, 2026-08-14): `latir()` cosecha a 1 Hz y
+    le ganaba el waitpid a `terminar()` — el atriz_fin salía con codigo=None y
+    senal=None sobre un programa que SÍ terminó. La segunda llamada tiene que
+    RECORDAR lo que vio la primera."""
+    prog = escribir_guion(taller, 'import sys\nsys.exit(7)\n')
+    ej = lanzar([sys.executable, prog], entorno(taller), str(taller))
+    fin = time.time() + 5
+    primero = (None, None)
+    while time.time() < fin and primero == (None, None):
+        primero = cosechar(ej.pid)
+        time.sleep(0.05)
+    assert primero == (7, None), f'la primera cosecha vio {primero}'
+    assert cosechar(ej.pid) == (7, None), 'la segunda olvidó el desenlace'
+
+
+def test_copiar_biblioteca_lleva_tambien_los_json(taller, tmp_path_factory):
+    """🔴 El seguidor lee `seguidor_config.json` con `Path(__file__).parent` y
+    con `if CONFIG.exists() else {}`: en la carpeta de sesión no moriría —
+    correría CALLADO con los umbrales de fábrica en vez de los calibrados del
+    aula (auditoría 2026-08-14). La copia de sesión lleva la biblioteca Y los
+    .json que viven junto a las prácticas."""
+    from agente_pty import copiar_biblioteca
+    origen = tmp_path_factory.mktemp('practicas')
+    (origen / 'atriz.py').write_text('# biblioteca\n')
+    (origen / 'seguidor_config.json').write_text('{"umbral_negro": 950}\n')
+    assert copiar_biblioteca(str(origen), str(taller))
+    assert (taller / 'atriz.py').is_file()
+    assert (taller / 'seguidor_config.json').read_text().strip() == '{"umbral_negro": 950}'

@@ -200,6 +200,15 @@ def vive(pgid: int) -> bool:
         return False
 
 
+#: Desenlaces ya cosechados, por pid. 🔴 CAZADO EN VIVO (2026-08-14, práctica
+#: 05): el `waitpid` solo contesta UNA vez, y el `latir()` de 1 Hz le ganaba la
+#: cosecha a `terminar()` — el `atriz_fin` salía con codigo=None sobre un
+#: programa que sí terminó. La segunda llamada tiene que RECORDAR la primera.
+#: (Los pids se reutilizan tardísimo y aquí hay UNA ejecución a la vez: el
+#: tamaño del dict está acotado por la sesión del agente.)
+_COSECHADOS: dict[int, tuple[int | None, str | None]] = {}
+
+
 def cosechar(pid: int) -> tuple[int | None, str | None]:
     """`(codigo, senal)` si ya terminó; `(None, None)` si sigue vivo.
 
@@ -207,6 +216,8 @@ def cosechar(pid: int) -> tuple[int | None, str | None]:
        siempre: la pantalla enseñaría «corriendo» sobre un programa acabado, que
        es justo la familia de fallo que este proyecto persigue.
     """
+    if pid in _COSECHADOS:
+        return _COSECHADOS[pid]
     try:
         hijo, estado = os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
@@ -216,8 +227,10 @@ def cosechar(pid: int) -> tuple[int | None, str | None]:
     if os.WIFSIGNALED(estado):
         s = os.WTERMSIG(estado)
         nombre = next((n for n, v in _POR_NOMBRE.items() if v == s), f'señal {s}')
-        return None, nombre
-    return os.WEXITSTATUS(estado), None
+        _COSECHADOS[pid] = (None, nombre)
+    else:
+        _COSECHADOS[pid] = (os.WEXITSTATUS(estado), None)
+    return _COSECHADOS[pid]
 
 
 def copiar_biblioteca(origen_dir: str, destino_dir: str) -> bool:
@@ -237,10 +250,19 @@ def copiar_biblioteca(origen_dir: str, destino_dir: str) -> bool:
     if not os.path.isfile(origen):
         return False
     try:
-        with open(origen, 'rb') as f:
-            datos = f.read()
-        with open(os.path.join(destino_dir, 'atriz.py'), 'wb') as f:
-            f.write(datos)
+        # La biblioteca, y TAMBIÉN los .json que viven junto a las prácticas
+        # (auditoría 2026-08-14): el seguidor lee `seguidor_config.json` con
+        # `Path(__file__).parent` y un `if CONFIG.exists() else {}` — en la
+        # carpeta de sesión no moriría, correría CALLADO con los umbrales de
+        # fábrica en vez de los calibrados del aula. La familia de fallo
+        # favorita del proyecto: funciona, y está mal.
+        llevar = ['atriz.py'] + sorted(
+            n for n in os.listdir(origen_dir) if n.endswith('.json'))
+        for n in llevar:
+            with open(os.path.join(origen_dir, n), 'rb') as f:
+                datos = f.read()
+            with open(os.path.join(destino_dir, n), 'wb') as f:
+                f.write(datos)
         return True
     except OSError:
         return False

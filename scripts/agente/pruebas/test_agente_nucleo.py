@@ -334,3 +334,24 @@ def test_la_huella_cambia_con_el_codigo():
     en vez de dejar creer que lo que corre es lo que se ve."""
     assert huella_de('print(1)') != huella_de('print(2)')
     assert huella_de('print(1)') == huella_de('print(1)')
+
+
+def test_entorno_conserva_el_pythonpath_de_ros_DETRAS_de_la_sesion():
+    """🔴 CAZADO EN VIVO (2026-08-14, práctica 05 por el agente): el entorno
+    pisaba PYTHONPATH entero con la carpeta de sesión y el guion del alumno
+    moría en `import rclpy` — porque es PYTHONPATH (no AMENT_PREFIX_PATH) quien
+    hace visible /opt/ros/.../site-packages. La carpeta de sesión va PRIMERO
+    (la copia de atriz.py debe ganar), y el resto del PYTHONPATH del agente,
+    detrás."""
+    import os
+    padre = {'PYTHONPATH': '/opt/ros/jazzy/lib/python3.12/site-packages:/otro'}
+    hijo = entorno_de_ejecucion(padre, '/run/atriz/abc')
+    partes = hijo['PYTHONPATH'].split(os.pathsep)
+    assert partes[0] == '/run/atriz/abc', 'la sesión tiene que ir PRIMERO'
+    assert '/opt/ros/jazzy/lib/python3.12/site-packages' in partes
+    assert '/otro' in partes
+
+
+def test_entorno_sin_pythonpath_del_padre_queda_solo_la_sesion():
+    hijo = entorno_de_ejecucion({}, '/run/atriz/abc')
+    assert hijo['PYTHONPATH'] == '/run/atriz/abc'

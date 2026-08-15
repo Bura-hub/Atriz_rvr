@@ -1,0 +1,61 @@
+# El agente de sesión del taller: ejecuta el código del alumno en el robot.
+#
+#   sudo cp atriz-agente.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now atriz-agente
+#
+# 🔴🔴 NO ESTÁ PROBADA. Escrita desde el PC el 2026-08-14, sin robot.
+
+[Unit]
+Description=Atriz · agente de sesión del taller (ejecuta el código del alumno)
+Documentation=https://github.com/Bura-hub/Atriz_migracion_ros2
+# El agente habla con rosbridge para comprobar el efecto, y el código del alumno
+# necesita el grafo ROS levantado. Sin el driver no tiene con qué trabajar.
+After=network-online.target atriz-robot.service
+Wants=network-online.target
+PartOf=atriz-robot.service
+
+[Service]
+Type=simple
+# 🔴 Como `sphero`, NO como root. Es lo que hace que el programa del alumno tenga
+#    exactamente los mismos permisos que si lo lanzara por SSH — ni más ni menos.
+#    Y por eso hay que quitar `~/.git-credentials` del robot: el código del
+#    alumno puede leer lo que `sphero` lea.
+User=sphero
+Group=sphero
+SupplementaryGroups=dialout video
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔴🔴 `RuntimeDirectoryPreserve=yes` NO ES OPCIONAL, Y AQUÍ ESTÁ EL PORQUÉ
+# ═══════════════════════════════════════════════════════════════════════════
+# `atriz-robot.service` declara este MISMO `RuntimeDirectory=atriz`, y dentro
+# vive la marca del vigía de DDS que garantiza «una sola cura por arranque».
+#
+# Sin el `Preserve`, systemd **borra /run/atriz al parar esta unidad** — y con él
+# esa marca. El vigía volvería a creerse con derecho a reiniciar el stack, y el
+# síntoma sería un robot que se reinicia solo más de una vez por arranque, en
+# mitad de una clase, sin que nada apunte al agente.
+#
+# Es un fallo CRUZADO entre dos unidades: `systemd-analyze verify` no lo ve, y
+# leer cualquiera de las dos por separado tampoco.
+RuntimeDirectory=atriz
+RuntimeDirectoryPreserve=yes
+
+ExecStart=/usr/local/bin/atriz-agente.sh
+
+# ⚠️ `SIGINT` y no `SIGTERM`: el agente aplica sus cuatro peldaños al hijo antes
+#    de irse, y el primero de esos peldaños es el Ctrl-C que `atriz.py` captura
+#    para parar el robot y apagar el barrido. Un reinicio del agente que deje un
+#    guion conduciendo es peor que el propio reinicio.
+KillSignal=SIGINT
+# 45 s: los cuatro peldaños del hijo (10 + 5 + margen) caben dentro.
+TimeoutStopSec=45
+
+Restart=always
+RestartSec=5
+
+# El agente no necesita privilegios de nada.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

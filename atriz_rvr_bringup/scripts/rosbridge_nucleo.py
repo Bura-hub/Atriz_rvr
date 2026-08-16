@@ -140,8 +140,8 @@ def decidir(
 ) -> Decision:
     """La decisión entera, en un sitio y sin efectos.
 
-    `verificar` recibe el testigo crudo y devuelve algo con `.valido`, `.codigo`,
-    `.motivo` y `.sujeto` — la forma de `atriz_testigo.Veredicto`. Se inyecta en
+    `verificar` recibe el testigo crudo y devuelve un `atriz_testigo.Veredicto`:
+    `.ok`, `.codigo`, `.motivo`, `.sujeto` — **esos nombres exactos**. Se inyecta en
     vez de importarse para que estas pruebas no dependan del otro repositorio, y
     para poder recorrer los cuatro rechazos sin fabricar firmas.
     """
@@ -162,13 +162,25 @@ def decidir(
         )
 
     v = verificar(crudo)
-    if getattr(v, 'valido', False):
-        return Decision(True, sujeto=getattr(v, 'sujeto', ''), subprotocolo=sub)
 
-    return Decision(
-        False,
-        getattr(v, 'codigo', CIERRE_TESTIGO_MALO),
-        getattr(v, 'motivo', 'testigo rechazado'),
-        getattr(v, 'sujeto', ''),
-        subprotocolo=sub,
-    )
+    # 🔴🔴 SE LEEN LOS CAMPOS DIRECTAMENTE, SIN `getattr(..., defecto)`. Y NO ES
+    #    ESTILO: aquí ponía `getattr(v, 'valido', False)` y el campo real de
+    #    `atriz_testigo.Veredicto` se llama **`ok`**. Resultado medido contra
+    #    rvr-01 el 2026-08-15: TODOS los testigos buenos rechazados, con
+    #    `codigo=0` y motivo vacío, mientras los cuatro rechazos funcionaban.
+    #
+    #    Y las 24 pruebas de este módulo PASABAN, porque el doble de estas
+    #    pruebas también lo llamaba `valido`: el doble de acuerdo con el autor y
+    #    los dos en desacuerdo con la clase real. Es la lección de la evidencia
+    #    120 cometida en el fichero que la cita.
+    #
+    #    La lección de segundo orden es la que vale: **un `getattr` con valor por
+    #    defecto convierte una violación de contrato en una respuesta silenciosa
+    #    y equivocada.** Con `v.ok` a secas habría reventado con AttributeError
+    #    en el primer testigo bueno. Falló cerrado por SUERTE, no por diseño.
+    #
+    #    `test_la_forma_de_Veredicto_no_ha_cambiado` es lo que impide que vuelva.
+    if v.ok:
+        return Decision(True, sujeto=v.sujeto, subprotocolo=sub)
+
+    return Decision(False, v.codigo, v.motivo, v.sujeto, subprotocolo=sub)

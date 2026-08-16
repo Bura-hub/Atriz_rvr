@@ -235,8 +235,57 @@ def _open_con_testigo(self, *args, **kwargs):
         log.info(f'rosbridge: admitido {d.sujeto} desde {self.request.remote_ip}')
 
 
+def _rechazada(self) -> bool:
+    """¿Esta conexión NO llegó a abrirse de verdad?"""
+    d = getattr(self, '_atriz', None)
+    return d is None or not d.admitir
+
+
+def _on_close_con_testigo(self):
+    """🔴 SIN ESTO, CADA RECHAZO DEJA UNA TRAZA ENTERA EN EL JOURNAL.
+
+    Medido contra rvr-01 el 2026-08-15. `websocket_handler.py:192` hace
+
+        self.protocol.outgoing = lambda *_args, **_kwargs: None
+
+    y `self.protocol` **solo existe si el `open` original llegó a correr**. Al
+    rechazar no corre, así que cerrar disparaba
+
+        AttributeError: 'RosbridgeWebSocket' object has no attribute 'protocol'
+
+    …y con él un «Uncaught exception GET /» de tornado por cada intento. Dos
+    consecuencias, las dos malas: el journal se llena —lo mismo que costó A11— y
+    **el cliente recibe un 1006 en vez del código y el motivo**, o sea que el
+    rechazo con explicación se convierte en un corte mudo, que es justo lo que
+    todo este diseño existe para evitar.
+
+    📝 Y es de la misma familia que el `AssertionError` de `select_subprotocol`:
+       parchear la puerta de entrada de una clase obliga a mirar **todo lo que
+       daba por hecho que la puerta se había abierto**.
+    """
+    if _rechazada(self):
+        return
+    _on_close_original(self)
+
+
+def _on_message_con_testigo(self, message):
+    """Mismo caso con `self.incoming_queue`, que tampoco existe si no se abrió.
+
+    Un cliente puede mandar datos entre el apretón y el cierre; sin esto, esos
+    bytes acaban en `incoming_queue.push` y revientan igual.
+    """
+    if _rechazada(self):
+        return
+    _on_message_original(self, message)
+
+
+_on_close_original = RosbridgeWebSocket.on_close
+_on_message_original = RosbridgeWebSocket.on_message
+
 RosbridgeWebSocket.select_subprotocol = _select_subprotocol
 RosbridgeWebSocket.open = _open_con_testigo
+RosbridgeWebSocket.on_close = _on_close_con_testigo
+RosbridgeWebSocket.on_message = _on_message_con_testigo
 
 print(
     f'[atriz-rosbridge] testigo EXIGIDO · robot {ROBOT} · clave {_RUTA_CLAVE} · '

@@ -30,12 +30,36 @@ from rosbridge_nucleo import (  # noqa: E402
 
 @dataclass
 class VeredictoFalso:
-    """La forma de `atriz_testigo.Veredicto`, sin firmar nada."""
+    """La forma de `atriz_testigo.Veredicto`, sin firmar nada.
 
-    valido: bool
+    🔴 EL CAMPO SE LLAMA `ok`. Aquí ponía `valido`, y como el código bajo prueba
+       usaba `getattr(v, 'valido', False)`, las 24 pruebas pasaban mientras el
+       robot rechazaba TODOS los testigos buenos. El doble de acuerdo con el
+       autor y los dos en desacuerdo con la clase real.
+       `test_la_forma_de_Veredicto_no_ha_cambiado` es lo que lo cierra.
+    """
+
+    ok: bool
     codigo: int | None = None
     motivo: str = ''
     sujeto: str = ''
+
+
+def _atriz_testigo_o_saltar():
+    """El verificador real, que vive en el repositorio de migración."""
+    candidatos = [
+        Path.home() / 'atriz_migracion/scripts',
+        Path(__file__).resolve().parents[3].parent / 'atriz_migracion/scripts',
+    ]
+    ruta = next((str(c) for c in candidatos if (c / 'atriz_testigo.py').is_file()), None)
+    if ruta is None:
+        pytest.skip(
+            'no encuentro atriz_testigo.py (repositorio de migración). '
+            f'He mirado en: {[str(c) for c in candidatos]}'
+        )
+    sys.path.insert(0, ruta)
+    import atriz_testigo as at
+    return at
 
 
 def _acepta(sujeto='ana'):
@@ -187,23 +211,43 @@ def test_los_codigos_coinciden_con_atriz_testigo():
        y lo dice — pero el lanzador NO salta: se niega a arrancar. El sitio donde
        importa que coincidan es el robot, no esta prueba.
     """
-    candidatos = [
-        Path.home() / 'atriz_migracion/scripts',
-        Path(__file__).resolve().parents[3].parent / 'atriz_migracion/scripts',
-    ]
-    ruta = next((str(c) for c in candidatos if (c / 'atriz_testigo.py').is_file()), None)
-    if ruta is None:
-        pytest.skip(
-            'no encuentro atriz_testigo.py (repositorio de migración). '
-            f'He mirado en: {[str(c) for c in candidatos]}'
-        )
-    sys.path.insert(0, ruta)
-    import atriz_testigo as at
+    at = _atriz_testigo_o_saltar()
 
     assert (CIERRE_RELOJ, CIERRE_SIN_TESTIGO, CIERRE_TESTIGO_MALO, CIERRE_OTRO_ROBOT) == \
            (at.CIERRE_RELOJ, at.CIERRE_SIN_TESTIGO, at.CIERRE_TESTIGO_MALO, at.CIERRE_OTRO_ROBOT)
     assert PREFIJO_TESTIGO == at.PREFIJO_TESTIGO
     assert SUBPROTOCOLO == at.SUBPROTOCOLO
+
+
+def test_la_forma_de_Veredicto_no_ha_cambiado():
+    """🔴 LA GUARDA QUE FALTABA, Y QUE COSTO UNA TANDA ENTERA CONTRA EL ROBOT.
+
+    El 2026-08-15 el nucleo leia `v.valido` y el campo real se llama **`ok`**.
+    Las 24 pruebas pasaban —el doble de aqui tambien lo llamaba `valido`— y el
+    robot rechazaba TODOS los testigos buenos con codigo 0 y motivo vacio.
+
+    Esto compara el doble contra la clase DE VERDAD, que es lo unico que puede
+    cazarlo: mientras los dos vengan del mismo autor, coincidir no prueba nada.
+    """
+    at = _atriz_testigo_o_saltar()
+    real = at.Veredicto(True, 0, '', 'ana')
+    doble = VeredictoFalso(True, 0, '', 'ana')
+
+    campos_reales = set(vars(real))
+    campos_doble = set(vars(doble))
+    assert campos_reales == campos_doble, (
+        'el doble y la clase real no tienen los mismos campos · '
+        f'real: {sorted(campos_reales)} · doble: {sorted(campos_doble)}'
+    )
+    # Y que `decidir` los use: un veredicto valido de la clase REAL entra.
+    d = decidir([f'{PREFIJO_TESTIGO}x'], '192.168.1.2', verificar=lambda _c: real)
+    assert d.admitir is True and d.sujeto == 'ana'
+
+    # Control en la otra direccion: uno invalido de la clase REAL se rechaza,
+    # y con SU codigo, no con uno inventado.
+    malo = at.Veredicto(False, at.CIERRE_OTRO_ROBOT, 'otro robot', 'ana')
+    d2 = decidir([f'{PREFIJO_TESTIGO}x'], '192.168.1.2', verificar=lambda _c: malo)
+    assert (d2.admitir, d2.codigo) == (False, at.CIERRE_OTRO_ROBOT)
 
 
 def test_Decision_es_inmutable():

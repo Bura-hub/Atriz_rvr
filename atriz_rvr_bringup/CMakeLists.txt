@@ -11,4 +11,19 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# El rosbridge que exige testigo (Fase B de SEGURIDAD_ROSBRIDGE.md). Va a `lib/`
+# y no a `share/` porque `Node(executable=...)` lo busca ahí.
+#
+# 🔴 `atriz_rosbridge.py` con PROGRAMS (queda ejecutable) y `rosbridge_nucleo.py`
+#    con FILES (solo se importa). Si el núcleo faltara, el lanzador se NIEGA a
+#    arrancar en vez de seguir sin comprobar nada.
+install(
+  PROGRAMS scripts/atriz_rosbridge.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(
+  FILES scripts/rosbridge_nucleo.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()

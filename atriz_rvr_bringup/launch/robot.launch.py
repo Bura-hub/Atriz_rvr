@@ -408,8 +408,15 @@ def generate_launch_description() -> LaunchDescription:
         """rosbridge quiere una CADENA con una lista, no una lista."""
         return str(lista)
 
+    # 🔴 NO es `package='rosbridge_server'` desde el 2026-08-15: es un lanzador
+    #    NUESTRO que parchea `RosbridgeWebSocket.open` para exigir el testigo de
+    #    la web, y luego ejecuta el nodo original tal cual. Fase B de
+    #    SEGURIDAD_ROSBRIDGE.md; el porqué de esta forma —y no un proxy— está en
+    #    `scripts/rosbridge_nucleo.py`.
+    #    El `name=` se mantiene: para el resto del sistema el nodo sigue siendo
+    #    el mismo, en el mismo puerto y con los mismos parámetros.
     puente = Node(
-        package='rosbridge_server', executable='rosbridge_websocket',
+        package='atriz_rvr_bringup', executable='atriz_rosbridge.py',
         name='rosbridge_websocket', namespace=ns, output='screen',
         condition=IfCondition(LaunchConfiguration('rosbridge')),
         parameters=[{

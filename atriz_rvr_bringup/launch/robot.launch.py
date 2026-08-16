@@ -408,28 +408,33 @@ def generate_launch_description() -> LaunchDescription:
         """rosbridge quiere una CADENA con una lista, no una lista."""
         return str(lista)
 
-    # ⏳ FASE B, A MEDIO CAMINO — Y AQUÍ SIGUE EL rosbridge NORMAL A PROPÓSITO.
+    # ═════════════════════════════════════════════════════════════════════════
+    # 🔴 FASE B ACTIVA: rosbridge EXIGE un testigo firmado por la web (A7)
+    # ═════════════════════════════════════════════════════════════════════════
+    # NO es `package='rosbridge_server'`: es un lanzador NUESTRO que parchea
+    # `RosbridgeWebSocket.open` y luego ejecuta el nodo original tal cual. El
+    # porqué de esta forma —y no un proxy— está en `scripts/rosbridge_nucleo.py`.
+    # El `name=`, el puerto y los parámetros no cambian: para el resto del
+    # sistema sigue siendo el mismo nodo.
     #
-    #    `scripts/atriz_rosbridge.py` ya existe y está verificado contra rvr-01
-    #    (8/8: rechaza 4401/4403/4404 y admite el testigo bueno). Para activarlo
-    #    bastaría con:
+    # 🔴🔴 CAMBIAR ESTA LÍNEA **ES DESPLEGAR**, y hay que hacer DOS cosas más:
     #
-    #        package='atriz_rvr_bringup', executable='atriz_rosbridge.py'
+    #   1. RECOMPILAR el paquete. `install/` de los robots es un ENLACE
+    #      SIMBÓLICO al fuente (`--symlink-install`), así que un `git pull`
+    #      cambia este fichero EN EL ACTO — pero `lib/atriz_rvr_bringup/
+    #      atriz_rosbridge.py` solo aparece con un `colcon build`. Sin él, el
+    #      siguiente reinicio deja el robot **SIN rosbridge**, no «pidiendo
+    #      testigo». Pasó el 2026-08-15 y se revirtió por eso (evidencia 124).
     #
-    #    🔴 PERO NO SE CABLEA HASTA QUE EL CLIENTE MANDE EL TESTIGO (F2). Se hizo
-    #       al revés el 2026-08-15 y fue un error con consecuencias reales: el
-    #       `install/` del robot es un ENLACE SIMBÓLICO al fuente, así que un
-    #       `git pull` cambió el launch que el robot usa **en el acto**, y como
-    #       nadie había recompilado el paquete, el ejecutable no existía en
-    #       `lib/`. El siguiente reinicio de `atriz-robot` —y este robot se
-    #       reinicia con solo manipularlo, cinco veces medidas en un día
-    #       (evidencia 123)— habría dejado el robot SIN rosbridge.
+    #   2. Poner `NEXT_PUBLIC_ATRIZ_TESTIGO=1` en la web, DESPUÉS. En ese hueco
+    #      la web verá `4401 · no llegó ningún testigo`, con motivo en pantalla.
+    #      Al revés —web primero— el síntoma es un **1006 mudo en bucle**, que no
+    #      se distingue de un robot apagado. Medido en los dos clientes.
     #
-    #    📝 La regla: **el cableado en el arranque es el ÚLTIMO paso de una
-    #       migración, no el primero.** Con `--symlink-install`, subir al
-    #       repositorio ES desplegar.
+    # Para desactivarlo sin tocar esto: `ATRIZ_ROSBRIDGE_SIN_TESTIGO=1` en el
+    # entorno del servicio. ⚠️ `verificar_robot.sh` da FALLO si lo encuentra.
     puente = Node(
-        package='rosbridge_server', executable='rosbridge_websocket',
+        package='atriz_rvr_bringup', executable='atriz_rosbridge.py',
         name='rosbridge_websocket', namespace=ns, output='screen',
         condition=IfCondition(LaunchConfiguration('rosbridge')),
         parameters=[{

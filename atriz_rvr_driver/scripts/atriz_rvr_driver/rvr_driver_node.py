@@ -760,6 +760,19 @@ class RvrDriverNode(Node):
                 'deja de enviar, el nodo no lo dirá.'
             )
 
+        # ── El grupo de los LATIDOS (AÑADIDO 2026-08-15, evidencia 126) ──────
+        # 🔴 Los publicadores puros NO pueden compartir grupo con los sondeos
+        #    que BLOQUEAN. Estuvieron todos en `g_salud` (mutuamente
+        #    excluyente), y el comentario del latido prometía «tiene que poder
+        #    correr AUNQUE la telemetría esté ocupada» — pero con el enlace
+        #    caído `_sondear_ir` bloqueaba hasta 6 s por tic dentro del MISMO
+        #    grupo, y el latido quedó MEDIDO a ~0,2 Hz (7 mensajes en 35 s
+        #    donde promete 1 Hz): el muro pintaba «la Pi calla» sobre una Pi
+        #    viva. La intención estaba escrita; el grupo la contradecía.
+        #    Aquí van solo callbacks que leen memoria y publican (o encolan
+        #    sin esperar): nada de este grupo habla con el puerto serie.
+        g_latido = MutuallyExclusiveCallbackGroup()
+
         # 🔴 REPUBLICAR LA SALUD DE MOTORES A 1 Hz, aunque no haya cambiado.
         #
         #    El publicador es TRANSIENT_LOCAL, así que en teoría «un suscriptor
@@ -774,23 +787,23 @@ class RvrDriverNode(Node):
         #
         #    Republicar es GRATIS: no toca el puerto serie, solo reenvía lo que ya
         #    está en memoria. El SONDEO sigue a 30 s, que es lo que sí cuesta.
-        self.create_timer(1.0, self._publicar_motores, callback_group=g_salud)
+        self.create_timer(1.0, self._publicar_motores, callback_group=g_latido)
 
         # ── El latido de `/estado_robot` (AÑADIDO 2026-08-04) ────────────────
         # ⚠️ NO VERIFICADO contra un robot.
         #
-        # Mismo grupo `g_salud` y mismo ritmo que `_publicar_motores`, y no por
-        # simetría: este temporizador tiene que poder correr AUNQUE la telemetría
-        # y `cmd_vel` estén ocupados, porque su trabajo es justamente decir que el
-        # nodo sigue vivo. En el grupo de la telemetría, un atasco allí congelaría
-        # el latido y el muro pintaría de rojo un robot que solo va lento.
+        # Grupo `g_latido` (2026-08-15, antes `g_salud`): este temporizador tiene
+        # que poder correr AUNQUE todo lo demás esté ocupado, porque su trabajo es
+        # justamente decir que el nodo sigue vivo — y en `g_salud` esa promesa se
+        # incumplía: `_sondear_ir` bloqueando en el mismo grupo lo dejó MEDIDO a
+        # ~0,2 Hz durante los reintentos (evidencia 126, apartado 4).
         #
         # 🔴 NO SE CONDICIONA A `silence_timeout > 0` ni a `keepalive_period > 0`,
         #    al contrario que los dos de arriba. Desactivar el detector de
         #    silencio es lo que se hace para REPRODUCIR el fallo a propósito, y es
         #    precisamente entonces cuando más falta hace poder ver qué pasa desde
         #    fuera. El latido no le habla al RVR: no puede molestar a nada.
-        self.create_timer(1.0, self._publicar_estado, callback_group=g_salud)
+        self.create_timer(1.0, self._publicar_estado, callback_group=g_latido)
 
         # ── El sondeo del IR (AÑADIDO 2026-08-11) ────────────────────────────
         # Mismo grupo `g_salud` que los otros dos, y por la misma razón: consulta
@@ -807,15 +820,16 @@ class RvrDriverNode(Node):
             # y dice explícitamente que no hay lecturas, en vez de desaparecer y
             # dejar al consumidor sin saber si está apagado o roto.
             self.create_timer(1.0, self._publicar_estado_ir,
-                              callback_group=g_salud)
+                              callback_group=g_latido)
             self.get_logger().warn(
                 'sondeo IR DESACTIVADO (ir_sondeo_hz=0): /estado_ir publicará '
                 'lecturas_validas=False. Los mensajes IR siguen llegando.')
 
-        # El apagado automático de la luz del color. Mismo grupo y mismo ritmo:
-        # solo compara números y, cuando toca, encola un comando sin esperarlo.
+        # El apagado automático de la luz del color. Grupo del LATIDO y no de
+        # los sondeos: solo compara números y, cuando toca, ENCOLA un comando
+        # sin esperarlo — nunca bloquea, así que no puede molestar al latido.
         if self._color_inactividad > 0 or self._color_max > 0:
-            self.create_timer(1.0, self._vigilar_luz_color, callback_group=g_salud)
+            self.create_timer(1.0, self._vigilar_luz_color, callback_group=g_latido)
         else:
             self.get_logger().warn(
                 'apagado automático de la luz del color DESACTIVADO: si un '
@@ -1922,6 +1936,27 @@ class RvrDriverNode(Node):
            ROS se entera — no pasa por `cmd_vel`, así que ni el watchdog ni el
            `collision_monitor` lo ven.
         """
+        # 🔴 CON EL ENLACE CAÍDO, NO SE PREGUNTA (2026-08-15, evidencia 126).
+        #    Cada `_pedir` de abajo bloquea hasta 3 s; con el puerto muerto eso
+        #    eran hasta 6 s por tic A 1 Hz — una tormenta que saturaba su grupo
+        #    de callbacks y llenaba el journal a 2 líneas/3 s (la familia del
+        #    `Failed to get scan`). La recuperación es trabajo del vigilante y
+        #    del puerto que se reabre solo; este sondeo espera a que vuelvan.
+        with self._lock:
+            enlace_caido = self._recuperando or self._reanudaciones_fallidas > 0
+        if enlace_caido:
+            if not getattr(self, '_ir_sondeo_pausado', False):
+                self._ir_sondeo_pausado = True
+                self.get_logger().warn(
+                    'sondeo IR EN PAUSA: el enlace con el RVR está caído; '
+                    '/estado_ir dirá lecturas_validas=False hasta que vuelva.')
+            with self._lock:
+                self._ir_lecturas_validas = False
+            self._publicar_estado_ir()
+            return
+        if getattr(self, '_ir_sondeo_pausado', False):
+            self._ir_sondeo_pausado = False
+            self.get_logger().info('sondeo IR reanudado: el enlace volvió.')
         try:
             ok_l, lect, _ = self._pedir(
                 self._rvr.get_bot_to_bot_infrared_readings(),

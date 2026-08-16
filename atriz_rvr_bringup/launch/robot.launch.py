@@ -436,6 +436,15 @@ def generate_launch_description() -> LaunchDescription:
     puente = Node(
         package='atriz_rvr_bringup', executable='atriz_rosbridge.py',
         name='rosbridge_websocket', namespace=ns, output='screen',
+        # 🔴 `on_exit=Shutdown()` como el driver (:213) y el collision_monitor:
+        #    sin esto, si el puente muere —p. ej. falta /etc/atriz/testigo.pub y
+        #    atriz_rosbridge._morir()— el launch sigue vivo y systemd dice
+        #    `active`: un robot VERDE sin rosbridge, invisible desde la web y
+        #    desde el verificador. Con Shutdown + Restart=always el fallo es
+        #    ruidoso: la unidad reintenta y, si es permanente, queda en FAILED,
+        #    que sí se ve. Un robot recién aprovisionado sin la clave nacía
+        #    exactamente en el estado silencioso. Evidencia 125, apartado 2.
+        on_exit=Shutdown(),
         condition=IfCondition(LaunchConfiguration('rosbridge')),
         parameters=[{
             'port': 9090, 'use_sim_time': False,

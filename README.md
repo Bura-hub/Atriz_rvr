@@ -1,3 +1,23 @@
+> # 🔴 ESTA RAMA ESTÁ OBSOLETA — NO LA USES
+>
+> Esto es el driver de **ROS 1 (Noetic)**, que llegó a su fin de vida en mayo de 2025. Se conserva
+> como historia del proyecto, no como código a instalar.
+>
+> **La rama buena es [`ros2`](../../tree/ros2)**, y es además la rama por defecto: un `git clone`
+> a secas ya te da esa. Si estás leyendo esto es porque cambiaste de rama a mano.
+>
+> | | `main` (esto) | `ros2` |
+> |---|---|---|
+> | ROS | 1 · Noetic, **EOL** | 2 · Jazzy, soporte a 2029 |
+> | compila con | `catkin` | `colcon` |
+> | al día | ❌ último commit: **2026-07-29** | ✅ **132 commits** por delante |
+>
+> Lo que sigue debajo describe el estado de julio de 2026 y **ya no es cierto** del robot: la
+> odometría, los marcos de referencia, el keepalive del enlace, la capa de seguridad y el arranque
+> automático se rehicieron en `ros2`.
+>
+> Documentación y plan de la migración: **[`Atriz_migracion_ros2`](https://github.com/Bura-hub/Atriz_migracion_ros2)**.
+
 # Sphero RVR ROS Driver - Atriz
 
 Este repositorio contiene el código necesario para operar el robot Sphero RVR utilizando ROS (Robot Operating System). Está diseñado como parte de un proyecto para la Universidad de Nariño, facilitando la integración y control del Sphero RVR en entornos de investigación y desarrollo.

@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-17] — /set_ir_baliza: la baliza IR que por construcción no puede conducir
+
+### Added
+- **`SetIRBaliza.srv` + servicio `/set_ir_baliza` + entrada en la lista blanca** (encargo del PC
+  en F5, aprobado por el usuario). El problema que resuelve: `set_ir_mode` lleva `broadcasting` y
+  `following` en el **mismo** `mode` como cadena libre, y la lista blanca de rosbridge filtra por
+  servicio, no por argumento — abrirlo a la web abriría también el modo que hace conducir al robot
+  sin watchdog ni collision_monitor. La petición nueva es `bool encender`: **no existe la cadena
+  con la que pedir `following`**.
+
+  El manejador delega entero en `_srv_ir_modo`, así que hereda la validación de rango, la
+  contabilidad de `/estado_ir` y el «off apaga las tres cosas». Al apagar, los códigos ni se
+  copian: apagar no puede fallar por un código basura.
+
+  ✅ TDD: `pruebas/test_srv_ir_baliza.py` (3 pruebas; la tercera barre el tipo entero y demuestra
+  que ninguna petición expresable produce `following`). Suite del driver 6/6.
+
+  ✅ Verificado POR EFECTO en rvr-01: `encender(3,5)` → `/estado_ir` con
+  `modo='broadcasting', far=3, near=5` · `far_code=200` → `success=False, «los códigos IR van de
+  0 a 7»` (la validación heredada muerde a través de la delegación) · apagar con códigos basura →
+  `success=True`, `modo='off'` · `probar_lista_blanca.py` (ampliado con `set_ir_mode` en RECHAZAR
+  y la baliza en PERMITIR) en verde.
+
+  📌 De paso quedó medido el caudal de `/estado_ir` (evidencia 127 de migracion): **412-414 B/msg
+  a ~1 Hz = 0,40 kB/s por robot**, en `off` Y en `broadcasting` — los float32 serializados a JSON
+  dominan sobre el nombre del modo.
+
 ## [2026-08-15e] — Un cliente sin subprotocolo se llevaba un HTTP 500 en vez del cierre 4401
 
 ### Fixed

@@ -1,0 +1,21 @@
+# Baliza IR robot-a-robot que POR CONSTRUCCIÓN no puede conducir.
+#
+# Existe porque `set_ir_mode` lleva `broadcasting` Y `following` en el mismo
+# `mode` como cadena libre, y la lista blanca de rosbridge filtra por SERVICIO,
+# no por argumento: abrir aquel a la web abriría también el modo que hace
+# conducir al robot solo, sin watchdog ni collision_monitor (los modos IR son
+# del firmware y no pasan por cmd_vel). Aquí la petición es un booleano — no
+# existe la cadena con la que pedir `following`.
+#
+# El driver delega en la lógica de `set_ir_mode`, así que hereda su validación
+# de rango, su contabilidad en /estado_ir y su semántica de apagado: apagar
+# apaga LAS TRES cosas (broadcasting, following y evading), no una de tres.
+#
+# Encargo del PC (F5, 2026-08-16) · decisión del usuario 2026-08-17.
+
+bool encender          # false = off (apaga baliza, following y evading)
+uint8 far_code         # 0-7, ignorado si encender=false
+uint8 near_code        # 0-7, ignorado si encender=false
+---
+bool success
+string message

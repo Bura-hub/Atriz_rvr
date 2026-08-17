@@ -108,8 +108,8 @@ from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoIR,
                                 SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
-    SendInfraredMessage, SetDriveParameters, SetIREvading, SetIRMode,
-    MoveTimed, MoveToPosAndYaw, MoveToPose, RawMotors,
+    SendInfraredMessage, SetDriveParameters, SetIRBaliza, SetIREvading,
+    SetIRMode, MoveTimed, MoveToPosAndYaw, MoveToPose, RawMotors,
     SetLEDRGB, SetLeds, SetMultipleLEDs, SetPosAndYaw, TriggerLedEvent,
 )
 
@@ -712,6 +712,7 @@ class RvrDriverNode(Node):
             (TriggerLedEvent, 'trigger_led_event', self._srv_led_event),
             (SendInfraredMessage, 'send_infrared_message', self._srv_ir_mensaje),
             (SetIRMode, 'set_ir_mode', self._srv_ir_modo),
+            (SetIRBaliza, 'set_ir_baliza', self._srv_ir_baliza),
             (SetIREvading, 'set_ir_evading', self._srv_ir_evasion),
             (SetDriveParameters, 'set_drive_parameters', self._srv_drive_params),
             (SetPosAndYaw, 'set_pos_and_yaw', self._srv_set_pos_yaw),
@@ -3034,6 +3035,30 @@ class RvrDriverNode(Node):
                     self._ir_far, self._ir_near = int(req.far_code), int(req.near_code)
         resp.success, resp.message = ok, msg or f'modo IR: {modo}'
         return resp
+
+    def _srv_ir_baliza(self, req, resp):
+        """Baliza IR para la web: por construcción no puede expresar `following`.
+
+        `set_ir_mode` lleva `broadcasting` y `following` en el mismo `mode` como
+        cadena libre, y la lista blanca de rosbridge filtra por SERVICIO, no por
+        argumento — abrirlo a la web abriría también el modo que conduce. Aquí
+        la petición es `bool encender`: no existe la cadena con la que pedir
+        `following` (encargo del PC, F5 2026-08-16).
+
+        Delega TODO en `_srv_ir_modo` — validación de rango, contabilidad de
+        `/estado_ir` y «off apaga las tres cosas»— para que no haya dos
+        validaciones que puedan divergir.
+        """
+        peticion = SetIRMode.Request()
+        if req.encender:
+            peticion.mode = 'broadcasting'
+            peticion.far_code = int(req.far_code)
+            peticion.near_code = int(req.near_code)
+        else:
+            # Los códigos NI SE COPIAN: apagar no puede fallar por un código
+            # basura, igual que `off` se salta la validación de rango.
+            peticion.mode = 'off'
+        return self._srv_ir_modo(peticion, resp)
 
     def _srv_ir_evasion(self, req, resp):
         """🔴 ESTE SÍ PUEDE MOVER EL ROBOT: la evasión IR conduce sola.

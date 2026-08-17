@@ -402,7 +402,14 @@ def generate_launch_description() -> LaunchDescription:
                  #:    significaria que cualquiera en el aula puede poner a
                  #:    conducir cualquier robot. Se reabre cuando exista esa
                  #:    identidad, no antes.
-                 '/send_infrared_message']
+                 #:
+                 #: 🆕 `set_ir_baliza` (2026-08-17): baliza continua para la web
+                 #:    SIN abrir `set_ir_mode`. Su petición es `bool encender` —
+                 #:    por construcción no existe la cadena con la que pedir
+                 #:    `following`—, y delega en la lógica de `set_ir_mode`, así
+                 #:    que hereda su validación y su «off apaga las tres cosas».
+                 #:    Solo ENCIENDE EMISORES: no mueve nada.
+                 '/send_infrared_message', '/set_ir_baliza']
 
     def _glob(lista):
         """rosbridge quiere una CADENA con una lista, no una lista."""

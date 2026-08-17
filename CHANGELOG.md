@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a ~1 Hz = 0,40 kB/s por robot**, en `off` Y en `broadcasting` — los float32 serializados a JSON
   dominan sobre el nombre del modo.
 
+### Docs
+- README: «Los 19 servicios» → **20**, con la baliza en el bloque. Y los dos documentos heredados
+  que enumeraban servicios ganan bandera de FOTO HISTÓRICA con fecha: `DIAGRAMA_DRIVER_RVR.md`
+  describe el nodo de la era ROS 1 (nombre, PID y cinco servicios que ya no existen) y la tabla de
+  `scripts/examples/README.md` es parcial y previa a la lista blanca. La lista autoritativa la da
+  el robot: `ros2 service list` (comprobado hoy, 20 del driver en vivo).
+
 ## [2026-08-15e] — Un cliente sin subprotocolo se llevaba un HTTP 500 en vez del cierre 4401
 
 ### Fixed

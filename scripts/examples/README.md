@@ -69,6 +69,11 @@ rostopic list | grep cmd_vel
 
 ## 🔧 Servicios ROS Disponibles
 
+> ⚠️ Lista PARCIAL y de la migración inicial (comprobado el 2026-08-17): el driver ofrece **20
+> servicios** — la lista vigente está en el `README.md` raíz y la da `ros2 service list`. Y desde
+> la web varios de estos NO son alcanzables: la lista blanca de rosbridge (`robot.launch.py`)
+> cierra, entre otros, `raw_motors` y `set_ir_mode`.
+
 | Servicio | Descripción |
 |----------|-------------|
 | `/get_encoders` | Obtener valores actuales de los encoders |

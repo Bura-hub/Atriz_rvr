@@ -3,7 +3,7 @@
 > # 🔴 ESTE README DESCRIBE EL SISTEMA VIEJO (ROS 1 / Noetic)
 >
 > Estás en la rama **`ros2`**, y casi todo lo que hay debajo de este aviso está **obsoleto**:
-> habla de `catkin`, de `/cmd_degrees` y de 5 servicios cuando el driver tiene **19**.
+> habla de `catkin`, de `/cmd_degrees` y de 5 servicios cuando el driver tiene **20**.
 > Se conserva porque documenta el sistema Noetic, que sigue siendo la ruta de vuelta atrás.
 >
 > **Lo que vale hoy está en el bloque de aquí abajo**, y el detalle completo —con el porqué de
@@ -12,7 +12,7 @@
 
 ---
 
-## ⚡ Referencia ROS 2 Jazzy — lo que de verdad corre (actualizado 2026-08-14)
+## ⚡ Referencia ROS 2 Jazzy — lo que de verdad corre (actualizado 2026-08-17)
 
 ### Arrancar
 
@@ -72,7 +72,7 @@ atriz-escaneo on | off | estado
 🔴 **`/odom`, `/imu`, `/color` y `/scan` son BEST_EFFORT.** Un suscriptor con el RELIABLE por
 defecto de `rclpy` **no recibe nada**, sin error ni aviso. Y `ros2 topic hz` no puede medirlos.
 
-### Los 19 servicios
+### Los 20 servicios
 
 ```
 release_emergency_stop     set_led_rgb              set_multiple_leds
@@ -81,8 +81,12 @@ get_system_info            get_control_state        trigger_led_event
 send_infrared_message      set_ir_mode              set_ir_evading
 set_drive_parameters       set_pos_and_yaw          move_timed
 raw_motors                 move_to_pose             move_to_pos_and_yaw
-enable_color
+enable_color               set_ir_baliza
 ```
+
+📝 **`set_ir_baliza`** (2026-08-17): baliza IR continua que **por construcción no puede
+expresar `following`** — su petición es `bool encender`. Existe para poder abrirla a la web
+sin abrir `set_ir_mode`, que lleva en el mismo `mode` el modo que hace conducir al robot.
 
 📝 **`enable_color`** (`std_srvs/SetBool`) enciende y apaga **la luz** del sensor de color, en
 caliente. Sin ella `/color` publica `[0,0,0]` y `get_rgbc_sensor_values` devuelve oscuridad.

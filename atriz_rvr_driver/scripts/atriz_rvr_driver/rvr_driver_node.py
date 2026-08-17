@@ -108,8 +108,8 @@ from atriz_rvr_msgs.msg import (Color, ControlState, Encoder, EstadoIR,
                                 SystemInfo)
 from atriz_rvr_msgs.srv import (
     GetControlState, GetEncoders, GetRGBCSensorValues, GetSystemInfo,
-    SendInfraredMessage, SetDriveParameters, SetIRBaliza, SetIREvading,
-    SetIRMode, MoveTimed, MoveToPosAndYaw, MoveToPose, RawMotors,
+    SendInfraredMessage, SetDriveParameters, SetIRBaliza, SetIRConduccion,
+    SetIREvading, SetIRMode, MoveTimed, MoveToPosAndYaw, MoveToPose, RawMotors,
     SetLEDRGB, SetLeds, SetMultipleLEDs, SetPosAndYaw, TriggerLedEvent,
 )
 
@@ -537,6 +537,14 @@ class RvrDriverNode(Node):
         self._ir_modo = 'off'
         self._ir_far = 0
         self._ir_near = 0
+        # El plazo de /set_ir_conduccion: temporizador de UN disparo que apaga
+        # following/evading solo. La generación delata vencimientos rancios
+        # (rearme y vencimiento corren en grupos distintos). Grupo PROPIO a
+        # propósito: un temporizador pase-lo-que-pase no puede compartir grupo
+        # con nada que bloquee (CLAUDE.md de migracion, evidencia 126).
+        self._ir_plazo = None
+        self._ir_plazo_gen = 0
+        self._g_plazo_ir = MutuallyExclusiveCallbackGroup()
         self._ir_ultimo_codigo = 0
         self._ir_t_ultimo_mensaje = None      # None = no ha llegado ninguno
         self._ir_crudo = 0
@@ -713,6 +721,9 @@ class RvrDriverNode(Node):
             (SendInfraredMessage, 'send_infrared_message', self._srv_ir_mensaje),
             (SetIRMode, 'set_ir_mode', self._srv_ir_modo),
             (SetIRBaliza, 'set_ir_baliza', self._srv_ir_baliza),
+            # 🔴 Este MUEVE EL ROBOT (following/evading), pero con plazo
+            #    obligatorio: no existe la petición «para siempre».
+            (SetIRConduccion, 'set_ir_conduccion', self._srv_ir_conduccion),
             (SetIREvading, 'set_ir_evading', self._srv_ir_evasion),
             (SetDriveParameters, 'set_drive_parameters', self._srv_drive_params),
             (SetPosAndYaw, 'set_pos_and_yaw', self._srv_set_pos_yaw),
@@ -2528,6 +2539,10 @@ class RvrDriverNode(Node):
         self.get_logger().error('PARADA DE EMERGENCIA')
         self._parada_emergencia = True
         self._conduciendo = False
+        # El plazo de /set_ir_conduccion se cancela AQUÍ, no al vencer: si no,
+        # quedaría un `stop` diferido disparando sobre un robot ya parado —
+        # inocuo hoy, veneno el día que alguien lo reactive a mano.
+        self._cancelar_plazo_ir()
         if self._rvr is not None:
             self._enviar(self._rvr.drive_stop(), 'parada de emergencia')
             # 🔴 `drive_stop()` NO BASTA con los modos IR activos: `evading` y
@@ -3059,6 +3074,107 @@ class RvrDriverNode(Node):
             # basura, igual que `off` se salta la validación de rango.
             peticion.mode = 'off'
         return self._srv_ir_modo(peticion, resp)
+
+    def _srv_ir_conduccion(self, req, resp):
+        """Seguir/huir CON PLAZO: la petición «para siempre» no existe.
+
+        `following` y `evading` conducen desde el FIRMWARE, sin `cmd_vel`: ni
+        el watchdog ni el collision_monitor los ven. La identidad de la Fase B
+        dice quién responde, pero no quita ese peligro — lo que lo reduce es
+        que no pueda quedarse encendido. `segundos` es obligatorio con tope y
+        un temporizador de un disparo lo apaga solo (encargo del PC,
+        2026-08-17; contrato espejo en `conduccion_ir.ts` de atriz-lab).
+
+        Delega en `_srv_ir_modo`/`_srv_ir_evasion`, que ya llevan
+        `_mover_permitido()` (la parada activa rechaza), la validación de
+        códigos y la contabilidad de `/estado_ir` — una sola validación, sin
+        gemelas que diverjan.
+        """
+        if req.modo == 0:
+            # Apagar no valida nada y no puede fallar por un valor raro en
+            # otro campo: cancela el plazo y delega en el 'off' de
+            # set_ir_mode, que apaga LAS TRES cosas.
+            self._cancelar_plazo_ir()
+            peticion = SetIRMode.Request()
+            peticion.mode = 'off'
+            return self._srv_ir_modo(peticion, resp)
+
+        if req.modo not in (1, 2):
+            resp.success, resp.message = False, (
+                f'modo={req.modo} desconocido: 0=off · 1=seguir · 2=huir')
+            return resp
+
+        tope = float(SetIRConduccion.Request.TOPE_SEGUNDOS)
+        seg = float(req.segundos)
+        # 🔴 RECHAZAR, NO RECORTAR: recortar 120 s a 30 pondría el robot a
+        #    conducir un tiempo que nadie pidió. Y NaN falla las DOS
+        #    comparaciones encadenadas, así que cae aquí — la trampa de
+        #    `limitar(nan)` (2026-08-03) no se repite.
+        if not (0.0 < seg <= tope):
+            resp.success, resp.message = False, (
+                f'segundos={req.segundos}: debe ser >0 y '
+                f'<={SetIRConduccion.Request.TOPE_SEGUNDOS}')
+            return resp
+
+        if req.modo == 1:
+            peticion = SetIRMode.Request()
+            peticion.mode = 'following'
+            peticion.far_code = int(req.far_code)
+            peticion.near_code = int(req.near_code)
+            resp = self._srv_ir_modo(peticion, resp)
+        else:
+            peticion = SetIREvading.Request()
+            peticion.far_code = int(req.far_code)
+            peticion.near_code = int(req.near_code)
+            resp = self._srv_ir_evasion(peticion, resp)
+
+        if resp.success:
+            # REARMAR, NO ACUMULAR: la cancelación sube la generación, así que
+            # un vencimiento viejo en vuelo queda rancio y no toca nada.
+            self._cancelar_plazo_ir()
+            with self._lock:
+                gen = self._ir_plazo_gen
+                self._ir_plazo = self.create_timer(
+                    seg, lambda: self._vencer_plazo_ir(gen),
+                    callback_group=self._g_plazo_ir)
+            resp.message = (resp.message or '') + f' · se apaga solo en {seg:g} s'
+        return resp
+
+    def _cancelar_plazo_ir(self):
+        """Cancela el plazo pendiente (rearme, apagado o parada de emergencia)."""
+        with self._lock:
+            self._ir_plazo_gen += 1
+            plazo, self._ir_plazo = self._ir_plazo, None
+        if plazo is not None:
+            plazo.cancel()
+            self.destroy_timer(plazo)
+
+    def _vencer_plazo_ir(self, gen):
+        """El plazo venció: apagar following Y evading, pase lo que pase.
+
+        Es la pieza que justifica `/set_ir_conduccion` entero. Solo cancela
+        (los timers de rclpy son periódicos); destruirlo desde su propio
+        callback puede interbloquear, así que lo destruye la próxima
+        cancelación.
+        """
+        with self._lock:
+            if gen != self._ir_plazo_gen:
+                return                      # rancio: hubo rearme o apagado
+            plazo = self._ir_plazo
+        if plazo is not None:
+            plazo.cancel()
+        self.get_logger().warn(
+            'plazo de conducción IR vencido: apagando following/evading '
+            '(se pidió con tope, y el tope manda)')
+        if self._rvr is not None:
+            # Sin esperar respuesta, como la parada: apagar no se bloquea.
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_following(),
+                         'plazo IR: following')
+            self._enviar(self._rvr.stop_robot_to_robot_infrared_evading(),
+                         'plazo IR: evading')
+        with self._lock:
+            self._ir_modo = 'off'
+            self._ir_conduciendo = False
 
     def _srv_ir_evasion(self, req, resp):
         """🔴 ESTE SÍ PUEDE MOVER EL ROBOT: la evasión IR conduce sola.

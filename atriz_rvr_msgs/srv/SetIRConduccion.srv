@@ -1,0 +1,32 @@
+# Modos IR que CONDUCEN el robot (seguir/huir), acotados en el tiempo POR
+# CONSTRUCCIÓN.
+#
+# `following` y `evading` son modos del FIRMWARE: el RVR conduce solo, sin
+# pasar por `cmd_vel`, así que ni el watchdog ni el `collision_monitor` los
+# ven. La condición histórica de reapertura —«cuando exista identidad por
+# usuario»— se cumplió con la Fase B y NO basta: identidad cambia quién
+# responde, no el peligro. Lo que lo reduce es que no pueda quedarse
+# encendido: `segundos` es obligatorio, con tope, y un temporizador de un
+# disparo en el driver lo apaga solo. No existe la petición «para siempre».
+#
+# El driver RECHAZA, no recorta, lo fuera de rango; una petición nueva REARMA
+# el plazo (no acumula); y la parada de emergencia cancela el plazo pendiente.
+#
+# Encargo del PC 2026-08-17 (03_operacion/ESTADO_ACTUAL.md). La web copia
+# TOPE_SEGUNDOS en `conduccion_ir.ts` y atará su constante a ESTE fichero;
+# si se separan, manda el robot.
+
+# ⚠️ Elección de aula, no medida (30 s inventados por el PC, pendientes de
+#    ajuste si la práctica dice otra cosa).
+uint8 TOPE_SEGUNDOS=30
+
+# 🔴 `off` es 0 A PROPÓSITO: un cuerpo mal formado o un campo que falte llega
+#    como 0, y 0 tiene que ser APAGAR. Si `seguir` fuera 0, un mensaje
+#    incompleto pondría el robot en marcha.
+uint8 modo             # 0=off · 1=seguir · 2=huir   (entero, NO cadena libre)
+uint8 far_code         # 0-7, ignorado si modo=0
+uint8 near_code        # 0-7, ignorado si modo=0
+float32 segundos       # >0 y <=TOPE_SEGUNDOS. Con modo=0 se ignora.
+---
+bool success
+string message

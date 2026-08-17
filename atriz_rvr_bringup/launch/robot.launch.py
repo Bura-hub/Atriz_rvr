@@ -397,11 +397,13 @@ def generate_launch_description() -> LaunchDescription:
                  #:    proposito, y no es un olvido: `following` y `evading` son
                  #:    modos del FIRMWARE que hacen CONDUCIR al robot sin pasar
                  #:    por `cmd_vel`, asi que se saltan el collision_monitor y el
-                 #:    watchdog. Con rosbridge SIN identidad por usuario
-                 #:    (pendiente abierto, SEGURIDAD_ROSBRIDGE.md), abrirlos
-                 #:    significaria que cualquiera en el aula puede poner a
-                 #:    conducir cualquier robot. Se reabre cuando exista esa
-                 #:    identidad, no antes.
+                 #:    watchdog.
+                 #:    📝 La condicion que estaba escrita aqui —«se reabre cuando
+                 #:    exista identidad por usuario»— SE CUMPLIO con la Fase B
+                 #:    (2026-08-15) y NO basto: identidad cambia quien responde,
+                 #:    no que el firmware conduzca sin capa de seguridad. La
+                 #:    reapertura real es `set_ir_conduccion` (abajo), porque lo
+                 #:    que reduce el peligro es el PLAZO, no el nombre.
                  #:
                  #: 🆕 `set_ir_baliza` (2026-08-17): baliza continua para la web
                  #:    SIN abrir `set_ir_mode`. Su petición es `bool encender` —
@@ -409,7 +411,19 @@ def generate_launch_description() -> LaunchDescription:
                  #:    `following`—, y delega en la lógica de `set_ir_mode`, así
                  #:    que hereda su validación y su «off apaga las tres cosas».
                  #:    Solo ENCIENDE EMISORES: no mueve nada.
-                 '/send_infrared_message', '/set_ir_baliza']
+                 #:
+                 #: 🆕 `set_ir_conduccion` (2026-08-17): seguir/huir CON PLAZO
+                 #:    obligatorio. Este SI mueve el robot, y por eso su
+                 #:    peticion no puede expresar «para siempre»: `segundos` con
+                 #:    tope (30 s, constante del .srv) y un temporizador de un
+                 #:    disparo en el driver que lo apaga solo. `modo` es un
+                 #:    entero cerrado (0=off·1=seguir·2=huir), no cadena libre,
+                 #:    y 0 es off a proposito: un campo ausente llega como 0 y
+                 #:    0 tiene que ser APAGAR. La parada activa lo rechaza
+                 #:    (`_mover_permitido`) y la parada en caliente cancela el
+                 #:    plazo pendiente.
+                 '/send_infrared_message', '/set_ir_baliza',
+                 '/set_ir_conduccion']
 
     def _glob(lista):
         """rosbridge quiere una CADENA con una lista, no una lista."""

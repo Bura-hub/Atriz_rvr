@@ -1,7 +1,7 @@
 # Diagrama del Nodo /driver_rvr
 
 > ⚠️ **FOTO HISTÓRICA (era ROS 1 / Noetic) — NO describe el driver actual.** Comprobado el
-> 2026-08-17: el nodo hoy se llama `/rvr_driver`, son **20 servicios** y varios de los listados
+> 2026-08-17: el nodo hoy se llama `/rvr_driver`, son **21 servicios** y varios de los listados
 > abajo ya no existen (`/battery_state` y `/configure_streaming` como servicios, `/ir_mode`,
 > `/reset_odom`, `/start_streaming`). La lista vigente está en el `README.md` raíz, y la
 > autoritativa la da el robot: `ros2 service list`. Se conserva porque documenta el sistema

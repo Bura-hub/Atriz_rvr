@@ -56,6 +56,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SendInfraredMessage.srv"
   "srv/SetDriveParameters.srv"
   "srv/SetIRBaliza.srv"
+  "srv/SetIRConduccion.srv"
   "srv/SetIREvading.srv"
   "srv/SetIRMode.srv"
   "srv/SetLEDRGB.srv"

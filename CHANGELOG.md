@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [2026-08-17b] — /set_ir_conduccion: seguir y huir con plazo — la petición «para siempre» no existe
+
+### Added
+- **`SetIRConduccion.srv` + servicio `/set_ir_conduccion` + entrada en la lista blanca** (encargo
+  del PC, contrato espejo de `conduccion_ir.ts`). `uint8 modo` (0=off·1=seguir·2=huir, entero y NO
+  cadena libre; 0 es off a propósito: un campo ausente llega como 0 y 0 tiene que ser APAGAR),
+  códigos 0-7 y `segundos` obligatorio en (0, `TOPE_SEGUNDOS=30`].
+
+  La pieza que justifica el servicio: **un temporizador de un disparo apaga following/evading
+  solo**. En grupo de callbacks PROPIO (un timer pase-lo-que-pase no comparte grupo con nada que
+  bloquee — la trampa de la evidencia 126), con generación contra vencimientos rancios durante un
+  rearme. Rechaza sin recortar (NaN incluido), rearma sin acumular, la parada activa lo rechaza
+  (delegación en `_mover_permitido`) y **la parada en caliente cancela el plazo**.
+
+  ✅ TDD: 10 pruebas nuevas (suite del driver **16/16**), escritas en rojo antes del `.srv`.
+
+  ✅ Verificado POR EFECTO con control (evidencia 128 de migracion): seguir 5 s → `off` solo;
+  `set_ir_mode` directo sin plazo → sigue encendido. Rearme con sellos del journal: UN vencimiento
+  a 4,02 s de la SEGUNDA petición. Parada en caliente → cero vencimientos después.
+  📝 Y el primer banco del rearme acusó al driver siendo el arnés: el CLI de `ros2` tarda ~2-4 s
+  por llamada en la Pi y las peticiones «solapadas» no se solaparon. El banco bueno usa rclpy.
+
+  📝 El comentario histórico de la lista blanca —«se reabre cuando exista identidad»— se
+  actualiza: la condición se cumplió con la Fase B y no bastó; lo que reduce el peligro es el
+  plazo. README: 21 servicios.
+
 ## [2026-08-17] — /set_ir_baliza: la baliza IR que por construcción no puede conducir
 
 ### Added

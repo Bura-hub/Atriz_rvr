@@ -34,6 +34,15 @@ de AMCL, y se cerró apagando `recovery_alpha_slow/fast` (evidencia 82, ver
 | **este directorio** (`aula.yaml`) | el mapa **de la flota**, igual en los 16 | va con el paquete: lo reparten `provision.sh` y la imagen dorada |
 | **`~/mapas/`** (`ATRIZ_DIR_MAPAS`) | lo que **SLAM produce** en este robot | `atriz-slam.service`, al mapear |
 
+🔴 **Y OJO, QUE HOY LA REALIDAD NO SIGUE ESA TABLA (2026-08-19).** El mapa del laboratorio existe
+y **vive en el segundo sitio**: `~/mapas/arena.yaml`, con `ATRIZ_MAPA` apuntando ahí en rvr-01.
+Este directorio sigue **vacío**. Consecuencia, deducida del código y **no probada aún**:
+`fase_6` borra `~/mapas` y vacía `ATRIZ_MAPA`, así que **los 15 robots restantes saldrían de la
+imagen sin mapa** y no hay nada que se lo lleve. Los 16 comparten arena, o sea que aquí clonar el
+mapa **sí** es correcto — al revés que con un mapa de casa. 👤 **Decisión abierta** (meterlo aquí
+como `aula.yaml`, o copiarlo a mano tras la imagen): las dos opciones y sus costes están en
+`Atriz_migracion_ros2/00_auditoria/planes/2026-08-03-arranque-navegacion.md`.
+
 Y **quien decide cuál se usa es `ATRIZ_MAPA` de `/etc/default/atriz`**, no la convención de
 nombres. Puede apuntar a cualquiera de los dos.
 
@@ -62,6 +71,41 @@ entre el `map_update_interval` de slam_toolbox y el `save_map_timeout` del map_s
 ⚠️ **Girar sobre el eje NO hace crecer el mapa.** El X2 barre los 360°, así que un robot que gira
 en el sitio vuelve a ver lo mismo desde el mismo punto: cero información nueva. Hay que
 **desplazarlo**, y no bastan 40 cm — `slam_toolbox` cuenta desde el último nodo del grafo.
+
+🔴🔴 **Y EL MORRO TIENE QUE ARRANCAR PARALELO A UNA PARED, O EL MAPA SALE EN ROMBO.** Los ejes del
+mapa son **los del robot en su primer barrido**. Medido el 2026-08-19 mapeando la misma arena tres
+veces:
+
+```
+                 lienzo         ocupadas   desconocido   forma
+v1 y v2      8,1x4,4 / 7,1x6,3   540/549    66 / 67 %    ROMBO (morro a ~45° de la pared)
+v3           6,0x4,7             511        47 %         ✅ recto (4,1x4,0 al cerrar el perímetro)
+```
+
+✅ **La receta que lo cierra, y es de OPERACIÓN** (guion:
+`Atriz_migracion_ros2/00_auditoria/evidencia/mediciones_banco/mapear_arena.py`):
+
+1. robot en una **esquina**, a ~55 cm de cada pared, con la pared a su **izquierda** y el morro
+   **PARALELO** a ella — se comprueba **con el propio LIDAR**, ajustando una recta a los puntos de
+   esa pared, no a ojo;
+2. `/set_pos_and_yaw(0,0,0)` y comprobar que `/odom` da **(0,000, 0,000, 0,0°)**;
+3. arrancar `atriz-slam` **DESPUÉS**, y comprobar que `map → base_footprint` da también
+   **(0,000, 0,000, 0,0°)**;
+4. y **sólo entonces** conducir (perímetro primero, para cerrar lazos; luego el interior).
+
+Así **el (0,0) del mapa ES esa esquina**, con testigo — y eso es lo que hace utilizable el mapa
+después.
+
+🔴 **Por qué esa convención no es cosmética: una sala CUADRADA no se puede localizar sola.**
+Casando `/scan` contra el mapa salieron **tres candidatos empatados** (coste 0,003 · 0,004 · 0,004)
+y **conducir 1 m no los desempató**. Con un LIDAR de 360° en una sala simétrica no hay nada que
+rompa el empate, y este robot **no tiene rumbo absoluto**. La pose de partida la da una persona:
+para eso existe `/initialpose`, y para eso vale la esquina convenida.
+
+⚠️ **Y mientras SLAM esté vivo, que NADIE toque el robot.** Mover el robot a mano con SLAM
+corriendo produce el **mismo síntoma que la congelación del `collision_monitor`** —lecturas de
+`/scan` idénticas tramo tras tramo y giros de 0,0°—, y costó **dos mapas** el 2026-08-19 antes de
+que se preguntara a la persona que estaba al lado.
 
 ⚠️ **El `.yaml` no basta: tiene que existir su `.pgm`**, y se resuelve **relativo al directorio
 del yaml**. Copiar solo el `.yaml` a otro sitio hace fallar a `map_server` **después** de arrancar

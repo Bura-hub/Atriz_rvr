@@ -203,6 +203,24 @@ collision_monitor:
       #      pasillo mínimo ≈ 2 × radius  ->  0.18 exigía 36 cm; 0.15 exige 30.
       #    Detalle en `19_paso_estrecho.txt`.
       #
+      # 🔑 PERO ESOS 30 cm SON PARA UN ROBOT PERFECTAMENTE CENTRADO, y eso no
+      #    existe conduciendo. Medido el 2026-08-20 cruzando un hueco de 40,1 cm
+      #    con `atriz.py` (lazo abierto, 0,15 m/s):
+      #
+      #        tramo                    mandado   real     %
+      #        aproximación              1,20 m   1,197   100
+      #        DENTRO de la puerta       0,90 m   0,366    41   <- Precaucion (40 %)
+      #        salida                    1,05 m   0,119    11   <- Aproximacion
+      #
+      #    Pasó, pero acabó a **15,0 cm exactos** de un objeto —el borde del
+      #    círculo, factor de mando ~0,001— porque los 5 cm de margen por lado que
+      #    dan 40,1 cm se los comió la deriva.
+      #      👉 REGLA PRACTICABLE:  hueco ≈ 2 × radius + 2 × (deriva esperada)
+      #         Con este robot: **40 cm es el límite, 45-50 es lo cómodo.**
+      #    ✅ Y en el BORDE sí se libera solo: retrocedió 10,5 cm de 30 (35 %) y
+      #       giró 17,9° de 20. La inmovilización total de abajo es con el
+      #       obstáculo DENTRO del círculo, no en su borde.
+      #
       # 🔴🔴 Y EL 2026-08-09 SE MIDIÓ QUE ES PEOR: NO SIEMPRE PUEDE SALIR.
       #    Con la pared **DETRÁS** a 16,8 cm y 188 cm libres delante, mandando por
       #    `/cmd_vel_raw` (el camino normal):

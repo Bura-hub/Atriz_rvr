@@ -22,6 +22,30 @@ cree estar. No hay nada en el sistema que lo detecte: **lo destapó una cinta m�
 Si se mueven las mesas, se mapea otra vez. Un mapa de la semana pasada con los muebles cambiados
 reproduce el fallo entero.
 
+## 🔑 Y una decisión que hay que tomar ANTES de mapear: ¿con los muebles puestos o no?
+
+No es lo mismo, y **cambia por dónde puede pasar el robot**. Medido el 2026-08-20 en la arena del
+laboratorio, con el **mismo hueco físico de 40 cm** y el mismo instrumento (49 muestras del costmap
+contando celdas transitables en la fila más estrecha):
+
+```
+mapa SIN los objetos (los ve solo la capa de obstaculos)   1 celda estable + 3 parpadeando
+mapa CON los objetos (entran en la capa estatica)          0 celdas · 49/49 CERRADAS
+```
+
+**Lo que está en el mapa entra ya engordado** (~5 cm por lado), así que el mismo paso «vale» unos
+**7 cm menos**. En números para montar un aula:
+
+| | paso mínimo |
+|---|---|
+| mobiliario **en el mapa** (mapeaste con él puesto) | **~49 cm** |
+| mobiliario **añadido después** (una silla que alguien movió) | **~42-45 cm** |
+
+⚠️ Y eso es lo que pide el **planificador**. Encima está lo que pide la **capa de seguridad**, que es
+otra cuenta y va aparte: `hueco practicable ≈ 2 × Aproximacion.radius + 2 × deriva` → con este robot
+**40 cm es el límite y 45-50 lo cómodo** (medido cruzando: 41 % de lo mandado dentro de la puerta,
+11 % al salir). **Manda la más exigente de las dos.**
+
 ⚠️ Y **lo que se arregló remapeando NO fue todo**: hubo dos fallos distintos con el mismo síntoma
 aparente. El otro —el marco `map → odom` rotando 98°— era la recuperación de «robot secuestrado»
 de AMCL, y se cerró apagando `recovery_alpha_slow/fast` (evidencia 82, ver

@@ -58,14 +58,28 @@ de AMCL, y se cerró apagando `recovery_alpha_slow/fast` (evidencia 82, ver
 | **este directorio** (`aula.yaml`) | el mapa **de la flota**, igual en los 16 | va con el paquete: lo reparten `provision.sh` y la imagen dorada |
 | **`~/mapas/`** (`ATRIZ_DIR_MAPAS`) | lo que **SLAM produce** en este robot | `atriz-slam.service`, al mapear |
 
-🔴 **Y OJO, QUE HOY LA REALIDAD NO SIGUE ESA TABLA (2026-08-19).** El mapa del laboratorio existe
-y **vive en el segundo sitio**: `~/mapas/arena.yaml`, con `ATRIZ_MAPA` apuntando ahí en rvr-01.
-Este directorio sigue **vacío**. Consecuencia, deducida del código y **no probada aún**:
-`fase_6` borra `~/mapas` y vacía `ATRIZ_MAPA`, así que **los 15 robots restantes saldrían de la
-imagen sin mapa** y no hay nada que se lo lleve. Los 16 comparten arena, o sea que aquí clonar el
-mapa **sí** es correcto — al revés que con un mapa de casa. 👤 **Decisión abierta** (meterlo aquí
-como `aula.yaml`, o copiarlo a mano tras la imagen): las dos opciones y sus costes están en
-`Atriz_migracion_ros2/00_auditoria/planes/2026-08-03-arranque-navegacion.md`.
+## 🔑 `aula.yaml` DE ESTE REPOSITORIO ES LA ARENA DE ATRIZ — reemplázalo en otra aula
+
+👤 **Decidido el 2026-08-20.** Aquí vive el mapa **de la arena del laboratorio de Atriz**
+(~3,95 × 4,00 m, mapeada el 2026-08-19 con la receta de abajo). Está en el repositorio **a
+propósito**, y la razón es concreta: los 16 robots comparten **la misma arena**, así que clonar el
+mapa es correcto — al revés que con un mapa de casa, que en 15 robots sería de otro sitio.
+
+🔴 **Sin esto, los 15 clones saldrían SIN MAPA.** `fase_6` borra `~/mapas` y vacía `ATRIZ_MAPA` (y
+hace bien), y el mapa vivía sólo ahí. Con el fichero en el paquete, el valor **por defecto** del
+supervisor y de `atriz-nav.sh` —`~/atriz_ws/src/Atriz_rvr/atriz_rvr_bringup/maps/aula.yaml`— lo
+encuentra sin que nadie configure nada.
+
+⚠️ **Y ESTO ES LO QUE HAY QUE HACER EN OTRA AULA, o Nav2 dirá «llegué» a medio metro** (el fallo de
+arriba, que no tiene ningún otro síntoma):
+
+1. mapea tu aula con la receta de este documento;
+2. **sustituye `aula.yaml` y `aula.pgm`** por los tuyos, o apunta `ATRIZ_MAPA` a los tuyos en
+   `/etc/default/atriz`;
+3. comprueba por efecto que `/estado_navegacion` dice el **nombre** y la **edad** que esperas.
+
+📌 El `.yaml` referencia su imagen **relativa a su propio directorio**, así que los dos ficheros
+viajan juntos y con el mismo nombre base.
 
 Y **quien decide cuál se usa es `ATRIZ_MAPA` de `/etc/default/atriz`**, no la convención de
 nombres. Puede apuntar a cualquiera de los dos.
